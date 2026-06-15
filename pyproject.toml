@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "payout-system"
+version = "0.1.0"
+description = "Automated rider payout, EV-rent, dues and COD-hold management for multi-company gig fleets."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Nilesh Singh" }]
+keywords = ["fintech", "payments", "automation", "streamlit", "sqlite"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "streamlit>=1.32",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "bcrypt>=4.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-jose[cryptography]>=3.3",
+    "python-multipart>=0.0.7",
+    "pydantic>=2.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "black>=24.0",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+payout-admin = "payout.cli.admin:main"
+payout-manage = "payout.cli.manage:main"
+payout-api = "payout.cli.serve:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/payout"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+ignore_missing_imports = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --cov=payout --cov-report=term-missing"
+pythonpath = ["src"]

@@ -1,0 +1,49 @@
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# ─── Virtual environments ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── Tooling caches ──────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ─── Sensitive runtime data — NEVER commit real rider data or the database ────
+*.db
+*.db-wal
+*.db-shm
+*.xlsx
+!data/sample/*.xlsx
+data/private/
+
+# ─── OS / IDE ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Cloned sub-repos (managed separately)
+CodeCurators-T08/
+FreeCodeCamp-Data_Analysis/
+Checkout-Experiment-And-Growth-Analytics/
+-Code_bytes-DASC09/
+
+# PowerShell setup script
+setup_repos.ps1

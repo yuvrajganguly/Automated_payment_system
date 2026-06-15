@@ -1,0 +1,236 @@
+"""payout-manage - database setup and seed-data import."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from payout.auth import hash_password
+from payout.db import get_connection, initialize_database
+from payout.ingest import import_seed, preview_seed
+
+
+def _create_admin(email: str, password: str) -> None:
+    with get_connection() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+            print(f"  admin '{email}' already exists - skipping")
+            return
+        conn.execute(
+            "INSERT INTO users (email, password_hash, role) VALUES (?,?, 'admin')",
+            (email, hash_password(password)),
+        )
+        conn.commit()
+        print(f"  admin user created: {email}")
+
+
+def cmd_init(args) -> None:
+    initialize_database()
+    print("  schema + reference data ready")
+    if args.email and args.password:
+        _create_admin(args.email.strip().lower(), args.password)
+    else:
+        print("  (no --email/--password; add an admin later with `payout-admin add-user`)")
+
+
+def _print_report(report) -> None:
+    print(f"  committed: {report.committed}")
+    for section, stats in report.stats.items():
+        print(f"  [{section}] " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+    for w in report.warnings:
+        print(f"    - {w}")
+    for e in report.errors:
+        print(f"    ! {e}")
+
+
+def cmd_seed(args) -> None:
+    data = Path(args.workbook).read_bytes()
+    print("DRY RUN (nothing written):")
+    _print_report(preview_seed(data))
+    if args.commit:
+        print("\nCOMMITTING:")
+        _print_report(import_seed(data, created_by=args.created_by))
+    else:
+        print("\nPreview only. Re-run with --commit to apply.")
+
+
+def cmd_rollback(args) -> None:
+    """Undo a committed cycle: delete its transactions, rewind balances,
+    rewind ev_arrears and rent_charged_through. Idempotent — safe to re-run.
+
+    Cycles are matched on (company, cycle_start, cycle_end). After deleting the
+    cycle's transactions, balances and ev_arrears are recomputed from whatever
+    transactions remain for each affected person.
+    """
+    company, cs, ce = args.company, args.cycle_start, args.cycle_end
+    with get_connection() as conn:
+        affected = [r["person_id"] for r in conn.execute(
+            "SELECT DISTINCT person_id FROM transactions "
+            "WHERE company=? AND cycle_start=? AND cycle_end=?",
+            (company, cs, ce),
+        ).fetchall()]
+        if not affected and not args.force:
+            print(f"  No transactions found for {company} {cs}..{ce}. Nothing to do.")
+            return
+        print(f"  Affecting {len(affected)} person(s)")
+        if not args.commit:
+            print("  DRY RUN — re-run with --commit to actually delete")
+            return
+
+        n = conn.execute(
+            "DELETE FROM transactions WHERE company=? AND cycle_start=? AND cycle_end=?",
+            (company, cs, ce),
+        ).rowcount
+        print(f"  Deleted {n} transaction(s)")
+
+        # Recompute each affected person's general balance + EV arrears from
+        # whatever transactions remain.
+        for pid in affected:
+            # Balance = sum of all PAYOUT/RENT/ADJUSTMENT/DUES_CARRY/OPENING amounts,
+            # clamped to <= 0 (positive balances aren't carried; they're released).
+            # Simpler: pick the most-recent transaction's balance_after.
+            row = conn.execute(
+                "SELECT balance_after FROM transactions WHERE person_id=? "
+                "ORDER BY id DESC LIMIT 1", (pid,),
+            ).fetchone()
+            bal = float(row["balance_after"]) if row else 0.0
+            conn.execute(
+                "UPDATE balances SET current_balance=?, last_updated=date('now') "
+                "WHERE person_id=?", (bal, pid),
+            )
+            # EV arrears: total_missed = sum of RENT_MISSED amounts (positive),
+            # total_recovered = sum of RENT_RECOVERED amounts.
+            missed = conn.execute(
+                "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
+                "WHERE person_id=? AND event_type='RENT_MISSED'", (pid,),
+            ).fetchone()["s"]
+            recovered = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS s FROM transactions "
+                "WHERE person_id=? AND event_type='RENT_RECOVERED'", (pid,),
+            ).fetchone()["s"]
+            opening = conn.execute(
+                "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
+                "WHERE person_id=? AND event_type='OPENING' "
+                "AND remarks LIKE '%EV arrears%'", (pid,),
+            ).fetchone()["s"]
+            total_missed = float(missed) + float(opening)
+            outstanding = max(0.0, total_missed - float(recovered))
+            conn.execute(
+                "UPDATE ev_arrears SET total_missed=?, total_recovered=?, "
+                "outstanding=?, last_updated=date('now') WHERE person_id=?",
+                (total_missed, float(recovered), outstanding, pid),
+            )
+            # rent_charged_through: rewind to the latest cycle_end still present
+            # for this person, else NULL.
+            last = conn.execute(
+                "SELECT MAX(cycle_end) AS m FROM transactions "
+                "WHERE person_id=? AND event_type='RENT'", (pid,),
+            ).fetchone()
+            rct = last["m"] if last and last["m"] else None
+            conn.execute(
+                "UPDATE ev_assignments SET rent_charged_through=? "
+                "WHERE person_id=? AND returned_date IS NULL", (rct, pid),
+            )
+        # Also drop COD holds for this cycle so the same file can be re-uploaded.
+        conn.execute(
+            "DELETE FROM cod_holds WHERE company=? AND cycle_start=? AND cycle_end=?",
+            (company, cs, ce),
+        )
+        conn.commit()
+        print(f"  Rebalanced {len(affected)} person(s); rolled back COD holds.")
+
+
+def cmd_reset_cycles(args) -> None:
+    """Delete every committed cycle, rewind balances back to the seed openings.
+
+    Keeps person_registry, rider_master, ev_units, ev_assignments, ev_models,
+    companies, users — and any OPENING transactions from the seed import.
+    Wipes RENT / PAYOUT / RENT_MISSED / RENT_RECOVERED / COD_* / DUES_CARRY /
+    ADJUSTMENT rows. Recomputes balances + arrears from the surviving OPENING
+    rows so the system is at "post-seed, pre-first-cycle" state.
+    """
+    with get_connection() as conn:
+        n_txn_before = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        n_op = conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE event_type = 'OPENING'"
+        ).fetchone()[0]
+        n_to_delete = n_txn_before - n_op
+        print(f"  {n_txn_before} total transactions, {n_op} OPENING (kept), "
+              f"{n_to_delete} cycle/adjustment (will delete)")
+        if not args.commit:
+            print("  DRY RUN — re-run with --commit to actually delete")
+            return
+
+        conn.execute("DELETE FROM transactions WHERE event_type <> 'OPENING'")
+        conn.execute("DELETE FROM cod_holds")
+        conn.execute("UPDATE ev_assignments SET rent_charged_through = NULL")
+
+        # Rewind balances from surviving OPENING rows (sum of opening dues entries).
+        conn.execute(
+            "UPDATE balances SET current_balance = COALESCE(("
+            "    SELECT SUM(t.amount) FROM transactions t "
+            "    WHERE t.person_id = balances.person_id "
+            "      AND t.event_type = 'OPENING' "
+            "      AND (t.remarks LIKE 'Opening dues%' OR t.remarks IS NULL)"
+            "), 0), last_updated = date('now')"
+        )
+
+        # Rewind ev_arrears from surviving OPENING EV-arrears rows.
+        conn.execute(
+            "UPDATE ev_arrears SET "
+            "  total_missed = COALESCE((SELECT -SUM(t.amount) FROM transactions t "
+            "    WHERE t.person_id = ev_arrears.person_id AND t.event_type='OPENING' "
+            "      AND t.remarks LIKE 'Opening EV arrears%'), 0), "
+            "  total_recovered = 0, "
+            "  outstanding = COALESCE((SELECT -SUM(t.amount) FROM transactions t "
+            "    WHERE t.person_id = ev_arrears.person_id AND t.event_type='OPENING' "
+            "      AND t.remarks LIKE 'Opening EV arrears%'), 0), "
+            "  cod_missed = COALESCE((SELECT -SUM(t.amount) FROM transactions t "
+            "    WHERE t.person_id = ev_arrears.person_id AND t.event_type='OPENING' "
+            "      AND t.remarks LIKE 'Opening COD%'), 0), "
+            "  cod_recovered = 0, "
+            "  cod_outstanding = COALESCE((SELECT -SUM(t.amount) FROM transactions t "
+            "    WHERE t.person_id = ev_arrears.person_id AND t.event_type='OPENING' "
+            "      AND t.remarks LIKE 'Opening COD%'), 0), "
+            "  last_updated = date('now')"
+        )
+        conn.commit()
+        print(f"  Deleted {n_to_delete} cycle/adjustment transactions.")
+        print(f"  Cleared cod_holds and rent_charged_through.")
+        print(f"  Balances + arrears rewound to seed-opening state.")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="payout-manage", description="Payout System - setup & import")
+    sub = p.add_subparsers(dest="command")
+    pi = sub.add_parser("init", help="Create schema, seed reference data, optional admin user")
+    pi.add_argument("--email")
+    pi.add_argument("--password")
+    ps = sub.add_parser("seed", help="Import the onboarding workbook (preview unless --commit)")
+    ps.add_argument("workbook", help="Path to the seed .xlsx")
+    ps.add_argument("--commit", action="store_true", help="Actually write to the database")
+    ps.add_argument("--created-by", default="seed_import")
+    prx = sub.add_parser("reset-cycles",
+                         help="Delete every committed cycle (keeps seed openings)")
+    prx.add_argument("--commit", action="store_true", help="Actually delete")
+    pr = sub.add_parser("rollback", help="Undo a previously committed cycle")
+    pr.add_argument("--company", required=True)
+    pr.add_argument("--cycle-start", dest="cycle_start", required=True)
+    pr.add_argument("--cycle-end", dest="cycle_end", required=True)
+    pr.add_argument("--commit", action="store_true", help="Actually delete")
+    pr.add_argument("--force", action="store_true",
+                    help="Proceed even if no transactions are matched")
+    args = p.parse_args()
+    if args.command == "init":
+        cmd_init(args)
+    elif args.command == "seed":
+        cmd_seed(args)
+    elif args.command == "rollback":
+        cmd_rollback(args)
+    elif args.command == "reset-cycles":
+        cmd_reset_cycles(args)
+    else:
+        p.print_help()
+
+
+if __name__ == "__main__":
+    main()
