@@ -27,7 +27,8 @@ from payout.api.routes import (
 )
 
 # Path to the React production build (populated by `npm run build` in frontend/)
-_FRONTEND_DIR = Path(__file__).resolve().parents[4] / "frontend" / "dist"
+# __file__ = src/payout/api/app.py → parents[3] = project root
+_FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
 def _seed_demo_users() -> None:
