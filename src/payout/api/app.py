@@ -59,8 +59,12 @@ def _seed_demo_users() -> None:
 async def lifespan(app: FastAPI):
     """Initialize DB schema + demo data before the first request."""
     from payout.db import initialize_database
+    from payout.db.demo_seed import seed_demo
+    from payout.db import get_connection
     initialize_database()
     _seed_demo_users()
+    with get_connection() as conn:
+        seed_demo(conn)
     yield
 
 
