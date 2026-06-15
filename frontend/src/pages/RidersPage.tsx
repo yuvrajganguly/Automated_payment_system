@@ -313,63 +313,6 @@ function LinkRidersCard({ onLinked }: { onLinked: () => void }) {
   )
 }
 
-function SetRiderIdCard({ onUpdated }: { onUpdated: () => void }) {
-  const [open, setOpen] = useState(false)
-  const empty = { person_id: '', company: '', new_rider_id: '', current_rider_id: '' }
-  const [form, setForm] = useState(empty)
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const [tone, setTone] = useState<'ok' | 'err'>('ok')
-
-  async function submit(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setMsg(null)
-    try {
-      const body: Record<string, string | number> = {
-        person_id: parseInt(form.person_id),
-        company: form.company,
-        new_rider_id: form.new_rider_id,
-      }
-      if (form.current_rider_id) body.current_rider_id = form.current_rider_id
-      const r = await api.post<{ renamed: boolean; old_rider_id?: string; new_rider_id?: string }>(
-        '/riders/rename-rider-id', body,
-      )
-      setTone('ok')
-      setMsg(r.renamed
-        ? `Renamed ${r.old_rider_id} → ${r.new_rider_id}`
-        : 'No change')
-      setForm(empty); onUpdated()
-    } catch (err) {
-      setTone('err')
-      setMsg(err instanceof Error ? err.message : 'Failed')
-    }
-    finally { setBusy(false) }
-  }
-  return (
-    <Card title="Set Rider ID (for placeholders)" open={open} onToggle={() => setOpen(!open)}>
-      <p className="text-xs text-slate-500 mb-2">
-        Attach a real rider_id to a placeholder (QSPEND…), or rename any
-        rider_id. Person keeps all history; transactions follow.
-      </p>
-      <form onSubmit={submit} className="grid grid-cols-2 gap-2">
-        <Input label="Person ID *" v={form.person_id}
-               on={(v) => setForm({ ...form, person_id: v })} />
-        <Input label="Company *" v={form.company}
-               on={(v) => setForm({ ...form, company: v })} />
-        <Input label="New Rider ID *" v={form.new_rider_id}
-               on={(v) => setForm({ ...form, new_rider_id: v })} />
-        <Input label="Current Rider ID (if ambiguous)" v={form.current_rider_id}
-               on={(v) => setForm({ ...form, current_rider_id: v })} />
-        <div className="col-span-2 flex gap-2 items-center mt-1">
-          <Submit busy={busy}
-                  disabled={!form.person_id || !form.company || !form.new_rider_id}
-                  label="Set" />
-          {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>{msg}</span>}
-        </div>
-      </form>
-    </Card>
-  )
-}
-
 function Card({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-lg shadow p-4">

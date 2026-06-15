@@ -266,7 +266,7 @@ function Stat({ label, value, tone }:
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="px-3 py-2 font-medium text-xs">{children}</th>
 }
-function Td({ children, right, className = '' }:
-  { children: React.ReactNode; right?: boolean; className?: string }) {
-  return <td className={'px-3 py-2 ' + (right ? 'text-right ' : '') + className}>{children}</td>
+function Td({ children, right, className = '', title }:
+  { children: React.ReactNode; right?: boolean; className?: string; title?: string }) {
+  return <td className={'px-3 py-2 ' + (right ? 'text-right ' : '') + className} title={title}>{children}</td>
 }
