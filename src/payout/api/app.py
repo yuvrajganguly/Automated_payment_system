@@ -56,7 +56,7 @@ def _seed_demo_users() -> None:
                 (email, pw_hash, role),
             )
         conn.commit()
-    print("[startup] Demo users ready: admin@demo.com / viewer@demo.com  (pw: Demo@1234)")
+    print("[startup] Demo users ready: admin@demo.com / viewer@demo.com  (pw: Demo-1234)")
 
 
 @asynccontextmanager
