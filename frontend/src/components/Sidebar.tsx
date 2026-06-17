@@ -3,17 +3,25 @@ import { useAuth } from '../auth/AuthContext'
 
 const NAV = [
   { to: '/', label: 'Process Payout', end: true },
+  { to: '/dashboard', label: 'Dashboard' },
   { to: '/riders', label: 'Riders' },
   { to: '/evs', label: 'EVs' },
   { to: '/arrears', label: 'Arrears' },
   { to: '/cod', label: 'COD' },
+  { to: '/payments', label: 'Payments' },
+  { to: '/users', label: 'Users' },
   { to: '/ev-rent', label: 'EV Rent Details' },
   { to: '/transactions', label: 'Transactions' },
   { to: '/settings', label: 'Settings' },
 ]
 
+const CREATOR_NAV = [
+  { to: '/system', label: 'System', icon: '⚡' },
+]
+
 export function Sidebar() {
   const { user, logout } = useAuth()
+  const isCreator = user?.role === 'creator'
   return (
     <aside className="w-60 bg-brand text-white p-6 flex flex-col">
       <h1 className="text-xl font-bold mb-8">Payout</h1>
@@ -31,14 +39,10 @@ export function Sidebar() {
             {item.label}
           </NavLink>
         ))}
-      </nav>
-      <div className="mt-auto pt-4 border-t border-white/20 text-xs">
-        <p className="font-semibold">{user?.email}</p>
-        <p className="opacity-70 mb-3">{user?.role}</p>
-        <button onClick={logout} className="text-xs underline hover:opacity-80">
-          Log out
-        </button>
-      </div>
-    </aside>
-  )
-}
+        {isCreator && (
+          <>
+            <div className="mt-4 mb-1 text-[10px] uppercase tracking-wider text-white/40 px-3">
+              Creator
+            </div>
+            {CREATOR_NAV.map((item) => (
+       

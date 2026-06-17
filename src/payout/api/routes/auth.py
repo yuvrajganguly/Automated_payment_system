@@ -1,48 +1,61 @@
-"""Auth routes: login (JWT), current user, and change password."""
+"""Auth routes: login (JWT), current user, change password, OTP reset."""
 
 from __future__ import annotations
 
+import secrets
+from datetime import datetime, timedelta
+
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 
 from payout.api.auth import authenticate, create_access_token, get_current_user
 from payout.api.schemas import ChangePasswordIn, TokenOut, UserOut
 from payout.auth import hash_password
 from payout.db import get_connection
+from payout.notifications import send_email
 
 router = APIRouter()
 
 
-@router.post("/login", response_model=TokenOut)
-def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
-    """Standard OAuth2 password flow. `username` is the user's email."""
-    user = authenticate(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return TokenOut(
-        access_token=create_access_token(subject=user["email"], role=user["role"]),
-        role=user["role"], email=user["email"],
-    )
+# ── OTP password reset ─────────────────────────────────────────────────────
+OTP_TTL_MINUTES = 10
 
 
-@router.get("/me", response_model=UserOut)
-def me(user: dict = Depends(get_current_user)) -> UserOut:
-    return UserOut(**user)
+class ForgotPasswordIn(BaseModel):
+    email: str
 
 
-@router.post("/change-password")
-def change_password(body: ChangePasswordIn,
-                    user: dict = Depends(get_current_user)) -> dict:
-    if len(body.new_password) < 8:
-        raise HTTPException(400, "New password must be at least 8 characters")
-    if not authenticate(user["email"], body.current_password):
-        raise HTTPException(401, "Current password is incorrect")
+class ResetPasswordIn(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+
+def _hash_otp(otp: str) -> str:
+    return bcrypt.hashpw(otp.encode(), bcrypt.gensalt()).decode()
+
+
+def _verify_otp(otp: str, stored_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(otp.encode(), stored_hash.encode())
+    except Exception:
+        return False
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordIn) -> dict:
+    """Generate a single-use 6-digit OTP and email it to the user.
+
+    For privacy we return the same response whether or not the email is
+    registered — don't leak which addresses have accounts."""
+    email = body.email.strip().lower()
+    if not email:
+        raise HTTPException(400, "Email is required")
     with get_connection() as conn:
-        conn.execute("UPDATE users SET password_hash=? WHERE email=?",
-                     (hash_password(body.new_password), user["email"]))
-        conn.commit()
-    return {"ok": True}
+        row = conn.execute(
+            "SELECT email FROM users WHERE email=? AND is_active=1", (email,)
+        ).fetchone()
+        if row:
+            otp = f

@@ -180,6 +180,10 @@ CREATE TABLE IF NOT EXISTS companies (
     payout_sheet       TEXT,
     rider_id_column    TEXT NOT NULL,
     payout_column      TEXT NOT NULL,
+    -- Optional column name in the company file holding the orders/deliveries
+    -- count (Spencer's: Delivered Order, Myntra: Total Order Completed, etc.).
+    -- Read straight through to the PAY/DUES sheets so payouts show orders.
+    orders_column      TEXT,
     has_hold_sheet     INTEGER NOT NULL DEFAULT 0,
     hold_style         TEXT,
     hold_sheet         TEXT,
@@ -199,6 +203,38 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT DEFAULT (datetime('now'))
 );
 
+-- ── audit_log ───────────────────────────────────────────────────────────────
+-- Every state-changing HTTP request (POST / PATCH / DELETE / PUT) made by an
+-- authenticated user is written here. Read by the Creator only — even admins
+-- shouldn't see what other admins did to keep peer pressure off the log.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT DEFAULT (datetime('now')),
+    email       TEXT,                 -- NULL for anonymous (e.g. login)
+    role        TEXT,
+    method      TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    status_code INTEGER,
+    duration_ms INTEGER,
+    body_excerpt TEXT,                -- first ~500 chars of the request body
+    ip          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_email ON audit_log (email);
+CREATE INDEX IF NOT EXISTS idx_audit_at    ON audit_log (at DESC);
+
+-- ── password_reset_tokens ───────────────────────────────────────────────────
+-- 6-digit OTPs the user enters to reset a forgotten password. Tokens are
+-- single-use and expire 10 minutes after issue.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT NOT NULL,
+    otp_hash   TEXT NOT NULL,             -- bcrypt of the 6 digits
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,                      -- NULL until the OTP is consumed
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pwd_reset_email ON password_reset_tokens (email);
+
 -- ── status_tracking ─────────────────────────────────────────────────────────
 -- Per-person activity. INACTIVE output highlights people with dues or an EV
 -- not yet returned.
@@ -208,6 +244,58 @@ CREATE TABLE IF NOT EXISTS status_tracking (
     last_seen   TEXT,
     ev_returned INTEGER NOT NULL DEFAULT 0
 );
+
+-- ── payment_uploads ─────────────────────────────────────────────────────────
+-- One row per uploaded bank MIS report. Each upload is parsed into multiple
+-- payment_lines, each of which is matched against the rider roster and then
+-- resolved (success → no action; failed → either marked paid via UPI or the
+-- amount is credited back to the rider's ledger).
+CREATE TABLE IF NOT EXISTS payment_uploads (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_name    TEXT NOT NULL,
+    uploaded_at  TEXT DEFAULT (datetime('now')),
+    uploaded_by  TEXT,
+    line_count   INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    unmatched_count INTEGER NOT NULL DEFAULT 0,
+    notes        TEXT
+);
+
+-- ── payment_lines ───────────────────────────────────────────────────────────
+-- One row per beneficiary line in a MIS report.
+--   bank_status        : 'Success' | 'Failed' | 'Rejected' | other (as parsed)
+--   match_status       : 'matched' (joined to a person via account+ifsc) |
+--                        'name_matched' (joined via fuzzy name) |
+--                        'unmatched' (no roster hit)
+--   resolution_method  : NULL until operator acts. Then one of:
+--                          'bank_ok'        — successful bank transfer, nothing to do
+--                          'upi_paid'       — operator paid the rider via UPI QR
+--                          'credit_ledger'  — failed and money added back to balance
+CREATE TABLE IF NOT EXISTS payment_lines (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_id        INTEGER NOT NULL REFERENCES payment_uploads(id) ON DELETE CASCADE,
+    line_no          INTEGER,
+    pymt_mode        TEXT,
+    bene_name        TEXT,
+    bene_account_no  TEXT,
+    bene_ifsc        TEXT,
+    amount           REAL NOT NULL DEFAULT 0,
+    remark           TEXT,
+    pymt_date        TEXT,
+    bank_status      TEXT,
+    utr              TEXT,
+    customer_ref     TEXT,
+    person_id        INTEGER REFERENCES person_registry(person_id),
+    matched_name     TEXT,
+    match_status     TEXT NOT NULL DEFAULT 'unmatched',
+    resolution_method TEXT,
+    resolved_at      TEXT,
+    resolved_by      TEXT,
+    transaction_id   INTEGER REFERENCES transactions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pl_upload ON payment_lines (upload_id);
+CREATE INDEX IF NOT EXISTS idx_pl_person ON payment_lines (person_id);
 
 -- ── ev_maintenance ──────────────────────────────────────────────────────────
 -- EV downtime windows. The rent engine excludes any chargeable day that falls

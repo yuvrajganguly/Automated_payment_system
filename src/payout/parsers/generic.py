@@ -63,6 +63,24 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 "no inline holds applied"
             )
 
+    # Optional orders/deliveries column (pass-through into the PAY sheet so
+    # operators can sanity-check payout vs activity at a glance).
+    orders_col_name = None
+    try:
+        orders_col_name = config["orders_column"]
+    except (KeyError, IndexError):
+        pass  # older DBs without the column — skip silently
+    orders_col = None
+    if orders_col_name:
+        orders_col = match_column(df.columns, orders_col_name)
+        if orders_col:
+            matched["orders"] = orders_col
+        else:
+            warnings.append(
+                f"{company}: orders column '{orders_col_name}' not found; "
+                "leaving orders blank"
+            )
+
     records: list[RiderRecord] = []
     for _, row in df.iterrows():
         rider_id = str(row.get(rider_col, "")).strip()
@@ -73,8 +91,12 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
             warnings.append(f"{company}: skipping {rider_id} — invalid payout value")
             continue
         cod = to_float(row.get(cod_col)) if cod_col else None
+        orders_val = to_float(row.get(orders_col)) if orders_col else None
         records.append(
-            RiderRecord(rider_id=rider_id, payout=payout, cod_pending=cod or 0.0)
+            RiderRecord(
+                rider_id=rider_id, payout=payout,
+                cod_pending=cod or 0.0, orders=orders_val,
+            )
         )
 
     # ── Separate hold sheet (Jiffy style), found by content ──────────────────

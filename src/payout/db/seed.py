@@ -23,6 +23,7 @@ COMPANIES: list[dict] = [
         "payout_sheet": "pattern:Computation",  # sheet named "W## - Computation"
         "rider_id_column": "rider_id",
         "payout_column": "Final weekly payout",
+        "orders_column": "total orders",
         "has_hold_sheet": 0,
         "hold_style": None,
         "hold_sheet": None,
@@ -37,6 +38,7 @@ COMPANIES: list[dict] = [
         "payout_sheet": "0",
         "rider_id_column": "rider_id",
         "payout_column": "net_pay",
+        "orders_column": "total_del",
         "has_hold_sheet": 0,
         "hold_style": None,
         "hold_sheet": None,
@@ -51,6 +53,7 @@ COMPANIES: list[dict] = [
         "payout_sheet": "0",
         "rider_id_column": "Worker Code",
         "payout_column": "Final Payout",
+        "orders_column": "Total Order Completed",
         "has_hold_sheet": 1,
         "hold_style": "column",          # inline COD-Pending column
         "hold_sheet": None,
@@ -62,9 +65,11 @@ COMPANIES: list[dict] = [
     {
         "company_name": "Spencer's",
         "parser_type": "spencers",
-        "payout_sheet": "pattern:Payout",
+        # Sheets are now named WEEK1, WEEK2, … so we just take the first sheet.
+        "payout_sheet": None,
         "rider_id_column": "Rider id",
-        "payout_column": "Total Payout",
+        "payout_column": "Total Payable Amount",
+        "orders_column": "Delivered Orders",
         "has_hold_sheet": 1,
         "hold_style": "sheet",
         "hold_sheet": "COD",
@@ -89,13 +94,14 @@ def seed_companies(conn: sqlite3.Connection) -> None:
         """
         INSERT OR IGNORE INTO companies
             (company_name, parser_type, payout_sheet, rider_id_column,
-             payout_column, has_hold_sheet, hold_style, hold_sheet,
-             hold_key_column, hold_amount_column, hold_status_column, is_active)
+             payout_column, orders_column, has_hold_sheet, hold_style,
+             hold_sheet, hold_key_column, hold_amount_column,
+             hold_status_column, is_active)
         VALUES
             (:company_name, :parser_type, :payout_sheet, :rider_id_column,
-             :payout_column, :has_hold_sheet, :hold_style, :hold_sheet,
-             :hold_key_column, :hold_amount_column, :hold_status_column,
-             :is_active)
+             :payout_column, :orders_column, :has_hold_sheet, :hold_style,
+             :hold_sheet, :hold_key_column, :hold_amount_column,
+             :hold_status_column, :is_active)
         """,
         COMPANIES,
     )

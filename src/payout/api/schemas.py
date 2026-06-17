@@ -225,6 +225,28 @@ class AdjustmentIn(BaseModel):
     reason: str
 
 
+class RentPaymentIn(BaseModel):
+    """Manual rent payment by a rider. The amount is split across outstanding
+    EV-arrears first (RENT_RECOVERED), then current-cycle rent (RENT_COLLECTED),
+    so it shows up correctly in EV Rent Details."""
+    person_id: Optional[int] = None
+    rider_id: Optional[str] = None
+    company: Optional[str] = None
+    amount: float = Field(..., gt=0,
+                          description="Positive — amount the rider just paid.")
+    paid_on: Optional[str] = Field(
+        None, description="ISO date the rider paid (defaults to today).")
+    # Optional rent coverage window. When supplied, RENT_COLLECTED is logged
+    # against this window (instead of the rider's last RENT cycle) and the EV's
+    # rent_charged_through advances to period_end — so the next automated cycle
+    # won't re-charge for the same days.
+    period_start: Optional[str] = Field(
+        None, description="ISO date — start of the rent window this payment covers.")
+    period_end: Optional[str] = Field(
+        None, description="ISO date — end (inclusive) of the rent window this payment covers.")
+    remarks: Optional[str] = None
+
+
 # ── Arrears ─────────────────────────────────────────────────────────────────
 class ArrearsOut(BaseModel):
     person_id: int

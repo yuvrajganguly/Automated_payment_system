@@ -60,12 +60,14 @@ def _auto_width(ws, min_w=10, max_w=42):
 
 
 # ---- PAY ----
-PAY_HEADERS = ["Person ID","Rider ID","Name","Hub","Vehicle","EV ID","Rent Charged",
-               "Gross Payout","Previous Dues","Total Deductions","Net Release",
-               "Carry Forward","COD Hold","Remarks","Account No","IFSC",
-               "Manual Adjustment","Notes"]
-PAY_NUM = [7, 8, 9, 10, 11, 12, 13, 17]
-PAY_SUM = [7, 8, 9, 10, 11, 12, 13]
+PAY_HEADERS = ["Person ID","Rider ID","Name","Hub","Vehicle","EV ID","Orders",
+               "Rent Charged","Gross Payout","Previous Dues","Dues Cleared",
+               "Total Deductions","Net Release","Carry Forward","COD Hold",
+               "Remarks","Account No","IFSC","Manual Adjustment","Notes"]
+# Numeric (right-align + thousands separator) columns. Orders=7 stays integer-ish
+# but we leave it in the numeric set so it formats consistently.
+PAY_NUM = [7, 8, 9, 10, 11, 12, 13, 14, 15, 19]
+PAY_SUM = [7, 8, 9, 10, 11, 12, 13, 14, 15]
 
 
 def _pay_sheet(wb, rows):
@@ -74,16 +76,25 @@ def _pay_sheet(wb, rows):
     for i, r in enumerate(rows, 2):
         prev_dues = round(max(0.0, -r.prev_balance), 2)
         carry = round(max(0.0, -r.new_balance), 2)
+        # Dues Cleared = whatever portion of the payout retired carried-forward
+        # dues this cycle. The engine surfaces this in dues_cleared so the row
+        # breakdown is rent + arrears_recovered + dues_cleared = total deduction.
+        dues_cleared = round(getattr(r, "dues_cleared", 0.0) or 0.0, 2)
         deductions = round(r.payout - r.released, 2)
+        orders_val = getattr(r, "orders", None)
         fill = HOLD_FILL if r.is_hold else PAY_FILL
         vals = [r.person_id, r.rider_id, r.name, r.hub or "", r.vehicle or "",
-                r.ev_id or "", r.rent,
-                r.payout, prev_dues, deductions, r.released, carry,
-                r.cod_hold, r.remarks, r.account_no or "", r.ifsc or "", "", ""]
+                r.ev_id or "", orders_val if orders_val is not None else "",
+                r.rent, r.payout, prev_dues, dues_cleared, deductions, r.released,
+                carry, r.cod_hold, r.remarks, r.account_no or "", r.ifsc or "",
+                "", ""]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=i, column=col, value=v)
-            cell.alignment = Alignment(horizontal="left" if col in (3, 15, 16, 18) else "center",
-                                       vertical="center")
+            # Left-align Name (3), Remarks (16), Account/IFSC (17/18), Notes (20).
+            cell.alignment = Alignment(
+                horizontal="left" if col in (3, 16, 17, 18, 20) else "center",
+                vertical="center",
+            )
         _style_row(ws, i, len(PAY_HEADERS), fill=fill)
         _set_num(ws, i, PAY_NUM)
     if rows:
@@ -99,10 +110,10 @@ def _pay_sheet(wb, rows):
 
 # ---- DUES ----
 DUES_HEADERS = ["Person ID","Rider ID","Name","Hub","Vehicle","EV ID","Model",
-                "Gross Payout","Rent Charged","Arrears Recovered","Previous Dues",
-                "Carry Forward","Account No","IFSC"]
-DUES_NUM = [8, 9, 10, 11, 12]
-DUES_SUM = [8, 9, 10, 11, 12]
+                "Orders","Gross Payout","Rent Charged","Arrears Recovered",
+                "Dues Cleared","Previous Dues","Carry Forward","Account No","IFSC"]
+DUES_NUM = [8, 9, 10, 11, 12, 13, 14]
+DUES_SUM = [8, 9, 10, 11, 12, 13, 14]
 
 
 def _dues_sheet(wb, rows):
@@ -111,13 +122,16 @@ def _dues_sheet(wb, rows):
     for i, r in enumerate(rows, 2):
         prev_dues = round(max(0.0, -r.prev_balance), 2)
         carry = round(max(0.0, -r.new_balance), 2)
+        dues_cleared = round(getattr(r, "dues_cleared", 0.0) or 0.0, 2)
+        orders_val = getattr(r, "orders", None)
         vals = [r.person_id, r.rider_id, r.name, r.hub or "", r.vehicle or "",
                 r.ev_id or "", r.model or "",
-                r.payout, r.rent, r.arrears_recovered, prev_dues, carry,
-                r.account_no or "", r.ifsc or ""]
+                orders_val if orders_val is not None else "",
+                r.payout, r.rent, r.arrears_recovered, dues_cleared, prev_dues,
+                carry, r.account_no or "", r.ifsc or ""]
         for col, v in enumerate(vals, 1):
             ws.cell(row=i, column=col, value=v).alignment = Alignment(
-                horizontal="left" if col in (3, 13, 14) else "center", vertical="center")
+                horizontal="left" if col in (3, 15, 16) else "center", vertical="center")
         _style_row(ws, i, len(DUES_HEADERS), fill=DUES_FILL)
         _set_num(ws, i, DUES_NUM)
     if rows:
@@ -212,21 +226,27 @@ def _hold_sheet(wb, conn, company, cs, ce):
 
 
 # ---- INACTIVE ----
-INA_HEADERS = ["Person ID","Name","Rider IDs at Company","Vehicle","EV ID","Model",
-               "Current Balance","Arrears Outstanding","Reason"]
-INA_NUM = [7, 8]
+INA_HEADERS = ["Person ID","Name","Hub","Rider IDs at Company","Vehicle","EV ID",
+               "Model","Current Balance","Arrears Outstanding","Reason"]
+INA_NUM = [8, 9]
 
 
 def _inactive_sheet(wb, rows):
     ws = wb.create_sheet("INACTIVE")
     _write_header(ws, INA_HEADERS)
     for i, r in enumerate(rows, 2):
-        vals = [r.person_id, r.name, ", ".join(r.rider_ids), r.vehicle or "",
+        # Vehicle defaults to BIKE so any older row without an explicit value
+        # still shows something useful.
+        veh = (getattr(r, "vehicle", None) or "BIKE")
+        hub = (getattr(r, "hub", None) or "")
+        vals = [r.person_id, r.name, hub, ", ".join(r.rider_ids), veh,
                 r.ev_id or "", r.model or "",
                 r.current_balance, r.arrears_outstanding, r.reason]
         for col, v in enumerate(vals, 1):
+            # Left-align Name (2), Hub (3), Rider IDs list (4), Reason (10).
             ws.cell(row=i, column=col, value=v).alignment = Alignment(
-                horizontal="left" if col in (2, 3, 9) else "center", vertical="center")
+                horizontal="left" if col in (2, 3, 4, 10) else "center",
+                vertical="center")
         flagged = r.current_balance < 0 or r.arrears_outstanding > 0 or "Missed" in (r.reason or "")
         _style_row(ws, i, len(INA_HEADERS), fill=FLAG_FILL if flagged else None)
         _set_num(ws, i, INA_NUM)

@@ -139,6 +139,21 @@ def cmd_update_company(args) -> None:
     print(f"Company '{args.name}' updated: {list(fields)}")
 
 
+def cmd_set_role(args) -> None:
+    valid = ("user", "admin", "creator")
+    if args.role not in valid:
+        print(f"--role must be one of {valid}.")
+        return
+    email = (args.email or input("Email: ")).strip().lower()
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+            print(f"User '{email}' not found.")
+            return
+        conn.execute("UPDATE users SET role=? WHERE email=?", (args.role, email))
+        conn.commit()
+    print(f"Role for '{email}' set to '{args.role}'.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="payout-admin", description="Payout System - administration")
     sub = p.add_subparsers(dest="command")
@@ -148,6 +163,8 @@ def main() -> None:
     sub.add_parser("list-users")
     pd_ = sub.add_parser("deactivate-user"); pd_.add_argument("--email")
     pr = sub.add_parser("reset-password"); pr.add_argument("--email"); pr.add_argument("--password")
+    psr = sub.add_parser("set-role", help="Promote/demote a user (user|admin|creator)")
+    psr.add_argument("--email"); psr.add_argument("--role", required=True)
 
     sub.add_parser("list-companies")
     pc = sub.add_parser("add-company")
@@ -169,6 +186,7 @@ def main() -> None:
         "deactivate-user": cmd_deactivate_user, "reset-password": cmd_reset_password,
         "list-companies": cmd_list_companies, "add-company": cmd_add_company,
         "update-company": cmd_update_company,
+        "set-role": cmd_set_role,
     }
     fn = dispatch.get(args.command)
     if fn:

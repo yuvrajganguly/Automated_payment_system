@@ -19,6 +19,38 @@ def _migrate(conn) -> None:
     for col in ("cleared_at", "cleared_by"):
         if col not in cod_cols:
             conn.execute(f"ALTER TABLE cod_holds ADD COLUMN {col} TEXT")
+    # companies: orders_column for delivered/completed orders pass-through (v0.6)
+    co_cols = {r[1] for r in conn.execute("PRAGMA table_info(companies)")}
+    if "orders_column" not in co_cols:
+        conn.execute("ALTER TABLE companies ADD COLUMN orders_column TEXT")
+        # Backfill defaults for the four known companies so existing DBs pick up
+        # the column without needing the Settings UI tour.
+        _backfill = (
+            ("Spencer's", "Delivered Orders"),
+            ("Myntra",    "Total Order Completed"),
+            ("Dealshare", "total orders"),
+            ("Blitz",     "total_del"),
+        )
+        for name, col in _backfill:
+            conn.execute(
+                "UPDATE companies SET orders_column=? "
+                "WHERE company_name=? AND (orders_column IS NULL OR orders_column='')",
+                (col, name),
+            )
+    # Spencer's renamed the column "Delivered Order" -> "Delivered Orders".
+    # Idempotent fix-up: pull existing wrong value forward without touching
+    # anything an operator may have customized.
+    conn.execute(
+        "UPDATE companies SET orders_column='Delivered Orders' "
+        "WHERE company_name=\"Spencer's\" AND orders_column='Delivered Order'"
+    )
+    # Default any missing rider vehicle to BIKE — the runtime display already
+    # derives EV/BIKE from EV assignment status, but normalising the raw column
+    # keeps reports/exports consistent.
+    conn.execute(
+        "UPDATE rider_master SET vehicle='BIKE' "
+        "WHERE vehicle IS NULL OR TRIM(vehicle)=''"
+    )
     # balances: cross-company rent slot (v0.4)
     bal_cols = {r[1] for r in conn.execute("PRAGMA table_info(balances)")}
     if "pending_xc_rent" not in bal_cols:

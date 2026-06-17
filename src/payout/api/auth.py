@@ -59,6 +59,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    return user
+    """Allow admin AND creator (creator is a strict super-set of admin)."""
+    if user.get("role") not in ("admin", "creator"):
+        raise HTTPExce

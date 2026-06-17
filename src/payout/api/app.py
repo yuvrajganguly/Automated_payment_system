@@ -16,14 +16,18 @@ from payout.api.routes import (
     arrears as arrears_routes,
     auth as auth_routes,
     cod as cod_routes,
+    creator as creator_routes,
+    dashboard as dashboard_routes,
     companies as company_routes,
     cycle as cycle_routes,
     ev_rent as ev_rent_routes,
     evs as evs_routes,
     inactive as inactive_routes,
     ledger as ledger_routes,
+    payments as payments_routes,
     persons as persons_routes,
     riders as riders_routes,
+    users as users_routes,
 )
 
 # Path to the React production build (populated by `npm run build` in frontend/)
@@ -87,6 +91,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from payout.api.middleware import AuditLogMiddleware  # noqa: E402
+app.add_middleware(AuditLogMiddleware)
+
 app.include_router(auth_routes.router,    prefix="/api/auth",      tags=["auth"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
 app.include_router(cycle_routes.router,   prefix="/api/cycles",    tags=["cycles"])
@@ -98,6 +105,10 @@ app.include_router(arrears_routes.router, prefix="/api/arrears",   tags=["arrear
 app.include_router(inactive_routes.router, prefix="/api/inactive", tags=["inactive"])
 app.include_router(cod_routes.router,     prefix="/api/cod",       tags=["cod"])
 app.include_router(ev_rent_routes.router, prefix="/api/ev-rent",   tags=["ev-rent"])
+app.include_router(payments_routes.router, prefix="/api/payments", tags=["payments"])
+app.include_router(dashboard_routes.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
+app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
 
 
 @app.get("/api/health", tags=["meta"])

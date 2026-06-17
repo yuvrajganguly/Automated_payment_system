@@ -17,6 +17,9 @@ class RiderRecord:
     rider_id: str
     payout: float
     cod_pending: float = 0.0  # inline COD (e.g. Myntra's COD-Pending); else 0
+    # Optional delivered-orders count straight from the company file. Kept as a
+    # float so int / float / "12.0" all flow through uniformly.
+    orders: float | None = None
 
 
 @dataclass

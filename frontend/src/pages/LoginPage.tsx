@@ -48,7 +48,4 @@ export function LoginPage() {
         >
           {busy ? 'Signing in...' : 'Sign in'}
         </button>
-      </form>
-    </div>
-  )
-}
+        <p className="text-xs t

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from payout.api.auth import get_current_user, require_admin
-from payout.api.schemas import AdjustmentIn, TransactionOut
+from payout.api.schemas import AdjustmentIn, RentPaymentIn, TransactionOut
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
 
@@ -61,6 +62,167 @@ def get_ledger(
     return [TransactionOut(**dict(r)) for r in rows]
 
 
+def _resolve_person_id(conn, *, person_id, rider_id, company):
+    pid = person_id
+    if not pid and rider_id:
+        if company:
+            row = conn.execute(
+                "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
+                (rider_id, company)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT person_id FROM rider_master WHERE rider_id=? LIMIT 1",
+                (rider_id,)).fetchone()
+        if row:
+            pid = row["person_id"]
+    if not pid:
+        raise HTTPException(404, "Person not found (provide person_id or rider_id)")
+    return pid
+
+
+@router.post("/rent-payment")
+def post_rent_payment(body: RentPaymentIn,
+                      user: dict = Depends(require_admin)) -> dict:
+    """Record a manual rent payment.
+
+    A rider walked in (or UPI'd outside the bank reconciliation) and paid some
+    rent. We split the amount:
+
+      1. **Arrears first.** Any outstanding ev_arrears.outstanding is paid down
+         and logged as RENT_RECOVERED. EV Rent Details reads this as recovered
+         rent for the prior cycle.
+      2. **Current cycle rent next.** The remainder is logged as RENT_COLLECTED.
+         EV Rent Details reads this as collected rent for the current cycle.
+
+    Either way the running balance is credited by the full amount so the
+    Person ledger and the Arrears/Dues view agree.
+    """
+    if body.amount <= 0:
+        raise HTTPException(400, "Amount must be positive.")
+    paid_on = body.paid_on or date.today().isoformat()
+    note = (body.remarks or "manual rent payment").strip()
+
+    with get_connection() as conn:
+        pid = _resolve_person_id(conn, person_id=body.person_id,
+                                 rider_id=body.rider_id, company=body.company)
+        # Identify the rider's deduction (rent-paying) company + rider_id so the
+        # RENT_COLLECTED row attaches to the right slot. Fall back to the body's
+        # company/rider_id when person_registry doesn't have one yet.
+        pr = conn.execute(
+            "SELECT deduction_company, deduction_rider_id "
+            "FROM person_registry WHERE person_id=?", (pid,)).fetchone()
+        company = (pr["deduction_company"] if pr else None) or body.company or ""
+        rider_id = (pr["deduction_rider_id"] if pr else None) or body.rider_id or ""
+
+        # Decide which cycle window this payment covers.
+        #   1. If the caller provided period_start/period_end, use them. This
+        #      is the explicit "this covers 8 Jun – 14 Jun" case.
+        #   2. Otherwise fall back to the rider's most recent RENT cycle so
+        #      RENT_COLLECTED still slots into something the EV Rent Details
+        #      aggregation can pick up.
+        #   3. If there's never been a RENT event for this person, anchor on
+        #      today as a last resort.
+        if body.period_start and body.period_end:
+            cs, ce = body.period_start, body.period_end
+        else:
+            last = conn.execute(
+                "SELECT cycle_start, cycle_end FROM transactions "
+                "WHERE person_id=? AND event_type='RENT' "
+                "ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+            if last:
+                cs, ce = last["cycle_start"], last["cycle_end"]
+            else:
+                cs = ce = paid_on
+
+        # Read current balance + arrears outstanding.
+        bal_row = conn.execute(
+            "SELECT current_balance FROM balances WHERE person_id=?",
+            (pid,)).fetchone()
+        balance = bal_row["current_balance"] if bal_row else 0.0
+        arr_row = conn.execute(
+            "SELECT outstanding FROM ev_arrears WHERE person_id=?",
+            (pid,)).fetchone()
+        arr_out = arr_row["outstanding"] if arr_row else 0.0
+
+        applied_to_arrears = 0.0
+        applied_to_rent = 0.0
+        remaining = float(body.amount)
+
+        # 1) Arrears first.
+        if arr_out > 0 and remaining > 0:
+            applied_to_arrears = round(min(remaining, arr_out), 2)
+            balance = round(balance + applied_to_arrears, 2)
+            conn.execute(
+                "UPDATE balances SET current_balance=?, last_updated=? "
+                "WHERE person_id=?", (balance, paid_on, pid))
+            conn.execute(
+                "INSERT OR IGNORE INTO balances "
+                "(person_id, current_balance, last_updated) VALUES (?,?,?)",
+                (pid, balance, paid_on))
+            conn.execute(
+                "UPDATE ev_arrears SET total_recovered = total_recovered + ?, "
+                "outstanding = outstanding - ?, last_updated=? "
+                "WHERE person_id=?",
+                (applied_to_arrears, applied_to_arrears, paid_on, pid))
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, "
+                "cycle_start, cycle_end, event_type, amount, balance_after, "
+                "remarks, created_by) "
+                "VALUES (?,?,?,?,?,'RENT_RECOVERED',?,?,?,?)",
+                (pid, rider_id, company, cs, ce,
+                 applied_to_arrears, balance,
+                 f"manual rent — arrears ({note})", user["email"]))
+            remaining = round(remaining - applied_to_arrears, 2)
+
+        # 2) Current cycle rent.
+        if remaining > 0:
+            applied_to_rent = round(remaining, 2)
+            balance = round(balance + applied_to_rent, 2)
+            conn.execute(
+                "UPDATE balances SET current_balance=?, last_updated=? "
+                "WHERE person_id=?", (balance, paid_on, pid))
+            conn.execute(
+                "INSERT OR IGNORE INTO balances "
+                "(person_id, current_balance, last_updated) VALUES (?,?,?)",
+                (pid, balance, paid_on))
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, "
+                "cycle_start, cycle_end, event_type, amount, balance_after, "
+                "remarks, created_by) "
+                "VALUES (?,?,?,?,?,'RENT_COLLECTED',?,?,?,?)",
+                (pid, rider_id, company, cs, ce,
+                 applied_to_rent, balance,
+                 f"manual rent payment ({note})", user["email"]))
+
+        # If the caller specified a coverage window and the payment actually
+        # paid down some rent, advance the EV's rent_charged_through so the
+        # automated engine won't re-charge for the same days on next cycle.
+        # We only advance forward — never backward — to keep the meter monotonic.
+        advanced_to = None
+        if body.period_end and applied_to_rent > 0:
+            row = conn.execute(
+                "SELECT assignment_id, rent_charged_through FROM ev_assignments "
+                "WHERE person_id=? AND returned_date IS NULL", (pid,)).fetchone()
+            if row:
+                cur_through = row["rent_charged_through"] or ""
+                if body.period_end > cur_through:
+                    conn.execute(
+                        "UPDATE ev_assignments SET rent_charged_through=? "
+                        "WHERE assignment_id=?",
+                        (body.period_end, row["assignment_id"]))
+                    advanced_to = body.period_end
+        conn.commit()
+
+    return {
+        "person_id": pid,
+        "applied_to_arrears": applied_to_arrears,
+        "applied_to_rent": applied_to_rent,
+        "new_balance": balance,
+        "covered_window": {"start": cs, "end": ce} if (body.period_start and body.period_end) else None,
+        "rent_charged_through_advanced_to": advanced_to,
+    }
+
+
 @router.post("/adjustments")
 def post_adjustment_endpoint(body: AdjustmentIn,
                              user: dict = Depends(require_admin)) -> dict:
@@ -69,20 +231,8 @@ def post_adjustment_endpoint(body: AdjustmentIn,
     if not body.amount:
         raise HTTPException(400, "Amount cannot be zero")
     with get_connection() as conn:
-        pid = body.person_id
-        if not pid and body.rider_id:
-            if body.company:
-                row = conn.execute(
-                    "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
-                    (body.rider_id, body.company)).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT person_id FROM rider_master WHERE rider_id=? LIMIT 1",
-                    (body.rider_id,)).fetchone()
-            if row:
-                pid = row["person_id"]
-        if not pid:
-            raise HTTPException(404, "Person not found (provide person_id or rider_id)")
+        pid = _resolve_person_id(conn, person_id=body.person_id,
+                                 rider_id=body.rider_id, company=body.company)
         new_balance = post_adjustment(
             conn, pid, body.amount, body.reason, user["email"],
             rider_id=body.rider_id or "", company=body.company or "",

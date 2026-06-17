@@ -56,6 +56,9 @@ class RiderResult:
     remarks: str
     account_no: str | None
     ifsc: str | None
+    # Delivered/completed orders pulled straight from the company file when the
+    # company config declares an orders_column. None when not available.
+    orders: float | None = None
 
 
 @dataclass
@@ -69,6 +72,7 @@ class InactiveRider:
     arrears_outstanding: float
     reason: str
     vehicle: str | None = None
+    hub: str | None = None
 
 
 @dataclass
@@ -103,9 +107,19 @@ def _txn(conn, **kw):
 
 def _lookup(conn, rider_id, company):
     row = conn.execute(
-        "SELECT rm.person_id, rm.name, rm.hub, rm.vehicle, rm.account_no, rm.ifsc, "
-        "pr.deduction_company, pr.deduction_rider_id "
-        "FROM rider_master rm JOIN person_registry pr ON pr.person_id = rm.person_id "
+        # Vehicle is derived from EV-assignment status so it's consistent across
+        # every rider_master row for the same person — EV when they currently
+        # hold an open assignment, BIKE otherwise (default for anyone without
+        # an explicit EV). Matches the riders-list endpoint.
+        "SELECT rm.person_id, rm.name, rm.hub, "
+        "       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END "
+        "         AS vehicle, "
+        "       rm.account_no, rm.ifsc, "
+        "       pr.deduction_company, pr.deduction_rider_id "
+        "FROM rider_master rm "
+        "JOIN person_registry pr ON pr.person_id = rm.person_id "
+        "LEFT JOIN ev_assignments ea "
+        "  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
         "WHERE rm.rider_id=? AND rm.company=?",
         (rider_id, company),
     ).fetchone()
@@ -184,11 +198,14 @@ def _ev_for(conn, pid):
 
 
 def _vehicle_for(conn, pid, company):
+    """Derived vehicle: EV if the person has any open EV assignment, BIKE
+    otherwise. The ``company`` argument is unused now but kept for callers."""
+    del company  # signature-stable, derivation is per-person
     r = conn.execute(
-        "SELECT vehicle FROM rider_master WHERE person_id=? AND company=? LIMIT 1",
-        (pid, company),
+        "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL LIMIT 1",
+        (pid,),
     ).fetchone()
-    return r["vehicle"] if r else None
+    return "EV" if r else "BIKE"
 
 
 def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
@@ -255,9 +272,18 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             pid = person["person_id"]
             ov = overrides.per_rider.get(rec.rider_id, RiderOverride())
 
-            charge_here = (rec.rider_id == person["deduction_rider_id"]
-                          and person["deduction_company"] == company
-                          and pid not in rent_done)
+            # Rent is charged on the first qualifying cycle that processes
+            # this person — regardless of which company that happens to be.
+            # Double-charging is prevented by ev_assignments.rent_charged_through:
+            # resolve_rent returns rent=0 once it's been advanced past the
+            # current cycle_end, so any later company processing the same
+            # cycle sees nothing left to charge. The deduction-company anchor
+            # remains useful for arrears/dues attribution and as the fallback
+            # logger in the absence pass below, but it no longer gates the
+            # main rent charge. (Older behavior: gated on deduction_company,
+            # which meant a late upload from the deduction company let rent
+            # silently slip.)
+            charge_here = pid not in rent_done
             if charge_here:
                 rinfo = resolve_rent(conn, pid, cycle_start, cycle_end,
                                     waive_days=ov.waive_days, waive_all=ov.waive_all,
@@ -402,6 +428,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                 new_arrears=s.new_arrears, cod_hold=cod_amt, is_hold=is_hold,
                 remarks="HOLD" if is_hold else "PAY",
                 account_no=person["account_no"], ifsc=person["ifsc"],
+                orders=getattr(rec, "orders", None),
             )
             (result.pay_rows if s.released > 0 else result.dues_rows).append(rr)
 
@@ -444,8 +471,11 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                                    company=company, created_by=created_by, days=rinfo.days)
                 advance_rent_charged_through(conn, pid, cycle_end)
                 total_missed += rinfo.rent
-            ridx = [r["rider_id"] for r in conn.execute(
-                "SELECT rider_id FROM rider_master WHERE person_id=? AND company=?", (pid, company))]
+            ridx_rows = conn.execute(
+                "SELECT rider_id, hub FROM rider_master WHERE person_id=? AND company=?",
+                (pid, company)).fetchall()
+            ridx = [r["rider_id"] for r in ridx_rows]
+            hub = next((r["hub"] for r in ridx_rows if r["hub"]), None)
             cur = _balance(conn, pid); arr = _arrears_out(conn, pid)
             veh = _vehicle_for(conn, pid, company)
             reasons = []
@@ -454,7 +484,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             if arr > 0:       reasons.append(f"Arrears {arr:.0f}")
             result.inactive_rows.append(InactiveRider(
                 person_id=pid, name=a["display_name"], rider_ids=ridx, vehicle=veh,
-                ev_id=rinfo.ev_id, model=rinfo.model, current_balance=cur,
+                hub=hub, ev_id=rinfo.ev_id, model=rinfo.model, current_balance=cur,
                 arrears_outstanding=arr, reason="; ".join(reasons) if reasons else "Absent"))
 
         for adj in overrides.adjustments:

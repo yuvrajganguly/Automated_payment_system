@@ -1,0 +1,60 @@
+"""Thin email layer.
+
+Reads SMTP config from environment variables. If any are missing, falls back
+to logging the message to stdout — useful for solo dev and avoids hard-failing
+when no mail service is wired up yet.
+
+Required env vars for live send:
+    PAYOUT_SMTP_HOST       (e.g. smtp.gmail.com)
+    PAYOUT_SMTP_PORT       (e.g. 587)
+    PAYOUT_SMTP_USER       (login email)
+    PAYOUT_SMTP_PASS       (app password)
+    PAYOUT_SMTP_FROM       (sender address, defaults to PAYOUT_SMTP_USER)
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import smtplib
+import ssl
+from email.message import EmailMessage
+
+logger = logging.getLogger(__name__)
+
+
+def send_email(to: str, subject: str, body: str) -> bool:
+    """Send an email. Returns True if delivered, False if logged-only.
+
+    Never raises on SMTP failure — logs the error and returns False so the
+    auth flow can decide how to surface it to the user."""
+    host = os.environ.get("PAYOUT_SMTP_HOST")
+    port = os.environ.get("PAYOUT_SMTP_PORT")
+    user = os.environ.get("PAYOUT_SMTP_USER")
+    pwd  = os.environ.get("PAYOUT_SMTP_PASS")
+    sender = os.environ.get("PAYOUT_SMTP_FROM") or user
+
+    if not (host and port and user and pwd and sender):
+        # Dev mode — print to console.
+        print(f"\n──── EMAIL (no SMTP configured) ────")
+        print(f"To:      {to}")
+        print(f"Subject: {subject}")
+        print(body)
+        print(f"────────────────────────────────────\n")
+        return False
+
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(host, int(port), timeout=10) as smtp:
+            smtp.starttls(context=ctx)
+            smtp.login(user, pwd)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        logger.exception("Failed to send email to %s: %s", to, e)
+        return False

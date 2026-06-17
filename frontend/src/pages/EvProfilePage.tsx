@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
+import { DangerZone } from './PersonPage'
 
 const fmt = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -34,7 +35,8 @@ interface Profile {
 export function EvProfilePage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
+  const isCreator = user?.role === 'creator'
   const [profile, setProfile] = useState<Profile | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -143,6 +145,15 @@ export function EvProfilePage() {
         {profile.maintenance.length === 0 &&
           <p className="p-4 text-sm text-slate-500">No maintenance windows logged.</p>}
       </Section>
+
+      {isCreator && (
+        <DangerZone
+          kind="EV unit"
+          label={u.ev_id}
+          deletePath={`/api/creator/evs/${encodeURIComponent(u.ev_id)}`}
+          onDeleted={() => { window.location.href = '/evs' }}
+        />
+      )}
     </div>
   )
 }

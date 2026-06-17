@@ -100,11 +100,16 @@ def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
             )
             person_id = cur.lastrowid
             _init_person(conn, person_id)
+    # Default to BIKE when nothing was supplied — that's the safe assumption
+    # for any rider not on an EV. (The runtime display value is still derived
+    # from EV-assignment status in list/lookup queries, so this is mostly for
+    # raw exports and any future direct selects on rider_master.)
+    veh = (vehicle or "").strip().upper() or "BIKE"
     conn.execute(
         "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, "
         "account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
         (rider_id, company, person_id, name, hub,
-         (vehicle or "").upper() or None, account_no, ifsc),
+         veh, account_no, ifsc),
     )
     return True, rider_id, person_id
 
@@ -439,5 +444,148 @@ def bulk_create_riders(
         "created": created,
         "duplicates": duplicates,
         "skipped": skipped,
+        "errors": errors,
+    }
+
+
+_UPDATABLE = ("name", "hub", "vehicle", "account_no", "ifsc")
+
+
+@router.post("/bulk-update")
+def bulk_update_riders(
+    file: UploadFile = File(...),
+    commit: bool = Query(False, description="Set true to actually write"),
+    match_by: str = Query(
+        "rider_id+company",
+        description="Either 'rider_id+company' or 'account_no+company'.",
+    ),
+    _: dict = Depends(require_admin),
+) -> dict:
+    """Bulk-update existing rider details from an Excel or CSV file.
+
+    Required columns depend on ``match_by``:
+      - rider_id+company (default): the file must have rider_id + company
+      - account_no+company:         the file must have account_no + company
+
+    Any subset of the updatable columns may be present and only non-blank
+    cells are written — leaving a cell empty leaves the stored value alone.
+    Updatable columns: name | hub | vehicle | account_no | ifsc
+
+    Dry-run by default. Pass ``?commit=true`` to actually persist.
+    """
+    data = file.file.read()
+    df = None
+    name_lower = (file.filename or "").lower()
+    try:
+        if name_lower.endswith(".csv") or name_lower.endswith(".tsv"):
+            sep = "\t" if name_lower.endswith(".tsv") else ","
+            df = pd.read_csv(BytesIO(data), sep=sep, dtype=str, keep_default_na=False)
+        else:
+            df = pd.read_excel(BytesIO(data), dtype=str)
+    except Exception as exc:
+        raise HTTPException(400, f"Could not read file: {exc}") from exc
+
+    df.columns = [str(c).strip() for c in df.columns]
+    cols = {
+        "rid":  match_column(df.columns, "rider_id", "rider id", "riderid"),
+        "co":   match_column(df.columns, "company"),
+        "name": match_column(df.columns, "rider_name", "rider name", "name"),
+        "hub":  match_column(df.columns, "hub"),
+        "veh":  match_column(df.columns, "vehicle", "vehicle type"),
+        "acc":  match_column(df.columns, "account_no", "account no",
+                             "acc_no", "account number", "a/c no", "ac no"),
+        "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
+    }
+    if not cols["co"]:
+        raise HTTPException(400, "Missing required 'company' column.")
+    if match_by == "rider_id+company" and not cols["rid"]:
+        raise HTTPException(400, "match_by=rider_id+company needs a 'rider_id' column.")
+    if match_by == "account_no+company" and not cols["acc"]:
+        raise HTTPException(400, "match_by=account_no+company needs an 'account_no' column.")
+    if match_by not in ("rider_id+company", "account_no+company"):
+        raise HTTPException(400, f"Unknown match_by={match_by!r}")
+
+    def cell(row, key):
+        col = cols[key]
+        if not col: return None
+        v = row.get(col)
+        if v is None or (isinstance(v, float) and pd.isna(v)): return None
+        s = str(v).strip()
+        return s if s and s.lower() != "nan" else None
+
+    updated: list[dict] = []
+    unchanged: list[dict] = []
+    not_found: list[dict] = []
+    errors: list[str] = []
+
+    with get_connection() as conn:
+        for i, row in df.iterrows():
+            line = int(i) + 2
+            co = cell(row, "co")
+            if not co:
+                errors.append(f"line {line}: missing company"); continue
+
+            # Locate the rider row.
+            if match_by == "rider_id+company":
+                rid = cell(row, "rid")
+                if not rid:
+                    errors.append(f"line {line}: missing rider_id"); continue
+                cur = conn.execute(
+                    "SELECT * FROM rider_master WHERE rider_id=? AND company=?",
+                    (rid, co),
+                ).fetchone()
+            else:
+                acc = cell(row, "acc")
+                cur = conn.execute(
+                    "SELECT * FROM rider_master "
+                    "WHERE account_no=? AND company=? AND account_no <> ''",
+                    (acc, co),
+                ).fetchone()
+            if cur is None:
+                not_found.append({"line": line, "company": co,
+                                  "key": cell(row, "rid") or cell(row, "acc")})
+                continue
+
+            patch: dict[str, str] = {}
+            for field, key in (("name", "name"), ("hub", "hub"),
+                               ("vehicle", "veh"), ("account_no", "acc"),
+                               ("ifsc", "ifsc")):
+                v = cell(row, key)
+                if v is not None and (cur[field] or "") != v:
+                    if field == "ifsc":
+                        v = v.upper()
+                    patch[field] = v
+            if not patch:
+                unchanged.append({"line": line, "rider_id": cur["rider_id"],
+                                  "company": co})
+                continue
+            sets = ", ".join(f"{f}=?" for f in patch)
+            params = list(patch.values()) + [cur["rider_id"], co]
+            conn.execute(
+                f"UPDATE rider_master SET {sets} "
+                "WHERE rider_id=? AND company=?",
+                params,
+            )
+            updated.append({
+                "line": line, "rider_id": cur["rider_id"], "company": co,
+                "fields": list(patch.keys()), "values": patch,
+            })
+        if commit and not errors:
+            conn.commit()
+        else:
+            conn.rollback()
+
+    return {
+        "committed": commit and not errors,
+        "match_by": match_by,
+        "summary": {
+            "would_update": len(updated),
+            "unchanged": len(unchanged),
+            "not_found": len(not_found),
+            "errors": len(errors),
+        },
+        "updated": updated,
+        "unchanged": unchanged,
+        "not_found": not_found,
         "errors": errors,
     }

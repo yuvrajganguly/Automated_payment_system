@@ -9,7 +9,7 @@ import type { Company, RiderOut } from '../api/types'
 
 export function RidersPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [riders, setRiders] = useState<RiderOut[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -107,6 +107,7 @@ export function RidersPage() {
         <div className="mt-6 grid md:grid-cols-2 gap-4">
           <AddRiderCard companies={companies} onAdded={reload} />
           <BulkUploadCard onUploaded={reload} />
+          <BulkUpdateCard onUpdated={reload} />
           <LinkRidersCard onLinked={reload} />
         </div>
       )}
@@ -240,6 +241,126 @@ function BulkUploadCard({ onUploaded }: { onUploaded: () => void }) {
               <summary className="cursor-pointer">Skipped ({report.skipped.length})</summary>
               <ul className="mt-1 ml-3 list-disc">
                 {report.skipped.map((s, i) => <li key={i}>L{s.line}: {s.reason}</li>)}
+              </ul>
+            </details>
+          )}
+          {report.errors.length > 0 && (
+            <details className="bg-red-50 border border-red-200 rounded p-2" open>
+              <summary className="cursor-pointer">Errors ({report.errors.length}) — fix and re-preview</summary>
+              <ul className="mt-1 ml-3 list-disc text-red-700">
+                {report.errors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function BulkUpdateCard({ onUpdated }: { onUpdated: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [matchBy, setMatchBy] = useState<'rider_id+company' | 'account_no+company'>('rider_id+company')
+  const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
+  type Report = {
+    committed: boolean
+    match_by: string
+    summary: { would_update: number; unchanged: number; not_found: number; errors: number }
+    updated: { line: number; rider_id: string; company: string;
+               fields: string[]; values: Record<string, string> }[]
+    unchanged: { line: number; rider_id: string; company: string }[]
+    not_found: { line: number; company: string; key: string | null }[]
+    errors: string[]
+  }
+  const [report, setReport] = useState<Report | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function send(commit: boolean) {
+    if (!file) return
+    setBusy(commit ? 'commit' : 'preview'); setError(null); setReport(null)
+    try {
+      const form = new FormData()
+      form.set('file', file)
+      const r = await api.postForm<Report>(
+        `/riders/bulk-update?commit=${commit}&match_by=${encodeURIComponent(matchBy)}`,
+        form,
+      )
+      setReport(r)
+      if (r.committed) onUpdated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Card title="Bulk Update Rider Details" open={open} onToggle={() => setOpen(!open)}>
+      <p className="text-xs text-slate-500 mb-2">
+        Fill in or correct account numbers, IFSC codes, hub, vehicle, or name
+        for many riders at once. Excel or CSV. Match each row by either
+        {' '}<code className="bg-slate-100 px-1 rounded">rider_id + company</code> or
+        {' '}<code className="bg-slate-100 px-1 rounded">account_no + company</code>.
+        Empty cells are ignored (existing value kept).
+      </p>
+      <div className="flex gap-2 items-center mb-2 flex-wrap">
+        <label className="text-xs">
+          <span className="block text-[10px] text-slate-500">Match by</span>
+          <select value={matchBy}
+                  onChange={(e) => setMatchBy(e.target.value as typeof matchBy)}
+                  className="border rounded px-2 py-1 text-xs">
+            <option value="rider_id+company">rider_id + company</option>
+            <option value="account_no+company">account_no + company</option>
+          </select>
+        </label>
+        <input type="file" accept=".xlsx,.xls,.csv,.tsv"
+               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+               className="text-sm" />
+        <button type="button" onClick={() => send(false)}
+                disabled={!file || !!busy}
+                className="text-sm bg-slate-200 hover:bg-slate-300 px-3 py-1.5 rounded disabled:opacity-50">
+          {busy === 'preview' ? 'Previewing…' : 'Preview'}
+        </button>
+        <button type="button" onClick={() => send(true)}
+                disabled={!file || !!busy || !report || report.summary.errors > 0}
+                className="text-sm bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
+          {busy === 'commit' ? 'Committing…' : 'Commit'}
+        </button>
+      </div>
+      {error && <p className="text-red-600 text-xs">{error}</p>}
+      {report && (
+        <div className="text-xs space-y-2">
+          <p className={report.committed ? 'text-green-700 font-medium' : 'text-slate-600'}>
+            {report.committed ? '✓ Committed' : 'Dry run'} —
+            update {report.summary.would_update},
+            unchanged {report.summary.unchanged},
+            not found {report.summary.not_found},
+            errors {report.summary.errors}
+          </p>
+          {report.updated.length > 0 && (
+            <details className="bg-emerald-50 border border-emerald-200 rounded p-2" open={!report.committed}>
+              <summary className="cursor-pointer">Updates ({report.updated.length})</summary>
+              <ul className="mt-1 ml-3 list-disc max-h-48 overflow-y-auto">
+                {report.updated.slice(0, 200).map((u, i) => (
+                  <li key={i}>
+                    L{u.line}: <b>{u.rider_id}</b> @ {u.company} — set{' '}
+                    {u.fields.map((f) => `${f}=${u.values[f]}`).join(', ')}
+                  </li>
+                ))}
+                {report.updated.length > 200 && (
+                  <li className="text-slate-500">…and {report.updated.length - 200} more</li>
+                )}
+              </ul>
+            </details>
+          )}
+          {report.not_found.length > 0 && (
+            <details className="bg-amber-50 border border-amber-200 rounded p-2">
+              <summary className="cursor-pointer">Not found ({report.not_found.length})</summary>
+              <ul className="mt-1 ml-3 list-disc">
+                {report.not_found.map((n, i) => (
+                  <li key={i}>L{n.line}: {n.key ?? '?'} @ {n.company}</li>
+                ))}
               </ul>
             </details>
           )}

@@ -30,7 +30,8 @@ const EVENT_COLOR: Record<string, string> = {
 export function PersonPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
+  const isCreator = user?.role === 'creator'
   const [person, setPerson] = useState<PersonOut | null>(null)
   const [txns, setTxns] = useState<TransactionOut[]>([])
   const [companies, setCompanies] = useState<CompanyOpt[]>([])
@@ -166,26 +167,27 @@ export function PersonPage() {
       <Section title={'Transactions (' + txns.length + ')'}>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
-            <tr><Th>ID</Th><Th>Cycle</Th><Th>Event</Th><Th>Rider / Co</Th><Th right>Amount</Th><Th right>Bal After</Th><Th>Days</Th><Th>Remarks</Th></tr>
+            <tr><Th>ID</Th><Th>Cycle</Th><Th>Event</Th><Th>Rider / Co</Th><Th right>Amount</Th><Th right>Bal After</Th><Th>Days</Th><Th>Remarks</Th>{isCreator && <Th>{''}</Th>}</tr>
           </thead>
           <tbody>
             {txns.map((t) => (
-              <tr key={t.id} className="border-t">
-                <Td>{t.id}</Td>
-                <Td className="text-xs">{t.cycle_start} → {t.cycle_end}</Td>
-                <Td><span className={'text-xs px-1.5 py-0.5 rounded ' + (EVENT_COLOR[t.event_type] ?? 'bg-slate-100')}>{t.event_type}</span></Td>
-                <Td className="text-xs">{(t.rider_id || '-') + ' / ' + (t.company || '-')}</Td>
-                <Td right>{fmt(t.amount)}</Td>
-                <Td right>{fmt(t.balance_after)}</Td>
-                <Td>{t.days ?? '-'}</Td>
-                <Td className="text-xs">{t.remarks ?? ''}</Td>
-              </tr>
+              <TxnRow key={t.id} t={t} isCreator={isCreator} onChanged={load} />
             ))}
           </tbody>
         </table>
         {txns.length === 0 && <p className="p-3 text-slate-500 text-sm">No transactions yet.</p>}
       </Section>
 
+      {isCreator && (
+        <DangerZone
+          kind="person"
+          label={person.display_name}
+          deletePath={`/api/creator/persons/${person.person_id}?cascade=true`}
+          onDeleted={() => { window.location.href = '/riders' }}
+        />
+      )}
+
+      {isAdmin && <RentPaymentForm personId={person.person_id} onPosted={load} />}
       {isAdmin && <AdjustmentForm personId={person.person_id} onPosted={load} />}
 
       {splitOpen && person && (
@@ -195,6 +197,106 @@ export function PersonPage() {
           onSplit={(newId) => { setSplitOpen(false); window.location.href = '/persons/' + newId }}
         />
       )}
+    </div>
+  )
+}
+
+function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: () => void }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(today)
+  const [periodStart, setPeriodStart] = useState('')
+  const [periodEnd, setPeriodEnd] = useState('')
+  const [remarks, setRemarks] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [tone, setTone] = useState<'ok' | 'err'>('ok')
+
+  // Both period dates are optional, but must come together if either is set.
+  const periodValid =
+    (!periodStart && !periodEnd) ||
+    (!!periodStart && !!periodEnd && periodStart <= periodEnd)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const amt = parseFloat(amount)
+      if (!amt || amt <= 0 || isNaN(amt)) throw new Error('Amount must be positive.')
+      if (!periodValid) throw new Error('Coverage period must have both dates with end ≥ start.')
+      const body: Record<string, unknown> = {
+        person_id: personId, amount: amt, paid_on: paidOn, remarks,
+      }
+      if (periodStart && periodEnd) {
+        body.period_start = periodStart
+        body.period_end = periodEnd
+      }
+      const r = await api.post<{
+        applied_to_arrears: number; applied_to_rent: number; new_balance: number
+        rent_charged_through_advanced_to: string | null
+      }>('/ledger/rent-payment', body)
+      setTone('ok')
+      setMsg(
+        `Recorded. ${r.applied_to_arrears > 0 ? `Arrears: ${fmt(r.applied_to_arrears)} · ` : ''}` +
+        `Rent: ${fmt(r.applied_to_rent)} · New balance: ${fmt(r.new_balance)}` +
+        (r.rent_charged_through_advanced_to
+          ? ` · Rent meter → ${r.rent_charged_through_advanced_to}`
+          : ''),
+      )
+      setAmount(''); setRemarks(''); setPeriodStart(''); setPeriodEnd(''); onPosted()
+    } catch (err) {
+      setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow p-4 mt-6 border-l-4 border-emerald-400">
+      <h3 className="font-semibold mb-1">Log Manual Rent Payment</h3>
+      <p className="text-xs text-slate-500 mb-3">
+        Use when a rider pays rent in cash / UPI outside the bank reconciliation.
+        Goes against outstanding EV arrears first, then current-cycle rent —
+        so it shows up correctly in the EV Rent Details tab.
+        Fill in the optional <b>coverage period</b> to mark which days the
+        payment covers; the EV's rent meter will advance to the end date so the
+        engine doesn't re-charge for those days.
+      </p>
+      <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
+        <label className="block text-sm">
+          <span className="block text-xs">Amount paid *</span>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)}
+                 type="number" step="0.01" min="0"
+                 className="border rounded px-3 py-1.5 w-32" />
+        </label>
+        <label className="block text-sm">
+          <span className="block text-xs">Paid on</span>
+          <input value={paidOn} onChange={(e) => setPaidOn(e.target.value)}
+                 type="date" className="border rounded px-3 py-1.5" />
+        </label>
+        <label className="block text-sm">
+          <span className="block text-xs">Covers from</span>
+          <input value={periodStart} onChange={(e) => setPeriodStart(e.target.value)}
+                 type="date" className="border rounded px-3 py-1.5" />
+        </label>
+        <label className="block text-sm">
+          <span className="block text-xs">Covers to</span>
+          <input value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)}
+                 type="date" className="border rounded px-3 py-1.5" />
+        </label>
+        <label className="block text-sm flex-1 min-w-[200px]">
+          <span className="block text-xs">Remarks (optional)</span>
+          <input value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                 placeholder="e.g. UPI to owner, ref# 12345"
+                 className="w-full border rounded px-3 py-1.5" />
+        </label>
+        <button type="submit" disabled={busy || !amount || !periodValid}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
+          {busy ? 'Posting…' : 'Record rent payment'}
+        </button>
+        {msg && (
+          <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-emerald-700')}>
+            {msg}
+          </span>
+        )}
+      </form>
     </div>
   )
 }
@@ -664,4 +766,145 @@ function SplitPersonModal({ person, onClose, onSplit }:
 function Cell({ v, on, placeholder }: { v: string; on: (v: string) => void; placeholder?: string }) {
   return <input value={v} onChange={(e) => on(e.target.value)} placeholder={placeholder}
                 className="border rounded px-1 py-0.5 text-xs w-full" />
+}
+
+function TxnRow({ t, isCreator, onChanged }:
+  { t: TransactionOut; isCreator: boolean; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [amount, setAmount] = useState(t.amount.toString())
+  const [remarks, setRemarks] = useState(t.remarks ?? '')
+  const [busy, setBusy] = useState(false)
+
+  async function save() {
+    setBusy(true)
+    try {
+      const r = await fetch('/api/creator/transactions/' + t.id, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? ''),
+        },
+        body: JSON.stringify({ amount: parseFloat(amount), remarks }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        alert(j.detail ?? r.statusText); return
+      }
+      setEditing(false); onChanged()
+    } finally { setBusy(false) }
+  }
+  async function voidIt() {
+    if (!confirm('Void transaction #' + t.id + '? Balance will be recomputed.')) return
+    setBusy(true)
+    try {
+      const r = await fetch('/api/creator/transactions/' + t.id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? '') },
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        alert(j.detail ?? r.statusText); return
+      }
+      onChanged()
+    } finally { setBusy(false) }
+  }
+
+  if (editing) {
+    return (
+      <tr className="border-t bg-amber-50">
+        <Td>{t.id}</Td>
+        <Td className="text-xs">{t.cycle_start} → {t.cycle_end}</Td>
+        <Td><span className={'text-xs px-1.5 py-0.5 rounded ' + (EVENT_COLOR[t.event_type] ?? 'bg-slate-100')}>{t.event_type}</span></Td>
+        <Td className="text-xs">{(t.rider_id || '-') + ' / ' + (t.company || '-')}</Td>
+        <Td right>
+          <input type="number" step="0.01" value={amount}
+                 onChange={(e) => setAmount(e.target.value)}
+                 className="border rounded px-1 py-0.5 text-xs w-24 text-right" />
+        </Td>
+        <Td right>{fmt(t.balance_after)}</Td>
+        <Td>{t.days ?? '-'}</Td>
+        <Td>
+          <input value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                 className="border rounded px-1 py-0.5 text-xs w-full" />
+        </Td>
+        <Td>
+          <div className="flex flex-col gap-1">
+            <button onClick={save} disabled={busy}
+                    className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">
+              Save
+            </button>
+            <button onClick={() => setEditing(false)} disabled={busy}
+                    className="text-xs text-slate-600 underline">Cancel</button>
+          </div>
+        </Td>
+      </tr>
+    )
+  }
+  return (
+    <tr className="border-t">
+      <Td>{t.id}</Td>
+      <Td className="text-xs">{t.cycle_start} → {t.cycle_end}</Td>
+      <Td><span className={'text-xs px-1.5 py-0.5 rounded ' + (EVENT_COLOR[t.event_type] ?? 'bg-slate-100')}>{t.event_type}</span></Td>
+      <Td className="text-xs">{(t.rider_id || '-') + ' / ' + (t.company || '-')}</Td>
+      <Td right>{fmt(t.amount)}</Td>
+      <Td right>{fmt(t.balance_after)}</Td>
+      <Td>{t.days ?? '-'}</Td>
+      <Td className="text-xs">{t.remarks ?? ''}</Td>
+      {isCreator && (
+        <Td>
+          <div className="flex gap-2">
+            <button onClick={() => setEditing(true)}
+                    className="text-xs text-purple-700 underline">edit</button>
+            <button onClick={voidIt}
+                    className="text-xs text-red-600 underline">void</button>
+          </div>
+        </Td>
+      )}
+    </tr>
+  )
+}
+
+export function DangerZone({ kind, label, deletePath, onDeleted }:
+  { kind: string; label: string; deletePath: string; onDeleted: () => void }) {
+  const [confirmText, setConfirmText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function go() {
+    if (confirmText !== 'DELETE') return
+    if (!confirm(`Hard delete this ${kind} (${label})? Irreversible.`)) return
+    setBusy(true); setErr(null)
+    try {
+      const r = await fetch(deletePath, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? '') },
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.detail ?? r.statusText)
+      }
+      onDeleted()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
+      <h3 className="font-semibold text-red-700 text-sm mb-2">Danger Zone — Creator only</h3>
+      <p className="text-xs text-red-800 mb-3">
+        Hard-delete this {kind}. Cascades through every ledger row and balance.
+        Type <code className="bg-white px-1 rounded">DELETE</code> below to confirm.
+      </p>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+               placeholder="type DELETE to enable"
+               className="border rounded px-2 py-1 text-sm" />
+        <button onClick={go} disabled={busy || confirmText !== 'DELETE'}
+                className="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
+          {busy ? '…' : `Hard delete ${kind}`}
+        </button>
+        {err && <span className="text-xs text-red-700">{err}</span>}
+      </div>
+    </div>
+  )
 }

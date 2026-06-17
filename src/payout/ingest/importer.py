@@ -126,9 +126,11 @@ def _import_roster(conn, xl, report):
             cur = conn.execute("INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) VALUES (?,?,?)", (name, co, rid))
             person_id = cur.lastrowid
             _init_person(conn, person_id); new_persons += 1
-        veh = _cell(row, c["veh"])
+        # Default any blank vehicle to BIKE so the inactive sheet and any
+        # downstream raw exports have a consistent fallback.
+        veh = (_cell(row, c["veh"]) or "BIKE").upper()
         conn.execute("INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
-            (rid, co, person_id, name, _cell(row, c["hub"]), veh.upper() if veh else None, _cell(row, c["acc"]), _cell(row, c["ifsc"])))
+            (rid, co, person_id, name, _cell(row, c["hub"]), veh, _cell(row, c["acc"]), _cell(row, c["ifsc"])))
         new_riders += 1
         if not _cell(row, c["acc"]) or not _cell(row, c["ifsc"]):
             report.warnings.append(f"Roster: {rid} ({name}) missing bank details")
