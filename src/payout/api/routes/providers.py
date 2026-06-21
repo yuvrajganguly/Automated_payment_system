@@ -29,6 +29,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.fleet_sync import IngestRow, ingest_master_rows
+from payout.domain.reconciliation import provider_rider_reconciliation
+from payout.exports import xlsx_response
 from payout.parsers.base import match_column
 
 router = APIRouter()
@@ -150,6 +152,66 @@ def provider_period(
             totals["no_models_registered"] = no_models
     return {"provider": prov, "from": df_iso, "to": dt_iso,
             "totals": totals, "per_ev": per_ev}
+
+
+# ── Per-rider reconciliation (the weekly boss report) ─────────────────
+
+
+def _validate_range(date_from: str, date_to: str) -> tuple[str, str]:
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(400, "date_from / date_to must be ISO dates.")
+    if d_to < d_from:
+        raise HTTPException(400, "date_to must be on or after date_from.")
+    return d_from.isoformat(), d_to.isoformat()
+
+
+@router.get("/{provider}/reconciliation")
+def provider_reconciliation(
+    provider: str,
+    date_from: str,
+    date_to: str,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Per-rider expected-vs-collected EV rent for the period.
+
+    Anchor the range to the provider's bill dates so 'expected' ties back to a
+    document. settled_via names the company payout(s) that actually collected a
+    rider's rent (the 'already collected elsewhere' signal).
+    """
+    df, dt = _validate_range(date_from, date_to)
+    with get_connection() as conn:
+        return provider_rider_reconciliation(conn, provider, df, dt)
+
+
+@router.get("/{provider}/reconciliation/export")
+def provider_reconciliation_export(
+    provider: str,
+    date_from: str,
+    date_to: str,
+    _: dict = Depends(get_current_user),
+):
+    """Styled .xlsx of the per-rider reconciliation — the sheet for the boss."""
+    df, dt = _validate_range(date_from, date_to)
+    with get_connection() as conn:
+        data = provider_rider_reconciliation(conn, provider, df, dt)
+    rows = [
+        (r["name"], r["ev_ids"], r["expected"], r["collected"], r["missed"],
+         r["recovered"], r["pending"], r["collection_pct"], r["settled_via"])
+        for r in data["rows"]
+    ]
+    return xlsx_response(
+        filename_stem=f"{data['provider']}_reconciliation_{df}_to_{dt}",
+        sheet_name="Reconciliation",
+        headers=["Rider", "EV(s)", "Expected", "Collected", "Missed (outstanding)",
+                 "Recovered", "Pending", "Collection %", "Settled via"],
+        rows=rows,
+        numeric_cols=(3, 4, 5, 6, 7, 8),
+        totals_cols=(3, 4, 5, 6, 7),
+        left_align_cols=(1, 2, 9),
+    )
 
 
 # ── Bill upload + parsing ─────────────────────────────────────────────────

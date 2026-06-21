@@ -122,6 +122,27 @@ interface Props {
   cadence: Cadence
 }
 
+interface ReconRow {
+  person_id: number
+  name: string
+  ev_ids: string
+  expected: number
+  collected: number
+  missed: number
+  recovered: number
+  pending: number
+  collection_pct: number
+  settled_via: string
+}
+interface ReconResp {
+  provider: string
+  from: string
+  to: string
+  rows: ReconRow[]
+  totals: { expected: number; collected: number; missed: number; recovered: number;
+            pending: number; collection_pct: number; rider_count: number }
+}
+
 export function ProviderPage({ provider, cadence }: Props) {
   const { user } = useAuth()
   const canUpload = user?.role === 'admin' || user?.role === 'creator'
@@ -148,6 +169,8 @@ export function ProviderPage({ provider, cadence }: Props) {
   const [from, setFrom] = useState(initialRange.from)
   const [to,   setTo]   = useState(initialRange.to)
   const [period, setPeriod] = useState<PeriodResp | null>(null)
+  const [recon, setRecon] = useState<ReconResp | null>(null)
+  const [loadingRecon, setLoadingRecon] = useState(true)
   const [bills,  setBills]  = useState<BillRow[]>([])
   const [loadingPeriod, setLoadingPeriod] = useState(true)
   const [loadingBills,  setLoadingBills]  = useState(true)
@@ -209,7 +232,35 @@ export function ProviderPage({ provider, cadence }: Props) {
     }
   }
 
+  async function loadRecon() {
+    setLoadingRecon(true)
+    try {
+      const data = await api.get<ReconResp>(
+        `/providers/${provider}/reconciliation?date_from=${from}&date_to=${to}`,
+      )
+      setRecon(data)
+    } catch {
+      setRecon(null)
+    } finally {
+      setLoadingRecon(false)
+    }
+  }
+
+  async function downloadRecon() {
+    const url = `/api/providers/${provider}/reconciliation/export?date_from=${from}&date_to=${to}`
+    const r = await fetch(url, { credentials: 'include' })
+    if (!r.ok) { setErr('Export failed'); return }
+    const blob = await r.blob()
+    const cd = r.headers.get('content-disposition') ?? ''
+    const m = cd.match(/filename="?([^"]+)"?/i)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = m ? m[1] : `${provider}_reconciliation.xlsx`
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href)
+  }
+
   useEffect(() => { loadPeriod() }, [from, to, provider])  // eslint-disable-line
+  useEffect(() => { loadRecon() }, [from, to, provider])   // eslint-disable-line
   useEffect(() => { loadBills() }, [provider])              // eslint-disable-line
 
   async function openBillDetail(id: number) {
@@ -424,6 +475,68 @@ export function ProviderPage({ provider, cadence }: Props) {
               {!loadingPeriod && (!period || period.per_ev.length === 0) && (
                 <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">
                   No {provider} EVs registered.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Per-rider reconciliation (boss report) */}
+      <section className="bg-white border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-slate-700">Rider reconciliation — expected vs collected</h2>
+            <p className="text-xs text-slate-500">
+              For the range above. &quot;Settled via&quot; is the company payout that actually collected the rent.
+            </p>
+          </div>
+          <button onClick={downloadRecon}
+                  className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded">
+            Export for boss (.xlsx)
+          </button>
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-2">Rider</th>
+                <th className="px-3 py-2">EV(s)</th>
+                <th className="px-3 py-2 text-right">Expected</th>
+                <th className="px-3 py-2 text-right">Collected</th>
+                <th className="px-3 py-2 text-right">Missed</th>
+                <th className="px-3 py-2 text-right">Pending</th>
+                <th className="px-3 py-2 text-right">Collected %</th>
+                <th className="px-3 py-2">Settled via</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(recon?.rows || []).map(r => (
+                <tr key={r.person_id} className="border-t hover:bg-slate-50">
+                  <td className="px-3 py-2">{r.name}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{r.ev_ids}</td>
+                  <td className="px-3 py-2 text-right">₹{fmt(r.expected)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-700">₹{fmt(r.collected)}</td>
+                  <td className="px-3 py-2 text-right text-red-600">₹{fmt(r.missed)}</td>
+                  <td className="px-3 py-2 text-right text-amber-600">₹{fmt(r.pending)}</td>
+                  <td className="px-3 py-2 text-right">{r.collection_pct}%</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{r.settled_via || '—'}</td>
+                </tr>
+              ))}
+              {recon && recon.rows.length > 0 && (
+                <tr className="border-t bg-slate-50 font-semibold">
+                  <td className="px-3 py-2" colSpan={2}>TOTAL ({recon.totals.rider_count})</td>
+                  <td className="px-3 py-2 text-right">₹{fmt(recon.totals.expected)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-700">₹{fmt(recon.totals.collected)}</td>
+                  <td className="px-3 py-2 text-right text-red-600">₹{fmt(recon.totals.missed)}</td>
+                  <td className="px-3 py-2 text-right text-amber-600">₹{fmt(recon.totals.pending)}</td>
+                  <td className="px-3 py-2 text-right">{recon.totals.collection_pct}%</td>
+                  <td className="px-3 py-2"></td>
+                </tr>
+              )}
+              {!loadingRecon && (!recon || recon.rows.length === 0) && (
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">
+                  No rider rent activity in this range.
                 </td></tr>
               )}
             </tbody>
