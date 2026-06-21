@@ -75,6 +75,23 @@ async def run_cycle(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="cycle_end must be on or after cycle_start",
         )
+    # Guard: a cycle whose end is meaningfully in the future would write
+    # 'billed' day-rows for days that haven't happened yet. If a return or
+    # maintenance fires between now and cycle_end those rows go stale. Allow
+    # a 3-day grace so timezone / "the file just landed at 11:59pm" cases
+    # work, but refuse anything farther out.
+    from datetime import date as _date_cls, timedelta as _td
+    today = _date_cls.today()
+    if cycle_end > today + _td(days=3):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"cycle_end ({cycle_end}) is more than 3 days in the future. "
+                "Future-dated cycles write daily-ledger rows for days that "
+                "haven't happened — returns or maintenance after today would "
+                "leave the ledger stale. Wait until the cycle's actually closed."
+            ),
+        )
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file upload")

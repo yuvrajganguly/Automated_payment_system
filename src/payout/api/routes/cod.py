@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
+from payout.exports import xlsx_response
 
 router = APIRouter()
 
@@ -54,6 +55,28 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
             """
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/export")
+def export_cod(_: dict = Depends(get_current_user)):
+    """COD page as a styled .xlsx download."""
+    data = list_cod(_)
+    headers = ["Person ID", "Name", "Companies", "Hub", "Pending Total",
+               "Entries", "Earliest Cycle", "Latest Cycle",
+               "Recent Payout", "Recent Cycle"]
+    rows = [
+        (r["person_id"], r["display_name"], r["companies"] or "",
+         r["hubs"] or "", r["total_pending"], r["entry_count"],
+         r["earliest_cycle_start"] or "", r["latest_cycle_end"] or "",
+         r["recent_payout"] or 0, r["recent_payout_cycle"] or "")
+        for r in data
+    ]
+    return xlsx_response(
+        filename_stem="cod_pending", sheet_name="COD",
+        headers=headers, rows=rows,
+        numeric_cols=(5, 9), totals_cols=(5,),
+        left_align_cols=(2, 3, 4),
+    )
 
 
 @router.get("/{person_id}/entries")

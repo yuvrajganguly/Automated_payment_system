@@ -157,18 +157,30 @@ def _import_ev(conn, xl, report):
     if missing:
         report.errors.append(f"EV Register missing required column(s) {missing}. Found: {list(df.columns)}")
         return
-    models = {(r["provider"].lower(), r["model_name"].lower()): r["model_id"] for r in conn.execute("SELECT provider, model_name, model_id FROM ev_models")}
+    # Lenient resolver: auto-create unknown (provider, model) entries instead
+    # of silently rejecting them, so a fresh master roll-out (e.g. Raft's
+    # "WARRIOR 2.0" / "WARRIOR 2.O" variants that aren't seeded) registers
+    # the fleet on first import. Rate is copied from a sibling model under
+    # the same provider; if nothing to copy from, the resolver flags it.
+    from payout.domain.fleet_sync import resolve_or_create_model
     units = assigns = conflicts = bad_models = unresolved = 0
+    models_created: list[str] = []
+    rate_review: list[str] = []
     for _, row in df.iterrows():
         ev = _cell(row, c["ev"]); prov = _cell(row, c["prov"]); model = _cell(row, c["model"])
         if not ev or not prov or not model:
             continue
-        key = (prov.lower(), model.lower())
-        if key not in models:
-            report.warnings.append(f"EV {ev}: '{prov}/{model}' not on the rate card - skipped")
+        try:
+            res = resolve_or_create_model(conn, prov, model)
+        except Exception as exc:
+            report.warnings.append(f"EV {ev}: couldn't resolve '{prov}/{model}' ({exc}) - skipped")
             bad_models += 1; continue
+        if res.created:
+            models_created.append(f"{prov}/{model}")
+            if res.flagged_rate:
+                rate_review.append(f"{prov}/{model}")
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (ev,)).fetchone():
-            conn.execute("INSERT INTO ev_units (ev_id, model_id, status) VALUES (?,?, 'spare')", (ev, models[key])); units += 1
+            conn.execute("INSERT INTO ev_units (ev_id, model_id, status) VALUES (?,?, 'spare')", (ev, res.model_id)); units += 1
         name = _cell(row, c["name"]); co = _cell(row, c["co"])
         if not name:
             continue
@@ -184,7 +196,17 @@ def _import_ev(conn, xl, report):
         hod = _parse_date(_cell(row, c["date"]))
         conn.execute("INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)", (person_id, ev, hod.isoformat() if hod else None))
         conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev,)); assigns += 1
-    report.stats["ev"] = {"units_added": units, "assignments": assigns, "conflicts": conflicts, "bad_models": bad_models, "unresolved": unresolved}
+    report.stats["ev"] = {
+        "units_added": units, "assignments": assigns, "conflicts": conflicts,
+        "bad_models": bad_models, "unresolved": unresolved,
+        "models_created": sorted(set(models_created)),
+        "rate_review_needed": sorted(set(rate_review)),
+    }
+    if rate_review:
+        report.warnings.append(
+            "Auto-created models with placeholder rate (please set on rate card): "
+            + ", ".join(sorted(set(rate_review)))
+        )
 
 
 def _import_balances(conn, xl, report, created_by):

@@ -48,11 +48,11 @@ def apply_settlement(
     collected outside the payout flow.
 
     Order of operations (highest priority first):
-        rent → general dues (prior carryforward) → EV arrears → release.
+        rent → EV arrears → general dues → release.
 
-    Rent comes first because EV rent is a per-cycle obligation. Prior dues
-    (the rider's carryforward from past cycles) get recovered before EV
-    arrears so the rider's general balance closes out fastest.
+    Rent comes first because EV rent is a per-cycle obligation. EV arrears are
+    recovered ahead of general dues so EV back-rent never loses out (per
+    DESIGN.md §6.4); whatever is left clears the rider's general carryforward.
     """
     payout = max(0.0, payout)
     cod_due = max(0.0, cod_due)
@@ -63,9 +63,9 @@ def apply_settlement(
     rent_paid = min(pool, rent); pool -= rent_paid
     rent_short = rent - rent_paid
 
-    dues_cleared = min(pool, general_dues); pool -= dues_cleared
-
     arrears_recovered = min(pool, arrears_outstanding); pool -= arrears_recovered
+
+    dues_cleared = min(pool, general_dues); pool -= dues_cleared
 
     released = pool
     new_general_dues = (general_dues - dues_cleared) + rent_short

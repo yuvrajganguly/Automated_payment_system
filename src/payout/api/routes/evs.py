@@ -14,6 +14,7 @@ from payout.api.schemas import (
 )
 from payout.db import get_connection
 from payout.domain.adjustments import log_maintenance
+from payout.exports import xlsx_response
 
 router = APIRouter()
 
@@ -27,6 +28,40 @@ def list_ev_models(_: dict = Depends(get_current_user)) -> list[EvModelOut]:
     return [EvModelOut(model_id=r["model_id"], provider=r["provider"],
                        model_name=r["model_name"], weekly_rate=float(r["weekly_rate"]))
             for r in rows]
+
+
+@router.get("/export")
+def export_ev_units(status: Optional[str] = None,
+                    _: dict = Depends(get_current_user)):
+    """EV units as a styled .xlsx download."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT u.ev_id, u.status, u.notes, m.provider, m.model_name, m.weekly_rate, "
+            "       a.handover_date, a.rent_charged_through, a.person_id, "
+            "       p.display_name AS current_rider_name, "
+            "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id "
+            "FROM ev_units u "
+            "JOIN ev_models m ON m.model_id = u.model_id "
+            "LEFT JOIN ev_assignments a ON a.ev_id = u.ev_id AND a.returned_date IS NULL "
+            "LEFT JOIN person_registry p ON p.person_id = a.person_id "
+            "ORDER BY u.ev_id"
+        ).fetchall()
+    headers = ["EV ID", "Provider", "Model", "Weekly Rate", "Status",
+               "Current Rider", "Person ID", "Rider ID", "Handover Date",
+               "Rent Through", "Notes"]
+    out = [
+        (r["ev_id"], r["provider"], r["model_name"], float(r["weekly_rate"]),
+         r["status"], r["current_rider_name"] or "", r["person_id"] or "",
+         r["rider_id"] or "", r["handover_date"] or "",
+         r["rent_charged_through"] or "", r["notes"] or "")
+        for r in rows if not status or r["status"] == status
+    ]
+    return xlsx_response(
+        filename_stem="ev_units", sheet_name="EVS",
+        headers=headers, rows=out,
+        numeric_cols=(4,), totals_cols=(4,),
+        left_align_cols=(6, 11),
+    )
 
 
 @router.get("", response_model=list[EvUnitOut])
@@ -98,6 +133,18 @@ def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
         conn.execute("INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
                      (pid, body.ev_id, hod))
         conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (body.ev_id,))
+        # If there's a stale open maintenance window for this EV, close it
+        # to handover_date - 1. The new rider clearly has the EV from
+        # handover_date onward, so any "still in maintenance" record is
+        # wrong and would silently zero their rent.
+        if hod:
+            conn.execute(
+                "UPDATE ev_maintenance "
+                "SET to_date = date(?, '-1 day') "
+                "WHERE ev_id=? AND to_date IS NULL "
+                "  AND from_date <= date(?, '-1 day')",
+                (hod, body.ev_id, hod),
+            )
         conn.commit()
     return {"assigned": True, "person_id": pid, "ev_id": body.ev_id, "handover_date": hod}
 
@@ -144,6 +191,18 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
         conn.execute("UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
                      (today, a["assignment_id"]))
         conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (a["ev_id"],))
+        # Auto-close any open maintenance window on this EV. An EV being
+        # returned to the depot means it isn't in maintenance anymore — and
+        # if it really is, the operator can reopen a fresh window. Leaving
+        # a stale to_date=NULL row around would zero the next rider's rent
+        # entirely (resolve_rent treats open maintenance as blocking through
+        # cycle_end).
+        conn.execute(
+            "UPDATE ev_maintenance SET to_date=? "
+            "WHERE ev_id=? AND to_date IS NULL "
+            "  AND from_date <= ?",
+            (today, a["ev_id"], today),
+        )
         conn.commit()
     return {"returned": True, "ev_id": a["ev_id"], "person_id": a["person_id"],
             "returned_date": today}

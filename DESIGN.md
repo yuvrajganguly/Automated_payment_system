@@ -129,9 +129,11 @@ Resolve: person → open EV assignment → `ev_unit` → `ev_model` → `weekly_
 
 Chargeable days this cycle:
 - No open assignment / no handover date → **full cycle** (current riders today).
-- `handover_date <= cycle_start` → full cycle.
-- `cycle_start < handover_date <= cycle_end` → `chargeable_days = (cycle_end − handover_date)`
+- `handover_date < cycle_start` → full cycle.
+- `cycle_start <= handover_date <= cycle_end` → `chargeable_days = (cycle_end − handover_date)`
   — **the handover day itself is not charged; the meter starts the next day.**
+  This includes handover *on* `cycle_start` (charges 6 days of a 7-day cycle),
+  so the engine and the daily ledger agree to the day.
 - `handover_date > cycle_end` → 0.
 
 Rent = `weekly_rate` if full standard (7-day) cycle, else `daily_rate × chargeable_days`.
@@ -310,8 +312,9 @@ The cycle overview/summary is deferred to the dashboard (Step 7), not the Excel.
 
 - **Zepto** payout layout — pending a sample file.
 - **Aadhaar (kyc_no)** — to be collected and backfilled later.
-- **Handover off-by-one** — confirm "charge from the day *after* handover"
-  (current assumption) vs. charging on the handover day itself.
+- ~~**Handover off-by-one**~~ — **resolved**: charge from the day *after*
+  handover, including when handover lands on `cycle_start` (handover day free).
+  Engine and daily ledger aligned; see §6.1.
 - **Myntra COD** — confirm `COD-Pending` is the net figure (not netting
   `Cod-Adjusted`).
 - **COD treatment** — currently a hold flag, not an auto-deduction.

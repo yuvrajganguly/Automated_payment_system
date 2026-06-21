@@ -18,6 +18,8 @@ import { EvRentPage } from './pages/EvRentPage'
 import { InactivePage } from './pages/InactivePage'
 import { TransactionsPage } from './pages/TransactionsPage'
 import { SystemPage } from './pages/SystemPage'
+import { RaftPage } from './pages/RaftPage'
+import { BlivePage } from './pages/BlivePage'
 
 export default function App() {
   return (
@@ -41,6 +43,8 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/raft"  element={<RaftPage />} />
+          <Route path="/blive" element={<BlivePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

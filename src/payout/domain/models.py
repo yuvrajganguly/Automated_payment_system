@@ -20,6 +20,11 @@ class RiderRecord:
     # Optional delivered-orders count straight from the company file. Kept as a
     # float so int / float / "12.0" all flow through uniformly.
     orders: float | None = None
+    # Name and hub pulled from the file when those columns are present. Used by
+    # the engine to populate `unknown_riders` so the onboarding modal can show
+    # the operator who each unknown rider_id is (rather than just a bare ID).
+    name: str | None = None
+    hub: str | None = None
 
 
 @dataclass

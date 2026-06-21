@@ -172,6 +172,11 @@ def split_person(person_id: int, body: SplitPersonIn,
             "INSERT OR IGNORE INTO status_tracking (person_id, status) "
             "VALUES (?, 'active')", (new_pid,))
 
+        # NOTE: pending_xc_rent intentionally stays with the source person.
+        # The bucket represents a *specific* cycle's cross-company shortfall
+        # tied to a specific company's run — it doesn't have a natural meaning
+        # for a freshly-carved-off split, so the source keeps it. If you want
+        # to clear it before splitting, post a manual adjustment first.
         # Optional money transfers.
         bf = max(0.0, min(1.0, body.transfer_balance_fraction or 0.0))
         af = max(0.0, min(1.0, body.transfer_arrears_fraction or 0.0))
@@ -289,14 +294,48 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
         # cod_holds: move every line item.
         conn.execute("UPDATE cod_holds SET person_id=? WHERE person_id=?",
                      (primary, secondary))
-        # balances: sum secondary's into primary's.
-        bal = conn.execute("SELECT current_balance FROM balances WHERE person_id=?", (secondary,)).fetchone()
-        if bal and bal["current_balance"]:
+        # balances: sum secondary's into primary's. This includes the
+        # pending_xc_rent bucket — if both halves had an unresolved
+        # cross-company rent shortfall, we sum them so neither is lost.
+        # Primary's xc_origin_company / xc_origin_cycle_end are preserved;
+        # secondary's origin is dropped because we keep one of them and
+        # primary's is the more authoritative target for any subsequent
+        # company that processes the merged person.
+        bal = conn.execute(
+            "SELECT current_balance, pending_xc_rent, xc_origin_company, "
+            "       xc_origin_cycle_end "
+            "FROM balances WHERE person_id=?", (secondary,),
+        ).fetchone()
+        if bal and (bal["current_balance"] or bal["pending_xc_rent"]):
             conn.execute(
-                "INSERT OR IGNORE INTO balances (person_id, current_balance) VALUES (?, 0)",
-                (primary,))
-            conn.execute("UPDATE balances SET current_balance = current_balance + ? WHERE person_id=?",
-                         (bal["current_balance"], primary))
+                "INSERT OR IGNORE INTO balances (person_id, current_balance) "
+                "VALUES (?, 0)", (primary,))
+            # Read primary's current xc state before summing.
+            prim_xc = conn.execute(
+                "SELECT pending_xc_rent, xc_origin_company, xc_origin_cycle_end "
+                "FROM balances WHERE person_id=?", (primary,),
+            ).fetchone()
+            new_xc_amt = float(prim_xc["pending_xc_rent"] or 0) + float(bal["pending_xc_rent"] or 0)
+            new_xc_origin = (
+                prim_xc["xc_origin_company"]
+                or bal["xc_origin_company"]
+            )
+            new_xc_cycle_end = (
+                prim_xc["xc_origin_cycle_end"]
+                or bal["xc_origin_cycle_end"]
+            )
+            conn.execute(
+                "UPDATE balances SET "
+                "  current_balance = current_balance + ?, "
+                "  pending_xc_rent = ?, "
+                "  xc_origin_company = ?, "
+                "  xc_origin_cycle_end = ? "
+                "WHERE person_id=?",
+                (bal["current_balance"] or 0, new_xc_amt,
+                 new_xc_origin if new_xc_amt > 0 else None,
+                 new_xc_cycle_end if new_xc_amt > 0 else None,
+                 primary),
+            )
         # ev_arrears: sum the EV-rent + COD buckets.
         arr = conn.execute(
             "SELECT total_missed, total_recovered, outstanding, "
@@ -322,6 +361,15 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
         # transactions: move every event so the ledger follows the person.
         conn.execute("UPDATE transactions SET person_id=? WHERE person_id=?",
                      (primary, secondary))
+        # ev_daily_ledger: re-attribute the day rows. Without this, recovery
+        # walks for the merged person would miss the secondary's pre-merge
+        # missed/billed days and the Provider Weekly report would silently
+        # under-count their history.
+        conn.execute(
+            "UPDATE ev_daily_ledger SET assigned_person_id=? "
+            "WHERE assigned_person_id=?",
+            (primary, secondary),
+        )
         # Drop secondary's now-orphaned rows + the person_registry row last.
         for t in ("balances", "ev_arrears", "status_tracking", "person_registry"):
             conn.execute(f"DELETE FROM {t} WHERE person_id=?", (secondary,))

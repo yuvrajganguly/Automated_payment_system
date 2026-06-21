@@ -268,10 +268,8 @@ function MaintenanceCloseCard({ openRow, onClosed }:
       if (date) body.to_date = date
       const r = await fetch('/api/evs/maintenance/' + openRow.id, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? ''),
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       })
       if (!r.ok) {

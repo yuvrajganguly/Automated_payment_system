@@ -62,6 +62,7 @@ export interface CycleResult {
   inactive_rows: InactiveRow[]
   warnings: string[]
   unknown_ids: string[]
+  unknown_riders: { rider_id: string; name: string; hub: string; payout: number }[]
   committed: boolean
   totals: Record<string, number>
 }

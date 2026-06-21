@@ -15,5 +15,7 @@ services:
         value: /tmp/payout.db
       - key: PAYOUT_CORS_ORIGINS
         value: "*"
+      - key: PAYOUT_COOKIE_SECURE
+        value: "true"
       - key: PYTHONPATH
         value: src

@@ -9,7 +9,7 @@ description = "Automated rider payout, EV-rent, dues and COD-hold management for
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-authors = [{ name = "Nilesh Singh" }]
+authors = [{ name = "Yuvraj Ganguly" }]
 keywords = ["fintech", "payments", "automation", "streamlit", "sqlite"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -68,4 +68,5 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q --cov=payout --cov-report=term-missin
+addopts = "-ra -q --cov=payout --cov-report=term-missing"
+pythonpath = ["src"]

@@ -26,6 +26,7 @@ from payout.api.routes import (
     ledger as ledger_routes,
     payments as payments_routes,
     persons as persons_routes,
+    providers as providers_routes,
     riders as riders_routes,
     users as users_routes,
 )
@@ -101,6 +102,7 @@ app.include_router(riders_routes.router,  prefix="/api/riders",    tags=["riders
 app.include_router(persons_routes.router, prefix="/api/persons",   tags=["persons"])
 app.include_router(evs_routes.router,     prefix="/api/evs",       tags=["evs"])
 app.include_router(ledger_routes.router,  prefix="/api/ledger",    tags=["ledger"])
+app.include_router(providers_routes.router, prefix="/api/providers", tags=["providers"])
 app.include_router(arrears_routes.router, prefix="/api/arrears",   tags=["arrears"])
 app.include_router(inactive_routes.router, prefix="/api/inactive", tags=["inactive"])
 app.include_router(cod_routes.router,     prefix="/api/cod",       tags=["cod"])

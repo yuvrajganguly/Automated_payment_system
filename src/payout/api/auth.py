@@ -5,15 +5,49 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
-from payout.api.config import ACCESS_TOKEN_EXPIRES, JWT_ALGORITHM, JWT_SECRET
+from payout.api.config import (
+    ACCESS_TOKEN_EXPIRES,
+    AUTH_COOKIE_NAME,
+    COOKIE_MAX_AGE,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    JWT_ALGORITHM,
+    JWT_SECRET,
+)
 from payout.auth import verify_password
 from payout.db import get_connection
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# auto_error=False: a missing Authorization header is not an error on its own —
+# the token may instead arrive in the httpOnly auth cookie (see get_current_user).
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    """Attach the JWT as an httpOnly cookie on ``response``."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        path="/",
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    """Remove the auth cookie (logout). Flags must match set_auth_cookie."""
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        path="/",
+    )
 
 
 def create_access_token(subject: str, role: str, expires: Optional[timedelta] = None) -> str:
@@ -51,7 +85,19 @@ def authenticate(email: str, password: str) -> Optional[dict]:
     return None
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+def get_current_user(
+    request: Request,
+    header_token: Optional[str] = Depends(oauth2_scheme),
+) -> dict:
+    """Resolve the caller from the JWT, taken from the Authorization header
+    (API/script clients) or the httpOnly auth cookie (browser)."""
+    token = header_token or request.cookies.get(AUTH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     payload = decode_token(token)
     if not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
@@ -61,4 +107,15 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """Allow admin AND creator (creator is a strict super-set of admin)."""
     if user.get("role") not in ("admin", "creator"):
-        raise HTTPExce
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+def require_creator(user: dict = Depends(get_current_user)) -> dict:
+    """Only the creator (super-admin) can change roles or remove other users."""
+    if user.get("role") != "creator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Creator (super-admin) access required",
+        )
+    return user

@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 
 const fmt = (n: number | null | undefined) =>
@@ -39,7 +40,7 @@ interface CodEntry {
 
 export function CodPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [rows, setRows] = useState<CodRow[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(true)
@@ -68,7 +69,10 @@ export function CodPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">COD Pending</h1>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h1 className="text-2xl font-bold">COD Pending</h1>
+        <ExportButton path="/cod/export" name="cod_pending.xlsx" />
+      </div>
       <p className="text-slate-500 text-sm mb-6">
         COD amounts that companies couldn't clear from a payout. These do not
         deduct from the rider's balance; mark each as cleared once you've

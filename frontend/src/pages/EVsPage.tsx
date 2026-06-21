@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { EvModelOut, EvUnitOut, MaintenanceOut } from '../api/types'
 
@@ -11,7 +12,7 @@ const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 
 
 export function EVsPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [models, setModels] = useState<EvModelOut[]>([])
   const [units, setUnits] = useState<EvUnitOut[]>([])
   const [maint, setMaint] = useState<MaintenanceOut[]>([])
@@ -41,7 +42,10 @@ export function EVsPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">EVs</h1>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h1 className="text-2xl font-bold">EVs</h1>
+        <ExportButton path="/evs/export" name="ev_units.xlsx" />
+      </div>
       <p className="text-slate-500 text-sm mb-6">Rate card, current units, assignments, and maintenance history.</p>
       {busy && <Spinner />}
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}

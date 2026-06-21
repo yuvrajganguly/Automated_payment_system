@@ -12,6 +12,10 @@ from payout.domain.arrears import (
     record_cod_missed, record_cod_recovery,
     record_missed_rent, record_recovery,
 )
+from payout.domain.ev_daily import (
+    attribute_recovery as _ev_attribute_recovery,
+    materialize_cycle_for_person as _ev_materialize_cycle,
+)
 from payout.domain.holds import compute_holds, persist_holds
 from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from payout.parsers import parse_file
@@ -86,6 +90,8 @@ class CycleResult:
     inactive_rows: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     unknown_ids: list = field(default_factory=list)
+    # Each entry: {rider_id, name, hub, payout} — for the onboarding modal.
+    unknown_riders: list = field(default_factory=list)
     committed: bool = False
     totals: dict = field(default_factory=dict)
 
@@ -146,26 +152,32 @@ def _set_balance(conn, pid, new_balance, cycle_end):
 
 
 def _get_pending_xc(conn, pid):
-    """Return (amount, origin_company) of the pending cross-company rent
-    bucket. (0.0, None) if there's nothing pending."""
+    """Return (amount, origin_company, origin_cycle_end) of the pending cross-
+    company rent bucket. (0.0, None, None) if there's nothing pending."""
     r = conn.execute(
-        "SELECT pending_xc_rent, xc_origin_company FROM balances WHERE person_id=?",
-        (pid,),
+        "SELECT pending_xc_rent, xc_origin_company, xc_origin_cycle_end "
+        "FROM balances WHERE person_id=?", (pid,),
     ).fetchone()
     if not r:
-        return (0.0, None)
-    return (float(r["pending_xc_rent"] or 0), r["xc_origin_company"])
+        return (0.0, None, None)
+    return (
+        float(r["pending_xc_rent"] or 0),
+        r["xc_origin_company"],
+        r["xc_origin_cycle_end"],
+    )
 
 
-def _set_pending_xc(conn, pid, amount, origin_company):
+def _set_pending_xc(conn, pid, amount, origin_company, origin_cycle_end=None):
     conn.execute(
         "INSERT INTO balances (person_id, current_balance, pending_xc_rent, "
-        "xc_origin_company, last_updated) VALUES (?, 0, ?, ?, date('now')) "
+        "xc_origin_company, xc_origin_cycle_end, last_updated) "
+        "VALUES (?, 0, ?, ?, ?, date('now')) "
         "ON CONFLICT(person_id) DO UPDATE SET "
         "  pending_xc_rent=excluded.pending_xc_rent, "
         "  xc_origin_company=excluded.xc_origin_company, "
+        "  xc_origin_cycle_end=excluded.xc_origin_cycle_end, "
         "  last_updated=excluded.last_updated",
-        (pid, amount, origin_company),
+        (pid, amount, origin_company, origin_cycle_end),
     )
 
 
@@ -227,6 +239,12 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                 present_persons[rec.rider_id] = p
             else:
                 result.unknown_ids.append(rec.rider_id)
+                result.unknown_riders.append({
+                    "rider_id": rec.rider_id,
+                    "name": rec.name or "",
+                    "hub":  rec.hub  or "",
+                    "payout": rec.payout,
+                })
                 result.warnings.append(f"Unknown rider_id '{rec.rider_id}' - skipped")
         present_rider_ids = set(present_persons)
         present_person_ids = {p["person_id"] for p in present_persons.values()}
@@ -290,6 +308,16 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                                     rent_override=ov.rent_override)
                 rent, rent_days = rinfo.rent, rinfo.days
                 ev_id, model = rinfo.ev_id, rinfo.model
+                # Soft cap: a catch-up window longer than 21 days almost
+                # always means a previous cycle was skipped or someone joined
+                # late and missed updates. Flag for manual review but bill it.
+                if rent_days > 21:
+                    result.warnings.append(
+                        f"Catch-up window for person_id={pid} "
+                        f"({rec.rider_id}@{company}) is {rent_days} days "
+                        f"(~{rent:.0f}). Likely a missed prior cycle or "
+                        f"late-onboarded rider — review before commit."
+                    )
             else:
                 rinfo = None; rent, rent_days = 0.0, 0
                 ev_id, model = _ev_for(conn, pid)
@@ -299,7 +327,31 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             cod_amt_for_settle = holds.per_rider.get(rec.rider_id, 0.0)
             cod_carry = get_cod_arrears(conn, pid)[2]
             # Cross-company pending rent gets folded into THIS cycle's rent.
-            pending_xc_before, pending_xc_origin = _get_pending_xc(conn, pid)
+            pending_xc_before, pending_xc_origin, pending_xc_cycle_end = \
+                _get_pending_xc(conn, pid)
+            # NEW-CYCLE COLLAPSE: if we're charging fresh rent for a strictly
+            # later cycle than the pending bucket's origin, the prior cycle is
+            # done with — whatever didn't get recovered cross-company over the
+            # past week collapses into general carryforward dues right now,
+            # then we proceed with this cycle's rent untainted.
+            if (charge_here and rent > 0 and pending_xc_before > 0
+                    and pending_xc_cycle_end
+                    and pending_xc_cycle_end < _iso(cycle_start)):
+                new_bal_after_collapse = prev_bal - pending_xc_before
+                _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
+                     cycle_start=cycle_start, cycle_end=cycle_end,
+                     event_type="XC_RENT_TO_CARRY",
+                     amount=-pending_xc_before, balance_after=new_bal_after_collapse,
+                     remarks=(f"Prior cycle's pending rent ({pending_xc_origin}, "
+                              f"end {pending_xc_cycle_end}) collapsed to dues at "
+                              f"start of new cycle"),
+                     created_by=created_by)
+                _set_balance(conn, pid, new_bal_after_collapse, cycle_end)
+                _set_pending_xc(conn, pid, 0.0, None, None)
+                prev_bal = new_bal_after_collapse
+                pending_xc_before = 0.0
+                pending_xc_origin = None
+                pending_xc_cycle_end = None
             effective_rent = rent + pending_xc_before
             s = apply_settlement(rec.payout, effective_rent, prev_bal, arr_out,
                                  cod_due=cod_amt_for_settle,
@@ -317,10 +369,39 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                 # or RENT_RECOVERED so the EV Rent Details dashboard can show
                 # both as "collected" without double-counting expected.
                 rent_collected_this_cycle = min(s.rent_paid, rent)
-                _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
-                     cycle_start=cycle_start, cycle_end=cycle_end, event_type="RENT",
-                     amount=-rent, balance_after=prev_bal + rec.payout - rent,
-                     days=rent_days, created_by=created_by)
+                # Multi-leg breakdown in the remarks: useful when an EV was
+                # swapped mid-cycle so the audit trail shows which EV's days
+                # contributed. Empty remarks (default "") when there's only
+                # one leg.
+                rent_remarks = ""
+                legs = getattr(rinfo, "legs", []) or []
+                billed_legs = [
+                    L for L in legs if (L.days or 0) > 0 or (L.rent or 0) > 0
+                ]
+                if len(billed_legs) > 1:
+                    rent_remarks = " + ".join(
+                        f"{L.ev_id} {L.days}d ({L.rent:.2f})"
+                        for L in billed_legs
+                    )
+                rent_txn_id = conn.execute(
+                    "INSERT INTO transactions (person_id, rider_id, company, "
+                    "cycle_start, cycle_end, event_type, amount, balance_after, "
+                    "days, remarks, created_by) "
+                    "VALUES (?,?,?,?,?,'RENT',?,?,?,?,?)",
+                    (pid, rec.rider_id, company,
+                     _iso(cycle_start), _iso(cycle_end),
+                     -rent, prev_bal + rec.payout - rent,
+                     rent_days, rent_remarks, created_by),
+                ).lastrowid
+                # Day-level ledger: write 'billed' rows for every day each leg
+                # contributed. Lets the weekly Raft reconciliation derive
+                # missed-vs-collected for any calendar window.
+                _ev_materialize_cycle(
+                    conn, person_id=pid,
+                    cycle_start=cycle_start, cycle_end=cycle_end,
+                    legs=billed_legs, billing_event_id=rent_txn_id,
+                    billing_status="billed",
+                )
                 if rent_collected_this_cycle > 0:
                     _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
                          cycle_start=cycle_start, cycle_end=cycle_end,
@@ -334,6 +415,22 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             if s.arrears_recovered > 0:
                 record_recovery(conn, pid, s.arrears_recovered, cycle_start, cycle_end,
                                 rider_id=rec.rider_id, company=company, created_by=created_by)
+                # Heal the oldest 'missed' day-rows for this person up to the
+                # recovered amount, so the weekly Raft report knows which past
+                # week's miss has now been clawed back.
+                recovery_id = conn.execute(
+                    "SELECT id FROM transactions WHERE person_id=? "
+                    "AND event_type='RENT_RECOVERED' "
+                    "AND cycle_start=? AND cycle_end=? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (pid, _iso(cycle_start), _iso(cycle_end))
+                ).fetchone()
+                if recovery_id:
+                    _ev_attribute_recovery(
+                        conn, person_id=pid,
+                        recovery_event_id=recovery_id["id"],
+                        amount=s.arrears_recovered,
+                    )
             # COD is intentionally NOT recovered or missed via the payout — it's
             # just a HOLD marker. compute_holds already populated cod_holds for
             # this cycle, and is_hold (computed below) flags the rider in
@@ -354,16 +451,17 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                      amount=-s.released, balance_after=s.new_balance,
                      remarks="Net payout released to rider", created_by=created_by)
             # ── Cross-company rent re-routing ─────────────────────────────────
-            # For multi-company riders, a first-attempt rent shortfall is moved
-            # OUT of general dues into a separate "pending_xc_rent" bucket so
-            # their next cycle at the other company gets the first crack at it.
-            # A second-attempt failure (or absence at the other company, handled
-            # in the absence pass) lets the shortfall fall through to ordinary
-            # carryforward.
+            # Behavior:
+            #   * First-attempt path — fresh shortfall opens pending_xc.
+            #   * Subsequent attempts — recover what we can; KEEP the rest
+            #     alive (don't collapse to dues). The new-cycle collapse at the
+            #     top of the loop handles the "give up" case when a strictly
+            #     later cycle's rent arrives.
             rent_short_this_cycle = max(0.0, effective_rent - s.rent_paid)
             final_balance = s.new_balance
             new_pending_xc = pending_xc_before
             new_pending_origin = pending_xc_origin
+            new_pending_cycle_end = pending_xc_cycle_end
 
             if rent_short_this_cycle > 0 and pending_xc_before == 0:
                 # First-attempt path — only if the person is at 2+ companies.
@@ -371,6 +469,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                     final_balance += rent_short_this_cycle   # un-debit from general dues
                     new_pending_xc = rent_short_this_cycle
                     new_pending_origin = company
+                    new_pending_cycle_end = _iso(cycle_end)
                     _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
                          cycle_start=cycle_start, cycle_end=cycle_end,
                          event_type="XC_RENT_PENDING",
@@ -378,25 +477,42 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                          remarks=("Partial rent held for recovery at other company"),
                          created_by=created_by)
             elif pending_xc_before > 0:
-                # Second attempt: whatever didn't get recovered now becomes
-                # ordinary carryforward — already in final_balance. Clear pending.
-                new_pending_xc = 0.0
-                new_pending_origin = None
-                recovered_xc = pending_xc_before - rent_short_this_cycle
+                # Subsequent attempt within the same cycle window. Split the
+                # apply_settlement's rent_paid between current rent and the
+                # pending bucket (current paid first): anything beyond
+                # current rent goes against pending.
+                pending_paid = max(0.0, s.rent_paid - rent)
+                pending_remaining = max(0.0, pending_xc_before - pending_paid)
+                recovered_xc = pending_xc_before - pending_remaining
+                # apply_settlement treated pending as part of THIS cycle's
+                # rent; un-debit whatever's still unrecovered so it stays in
+                # the pending bucket rather than current_balance.
+                final_balance += pending_remaining
+                new_pending_xc = pending_remaining
+                new_pending_origin = pending_xc_origin if pending_remaining > 0 else None
+                new_pending_cycle_end = pending_xc_cycle_end if pending_remaining > 0 else None
                 if recovered_xc > 0:
-                    _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
-                         cycle_start=cycle_start, cycle_end=cycle_end,
-                         event_type="XC_RENT_RECOVERED",
-                         amount=recovered_xc, balance_after=final_balance,
-                         remarks=("Pending cross-company rent recovered"),
-                         created_by=created_by)
-                if rent_short_this_cycle > 0:
-                    _txn(conn, person_id=pid, rider_id=rec.rider_id, company=company,
-                         cycle_start=cycle_start, cycle_end=cycle_end,
-                         event_type="XC_RENT_TO_CARRY",
-                         amount=-rent_short_this_cycle, balance_after=final_balance,
-                         remarks=("Pending rent converted to carryforward"),
-                         created_by=created_by)
+                    xc_id = conn.execute(
+                        "INSERT INTO transactions (person_id, rider_id, company, "
+                        "cycle_start, cycle_end, event_type, amount, "
+                        "balance_after, remarks, created_by) "
+                        "VALUES (?,?,?,?,?,'XC_RENT_RECOVERED',?,?,?,?)",
+                        (pid, rec.rider_id, company,
+                         _iso(cycle_start), _iso(cycle_end),
+                         recovered_xc, final_balance,
+                         "Pending cross-company rent recovered", created_by),
+                    ).lastrowid
+                    # Heal day-rows for the missed days this XC recovery
+                    # actually pays down.
+                    _ev_attribute_recovery(
+                        conn, person_id=pid,
+                        recovery_event_id=xc_id, amount=recovered_xc,
+                    )
+                # NOTE: no XC_RENT_TO_CARRY here anymore. The remainder stays
+                # alive in pending_xc_rent and gets another shot at the next
+                # company's run. Only the new-cycle collapse at the top of the
+                # loop (when a strictly later cycle's RENT arrives) finally
+                # writes it off to general carryforward dues.
 
             # DUES_CARRY records what carries into the next cycle. Amount is the
             # *change* in the balance this cycle (negative = more dues added).
@@ -409,7 +525,8 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                      created_by=created_by)
 
             _set_balance(conn, pid, final_balance, cycle_end)
-            _set_pending_xc(conn, pid, new_pending_xc, new_pending_origin)
+            _set_pending_xc(conn, pid, new_pending_xc, new_pending_origin,
+                            new_pending_cycle_end)
             _mark_present(conn, pid, cycle_end)
             if charge_here and rinfo and rinfo.has_ev:
                 advance_rent_charged_through(conn, pid, cycle_end)
@@ -450,26 +567,38 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             pid = a["person_id"]
             if pid in present_person_ids: continue
             rinfo = resolve_rent(conn, pid, cycle_start, cycle_end)
-            # If this person had pending cross-company rent originating elsewhere,
-            # and they're now absent at the "other company" cycle: convert the
-            # pending bucket to general carryforward, then clear it.
-            pending_xc_before, pending_xc_origin = _get_pending_xc(conn, pid)
-            if pending_xc_before > 0 and pending_xc_origin != company:
-                cur_bal = _balance(conn, pid)
-                new_bal = cur_bal - pending_xc_before
-                _txn(conn, person_id=pid, rider_id=a["deduction_rider_id"] or "",
-                     company=company, cycle_start=cycle_start, cycle_end=cycle_end,
-                     event_type="XC_RENT_TO_CARRY",
-                     amount=-pending_xc_before, balance_after=new_bal,
-                     remarks="Absent at other company; pending rent → carryforward",
-                     created_by=created_by)
-                _set_balance(conn, pid, new_bal, cycle_end)
-                _set_pending_xc(conn, pid, 0.0, None)
+            # NOTE: absence alone no longer collapses a pending_xc_rent bucket.
+            # Under the new model, pending stays alive across every company
+            # run in the cycle window — it only falls to general carryforward
+            # when a strictly later cycle's RENT lands (handled at the top of
+            # the present-rider loop above).
             if rinfo.has_ev and rinfo.rent > 0:
                 record_missed_rent(conn, pid, rinfo.rent, cycle_start, cycle_end,
                                    rider_id=a["deduction_rider_id"] or "",
                                    company=company, created_by=created_by, days=rinfo.days)
-                advance_rent_charged_through(conn, pid, cycle_end)
+                # Find the RENT_MISSED transaction we just wrote so we can
+                # attribute the missed days back to it in the daily ledger.
+                missed_id = conn.execute(
+                    "SELECT id FROM transactions WHERE person_id=? "
+                    "AND event_type='RENT_MISSED' AND company=? "
+                    "AND cycle_start=? AND cycle_end=? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (pid, company, _iso(cycle_start), _iso(cycle_end))
+                ).fetchone()
+                billed_legs = [L for L in (rinfo.legs or []) if (L.days or 0) > 0]
+                _ev_materialize_cycle(
+                    conn, person_id=pid,
+                    cycle_start=cycle_start, cycle_end=cycle_end,
+                    legs=billed_legs,
+                    billing_event_id=(missed_id["id"] if missed_id else None),
+                    billing_status="missed",
+                )
+                # NOTE: deliberately NOT advancing rent_charged_through here.
+                # Under the catch-up rent model, RENT_MISSED leaves the meter
+                # where it is so a later company's cycle (whose window covers
+                # the same days) can pick them up and flip 'missed' → 'recovered'
+                # in the daily ledger. Advancing the meter on RENT_MISSED would
+                # hide those days from any subsequent cycle.
                 total_missed += rinfo.rent
             ridx_rows = conn.execute(
                 "SELECT rider_id, hub FROM rider_master WHERE person_id=? AND company=?",
@@ -511,8 +640,54 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             "inactive_count": len(result.inactive_rows),
         }
         result.committed = commit
-        if commit: conn.commit()
-        else: conn.rollback()
+        if commit:
+            # Cycle tracking: write a company_cycles row so dashboards have a
+            # cheap join target instead of recomputing from the transactions
+            # table. week_bucket groups the four companies' runs that fall in
+            # the same ISO week (Mon-Sun, derived from cycle_end) into a
+            # "global cycle" for cross-company dashboards.
+            from datetime import date as _date_cls
+            ce_d = (cycle_end if isinstance(cycle_end, _date_cls)
+                    else _date_cls.fromisoformat(_iso(cycle_end)))
+            iso_year, iso_week, _ = ce_d.isocalendar()
+            week_bucket = f"{iso_year}-W{iso_week:02d}"
+            t = result.totals
+            total_rent_collected = round(
+                sum(
+                    min(r.rent, r.rent - (max(0.0, -r.new_balance) if r.is_hold else 0.0))
+                    for r in result.pay_rows
+                    if getattr(r, "rent", 0) > 0
+                ),
+                2,
+            )
+            conn.execute(
+                "INSERT INTO company_cycles "
+                "(company, cycle_start, cycle_end, week_bucket, "
+                " processed_by, rider_count, riders_paid, riders_in_dues, "
+                " total_release, total_rent_charged, total_rent_collected, "
+                " total_rent_missed) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(company, cycle_start, cycle_end) DO UPDATE SET "
+                "  week_bucket=excluded.week_bucket, "
+                "  processed_at=datetime('now'), "
+                "  processed_by=excluded.processed_by, "
+                "  rider_count=excluded.rider_count, "
+                "  riders_paid=excluded.riders_paid, "
+                "  riders_in_dues=excluded.riders_in_dues, "
+                "  total_release=excluded.total_release, "
+                "  total_rent_charged=excluded.total_rent_charged, "
+                "  total_rent_collected=excluded.total_rent_collected, "
+                "  total_rent_missed=excluded.total_rent_missed",
+                (company, _iso(cycle_start), _iso(cycle_end), week_bucket,
+                 created_by,
+                 t["riders_paid"] + t["riders_in_dues"],
+                 t["riders_paid"], t["riders_in_dues"],
+                 t["total_release"], t["total_rent_charged"],
+                 total_rent_collected, t["rent_missed_this_cycle"]),
+            )
+            conn.commit()
+        else:
+            conn.rollback()
     except Exception:
         conn.rollback(); raise
     finally:

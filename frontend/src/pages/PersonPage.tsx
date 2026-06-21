@@ -399,10 +399,8 @@ function RiderRow({
       if (!currentRid && form.new_rider_id) {
         const r0 = await fetch('/api/riders/rename-rider-id', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? ''),
-          },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             person_id: rider.person_id,
             company: rider.company,
@@ -431,10 +429,8 @@ function RiderRow({
         body.new_company = form.new_company
       const r = await fetch('/api' + url, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? ''),
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       })
       if (!r.ok) {
@@ -780,10 +776,8 @@ function TxnRow({ t, isCreator, onChanged }:
     try {
       const r = await fetch('/api/creator/transactions/' + t.id, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? ''),
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ amount: parseFloat(amount), remarks }),
       })
       if (!r.ok) {
@@ -799,7 +793,7 @@ function TxnRow({ t, isCreator, onChanged }:
     try {
       const r = await fetch('/api/creator/transactions/' + t.id, {
         method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? '') },
+        credentials: 'include',
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -877,7 +871,7 @@ export function DangerZone({ kind, label, deletePath, onDeleted }:
     try {
       const r = await fetch(deletePath, {
         method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + (localStorage.getItem('payout_token') ?? '') },
+        credentials: 'include',
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))

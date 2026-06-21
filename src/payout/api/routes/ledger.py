@@ -11,8 +11,49 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import AdjustmentIn, RentPaymentIn, TransactionOut
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
+from payout.exports import xlsx_response
 
 router = APIRouter()
+
+
+@router.get("/export")
+def export_transactions(
+    event_type: Optional[str] = None,
+    company: Optional[str] = None,
+    limit: int = 5000,
+    _: dict = Depends(get_current_user),
+):
+    """Recent transactions as a styled .xlsx download."""
+    sql = (
+        "SELECT id, person_id, rider_id, company, cycle_start, cycle_end, "
+        "event_type, amount, balance_after, days, remarks, created_at, created_by "
+        "FROM transactions WHERE 1=1 "
+    )
+    params: list = []
+    if event_type:
+        sql += " AND event_type=? "; params.append(event_type)
+    if company:
+        sql += " AND company=? "; params.append(company)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(min(max(limit, 1), 100000))
+    with get_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    headers = ["ID", "Person ID", "Rider ID", "Company", "Cycle Start",
+               "Cycle End", "Event", "Amount", "Balance After", "Days",
+               "Remarks", "When", "By"]
+    out = [
+        (r["id"], r["person_id"], r["rider_id"], r["company"],
+         r["cycle_start"], r["cycle_end"], r["event_type"], r["amount"],
+         r["balance_after"], r["days"] if r["days"] is not None else "",
+         r["remarks"] or "", r["created_at"] or "", r["created_by"] or "")
+        for r in rows
+    ]
+    return xlsx_response(
+        filename_stem="transactions", sheet_name="TXNS",
+        headers=headers, rows=out,
+        numeric_cols=(8, 9),
+        left_align_cols=(11, 13),
+    )
 
 
 @router.get("", response_model=list[TransactionOut])
@@ -105,14 +146,34 @@ def post_rent_payment(body: RentPaymentIn,
     with get_connection() as conn:
         pid = _resolve_person_id(conn, person_id=body.person_id,
                                  rider_id=body.rider_id, company=body.company)
-        # Identify the rider's deduction (rent-paying) company + rider_id so the
-        # RENT_COLLECTED row attaches to the right slot. Fall back to the body's
-        # company/rider_id when person_registry doesn't have one yet.
-        pr = conn.execute(
-            "SELECT deduction_company, deduction_rider_id "
-            "FROM person_registry WHERE person_id=?", (pid,)).fetchone()
-        company = (pr["deduction_company"] if pr else None) or body.company or ""
-        rider_id = (pr["deduction_rider_id"] if pr else None) or body.rider_id or ""
+        # Decide which (company, rider_id) to attach the RENT_COLLECTED row to.
+        # Under first-cycle-wins, the actual RENT event may have been charged
+        # at a non-deduction company (whichever processed first). The
+        # collection must land at the SAME company so the EV Rent Details
+        # math balances per (company, cycle). Walk the cycle window backwards
+        # from the explicit override → most-recent RENT event for this person
+        # → deduction company → body's company.
+        if body.period_start and body.period_end:
+            anchor = conn.execute(
+                "SELECT company, rider_id FROM transactions "
+                "WHERE person_id=? AND event_type='RENT' "
+                "  AND cycle_start=? AND cycle_end=? "
+                "ORDER BY id DESC LIMIT 1",
+                (pid, body.period_start, body.period_end)).fetchone()
+        else:
+            anchor = conn.execute(
+                "SELECT company, rider_id FROM transactions "
+                "WHERE person_id=? AND event_type='RENT' "
+                "ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+        if anchor:
+            company = anchor["company"]
+            rider_id = anchor["rider_id"]
+        else:
+            pr = conn.execute(
+                "SELECT deduction_company, deduction_rider_id "
+                "FROM person_registry WHERE person_id=?", (pid,)).fetchone()
+            company = (pr["deduction_company"] if pr else None) or body.company or ""
+            rider_id = (pr["deduction_rider_id"] if pr else None) or body.rider_id or ""
 
         # Decide which cycle window this payment covers.
         #   1. If the caller provided period_start/period_end, use them. This
@@ -120,8 +181,11 @@ def post_rent_payment(body: RentPaymentIn,
         #   2. Otherwise fall back to the rider's most recent RENT cycle so
         #      RENT_COLLECTED still slots into something the EV Rent Details
         #      aggregation can pick up.
-        #   3. If there's never been a RENT event for this person, anchor on
-        #      today as a last resort.
+        #   3. As a last resort, fall back to the deduction company's most
+        #      recent processed cycle (any RENT event for any rider on that
+        #      company). Single-day "cycles" (cs == ce == paid_on) cause the
+        #      EV Rent Details "latest cycle" picker to glitch, so we go to
+        #      lengths to find a real weekly cycle to attach to.
         if body.period_start and body.period_end:
             cs, ce = body.period_start, body.period_end
         else:
@@ -132,7 +196,23 @@ def post_rent_payment(body: RentPaymentIn,
             if last:
                 cs, ce = last["cycle_start"], last["cycle_end"]
             else:
-                cs = ce = paid_on
+                # Try the deduction company's latest RENT cycle.
+                co_last = None
+                if company:
+                    co_last = conn.execute(
+                        "SELECT cycle_start, cycle_end FROM transactions "
+                        "WHERE company=? AND event_type='RENT' "
+                        "ORDER BY id DESC LIMIT 1", (company,)).fetchone()
+                if co_last:
+                    cs, ce = co_last["cycle_start"], co_last["cycle_end"]
+                else:
+                    # Absolute last resort: a 7-day window ending paid_on.
+                    # Prevents the degenerate single-day cycle that pollutes
+                    # the EV Rent Details "latest cycle" picker.
+                    from datetime import date as _date, timedelta
+                    ce_dt = _date.fromisoformat(paid_on)
+                    cs = (ce_dt - timedelta(days=6)).isoformat()
+                    ce = paid_on
 
         # Read current balance + arrears outstanding.
         bal_row = conn.execute(
@@ -148,51 +228,62 @@ def post_rent_payment(body: RentPaymentIn,
         applied_to_rent = 0.0
         remaining = float(body.amount)
 
+        # IMPORTANT — the balance does NOT change here.
+        # Background: RENT_MISSED only touches ev_arrears.outstanding; it never
+        # debits the balance. Likewise the engine's normal rent collection
+        # (PAYOUT + RENT + RENT_COLLECTED) nets to zero on the balance — the
+        # rider goes home with (payout - rent) released as cash. A manual rent
+        # payment is the same shape: the rider hands over cash that mirrors
+        # what the payout would have deducted, so the ledger balance must stay
+        # put. The audit RENT_RECOVERED / RENT_COLLECTED rows still get logged
+        # with the *unchanged* balance_after so the trail is clear.
+
         # 1) Arrears first.
         if arr_out > 0 and remaining > 0:
             applied_to_arrears = round(min(remaining, arr_out), 2)
-            balance = round(balance + applied_to_arrears, 2)
-            conn.execute(
-                "UPDATE balances SET current_balance=?, last_updated=? "
-                "WHERE person_id=?", (balance, paid_on, pid))
-            conn.execute(
-                "INSERT OR IGNORE INTO balances "
-                "(person_id, current_balance, last_updated) VALUES (?,?,?)",
-                (pid, balance, paid_on))
             conn.execute(
                 "UPDATE ev_arrears SET total_recovered = total_recovered + ?, "
                 "outstanding = outstanding - ?, last_updated=? "
                 "WHERE person_id=?",
                 (applied_to_arrears, applied_to_arrears, paid_on, pid))
-            conn.execute(
+            recovery_txn_id = conn.execute(
                 "INSERT INTO transactions (person_id, rider_id, company, "
                 "cycle_start, cycle_end, event_type, amount, balance_after, "
                 "remarks, created_by) "
                 "VALUES (?,?,?,?,?,'RENT_RECOVERED',?,?,?,?)",
                 (pid, rider_id, company, cs, ce,
                  applied_to_arrears, balance,
-                 f"manual rent — arrears ({note})", user["email"]))
+                 f"manual rent — arrears ({note})", user["email"])).lastrowid
             remaining = round(remaining - applied_to_arrears, 2)
+            # Daily ledger: heal the oldest 'missed' day-rows for this person
+            # up to the recovered amount. The Provider Weekly report would
+            # otherwise still show these days as missed.
+            from payout.domain.ev_daily import attribute_recovery
+            attribute_recovery(
+                conn, person_id=pid, recovery_event_id=recovery_txn_id,
+                amount=applied_to_arrears,
+            )
 
         # 2) Current cycle rent.
+        collected_txn_id = None
         if remaining > 0:
             applied_to_rent = round(remaining, 2)
-            balance = round(balance + applied_to_rent, 2)
-            conn.execute(
-                "UPDATE balances SET current_balance=?, last_updated=? "
-                "WHERE person_id=?", (balance, paid_on, pid))
-            conn.execute(
-                "INSERT OR IGNORE INTO balances "
-                "(person_id, current_balance, last_updated) VALUES (?,?,?)",
-                (pid, balance, paid_on))
-            conn.execute(
+            collected_txn_id = conn.execute(
                 "INSERT INTO transactions (person_id, rider_id, company, "
                 "cycle_start, cycle_end, event_type, amount, balance_after, "
                 "remarks, created_by) "
                 "VALUES (?,?,?,?,?,'RENT_COLLECTED',?,?,?,?)",
                 (pid, rider_id, company, cs, ce,
                  applied_to_rent, balance,
-                 f"manual rent payment ({note})", user["email"]))
+                 f"manual rent payment ({note})", user["email"])).lastrowid
+            # Daily ledger: also heal missed days for this person with the
+            # rent-side amount (in case attribute_recovery's arrears walk
+            # didn't soak up everything missed yet).
+            from payout.domain.ev_daily import attribute_recovery
+            attribute_recovery(
+                conn, person_id=pid, recovery_event_id=collected_txn_id,
+                amount=applied_to_rent,
+            )
 
         # If the caller specified a coverage window and the payment actually
         # paid down some rent, advance the EV's rent_charged_through so the

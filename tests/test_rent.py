@@ -13,7 +13,7 @@ CE = date(2026, 3, 8)  # cycle end (Sun) -> 7-day cycle
     [
         (None, 7),                 # no handover date -> full week
         (date(2026, 2, 1), 7),     # held well before the cycle
-        (CS, 7),                   # handover on cycle start -> full week
+        (CS, 6),                   # handover on cycle start -> handover day free, bill Tue..Sun
         (date(2026, 3, 3), 5),     # Tue handover -> Wed..Sun
         (date(2026, 3, 4), 4),     # Wed handover -> Thu..Sun
         (date(2026, 3, 7), 1),     # Sat handover -> Sun

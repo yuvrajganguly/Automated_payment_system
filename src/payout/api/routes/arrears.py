@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from payout.api.auth import get_current_user
 from payout.db import get_connection
+from payout.exports import xlsx_response
 
 router = APIRouter()
 
@@ -51,3 +52,35 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
             "               THEN -b.current_balance ELSE 0 END) DESC"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/export")
+def export_arrears(_: dict = Depends(get_current_user)):
+    """Same payload as GET /arrears but as a styled .xlsx download.
+
+    Adds a derived Total Dues column (EV outstanding + Dues carry-forward) so
+    the operator can ladder by overall debt at a glance.
+    """
+    data = list_arrears(_)
+    headers = [
+        "Person ID", "Name", "Companies", "Hub", "EV ID", "Model",
+        "EV Outstanding", "Dues (Carryfwd)", "Total Dues", "Last Updated",
+    ]
+    rows = [
+        (
+            r["person_id"], r["display_name"], r["companies"] or "",
+            r["hubs"] or "", r["ev_id"] or "", r["model"] or "",
+            r["outstanding"], r["dues_outstanding"],
+            (r["outstanding"] or 0) + (r["dues_outstanding"] or 0),
+            r["last_updated"] or "",
+        )
+        for r in data
+    ]
+    return xlsx_response(
+        filename_stem="arrears",
+        sheet_name="ARREARS",
+        headers=headers, rows=rows,
+        numeric_cols=(7, 8, 9),
+        totals_cols=(7, 8, 9),
+        left_align_cols=(2, 3, 4),
+    )

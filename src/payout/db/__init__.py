@@ -51,12 +51,25 @@ def _migrate(conn) -> None:
         "UPDATE rider_master SET vehicle='BIKE' "
         "WHERE vehicle IS NULL OR TRIM(vehicle)=''"
     )
+    # v0.8 — rename ev_daily_ledger.raft_cost → provider_cost (provider-agnostic).
+    daily_cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(ev_daily_ledger)")
+    }
+    if "raft_cost" in daily_cols and "provider_cost" not in daily_cols:
+        conn.execute(
+            "ALTER TABLE ev_daily_ledger RENAME COLUMN raft_cost TO provider_cost"
+        )
     # balances: cross-company rent slot (v0.4)
     bal_cols = {r[1] for r in conn.execute("PRAGMA table_info(balances)")}
     if "pending_xc_rent" not in bal_cols:
         conn.execute("ALTER TABLE balances ADD COLUMN pending_xc_rent REAL NOT NULL DEFAULT 0")
     if "xc_origin_company" not in bal_cols:
         conn.execute("ALTER TABLE balances ADD COLUMN xc_origin_company TEXT")
+    # v0.7 — cycle_end of the cycle that produced pending_xc_rent, so the
+    # engine can detect "a new cycle's RENT landed" and collapse the prior
+    # bucket into general dues before charging fresh rent.
+    if "xc_origin_cycle_end" not in bal_cols:
+        conn.execute("ALTER TABLE balances ADD COLUMN xc_origin_cycle_end TEXT")
     # ev_maintenance.to_date: drop NOT NULL so open-ended windows can be NULL.
     # SQLite can't alter constraints, so rebuild the table when the current
     # definition still says NOT NULL.

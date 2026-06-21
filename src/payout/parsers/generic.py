@@ -81,6 +81,15 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 "leaving orders blank"
             )
 
+    # Optional name and hub columns. We pull these from the file so the engine
+    # can label unknown rider_ids with a real name + hub in the onboarding
+    # modal (instead of just "id 8906377190 — who's that?").
+    name_col = match_column(df.columns, "rider_name", "rider name", "name")
+    hub_col  = match_column(df.columns, "store", "hub", "store/hub", "store_hub",
+                            "store name", "hub name", "store/hub name")
+    if name_col: matched["name"] = name_col
+    if hub_col:  matched["hub"]  = hub_col
+
     records: list[RiderRecord] = []
     for _, row in df.iterrows():
         rider_id = str(row.get(rider_col, "")).strip()
@@ -92,10 +101,17 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
             continue
         cod = to_float(row.get(cod_col)) if cod_col else None
         orders_val = to_float(row.get(orders_col)) if orders_col else None
+        def _cell(col):
+            if not col: return None
+            v = row.get(col)
+            if v is None: return None
+            s = str(v).strip()
+            return s if s and s.lower() != "nan" else None
         records.append(
             RiderRecord(
                 rider_id=rider_id, payout=payout,
                 cod_pending=cod or 0.0, orders=orders_val,
+                name=_cell(name_col), hub=_cell(hub_col),
             )
         )
 

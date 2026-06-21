@@ -18,6 +18,8 @@ interface RiderLine {
   prior_recovered: number
   rolled_forward: number
   arrears_rent: number
+  future_arrears_recovered?: number     // backend already populates these
+  future_xc_recovered?: number
   days_billed: number | null
   status: 'paid' | 'partial' | 'inactive' | 'recovered' | 'partial_recovered'
 }
@@ -30,7 +32,11 @@ interface CycleRow {
   collected_rent: number
   prior_recovered: number
   rolled_forward: number
+  rolled_recovered_later: number
+  rolled_forward_net: number
   arrears_rent: number
+  arrears_recovered_later: number
+  arrears_net: number
   rider_count: number
   legacy?: boolean
   by_rider: RiderLine[]
@@ -38,6 +44,8 @@ interface CycleRow {
 
 export function EvRentPage() {
   const [rows, setRows] = useState<CycleRow[]>([])
+  const [companies, setCompanies] = useState<string[]>([])
+  const [availableCompanies, setAvailableCompanies] = useState<string[]>([])
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [latestOnly, setLatestOnly] = useState(true)
@@ -45,25 +53,45 @@ export function EvRentPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    api.get<{ company_name: string }[]>('/companies')
+      .then((cs) => setAvailableCompanies(cs.map((c) => c.company_name)))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     setBusy(true)
-    api.get<CycleRow[]>('/ev-rent?latest_only=' + latestOnly)
+    const params = new URLSearchParams()
+    params.set('latest_only', String(latestOnly))
+    if (companies.length) params.set('companies', companies.join(','))
+    api.get<CycleRow[]>('/ev-rent?' + params)
       .then(setRows)
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
-  }, [latestOnly])
+  }, [latestOnly, companies])
+
+  function toggleCompany(c: string) {
+    setCompanies((cs) => cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c])
+  }
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
   const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered)
 
+  // Use NET arrears / rolled — so the totals heal when cross-company
+  // recoveries are detected. arrears_net = arrears − arrears_recovered_later
+  // and rolled_forward_net = rolled_forward − rolled_recovered_later, both
+  // bounded at zero in the backend.
   const totals = visible.reduce(
     (a, r) => ({
       expected: a.expected + r.expected_rent,
       collected: a.collected + r.collected_rent,
       prior: a.prior + (r.prior_recovered ?? 0),
-      rolled: a.rolled + r.rolled_forward,
-      arrears: a.arrears + r.arrears_rent,
+      rolled: a.rolled + (r.rolled_forward_net ?? r.rolled_forward),
+      arrears: a.arrears + (r.arrears_net ?? r.arrears_rent),
+      arrears_gross: a.arrears_gross + r.arrears_rent,
+      rolled_gross: a.rolled_gross + r.rolled_forward,
     }),
-    { expected: 0, collected: 0, prior: 0, rolled: 0, arrears: 0 },
+    { expected: 0, collected: 0, prior: 0, rolled: 0, arrears: 0,
+      arrears_gross: 0, rolled_gross: 0 },
   )
 
   return (
@@ -77,7 +105,7 @@ export function EvRentPage() {
         on multiple companies are not double-counted.
       </p>
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-xs text-slate-500 mr-1">Show:</span>
         <button onClick={() => setLatestOnly(true)}
                 className={'text-xs px-3 py-1 rounded ' +
@@ -89,6 +117,23 @@ export function EvRentPage() {
                   (!latestOnly ? 'bg-brand text-white' : 'bg-slate-200 hover:bg-slate-300')}>
           All cycles
         </button>
+        <span className="text-xs text-slate-500 ml-3 mr-1">Companies:</span>
+        <button onClick={() => setCompanies([])}
+                className={'text-xs px-2 py-1 rounded ' +
+                  (companies.length === 0
+                    ? 'bg-brand text-white'
+                    : 'bg-slate-200 hover:bg-slate-300')}>
+          All
+        </button>
+        {availableCompanies.map((c) => (
+          <button key={c} onClick={() => toggleCompany(c)}
+                  className={'text-xs px-2 py-1 rounded ' +
+                    (companies.includes(c)
+                      ? 'bg-brand text-white'
+                      : 'bg-slate-200 hover:bg-slate-300')}>
+            {c}
+          </button>
+        ))}
       </div>
 
       <ColumnFilters
@@ -104,8 +149,18 @@ export function EvRentPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <Stat label="Expected rent" value={fmt(totals.expected)} tone="expected" />
         <Stat label="Collected from payout" value={fmt(totals.collected)} tone="charged" />
-        <Stat label="Rolled to next cycle" value={fmt(totals.rolled)} tone="rolled" />
-        <Stat label="Arrears (inactive riders)" value={fmt(totals.arrears)} tone="missed" />
+        <Stat label="Rolled to next cycle (net)"
+              value={fmt(totals.rolled)}
+              tone="rolled"
+              sub={totals.rolled_gross > totals.rolled
+                ? `Gross ${fmt(totals.rolled_gross)} − recovered later ${fmt(totals.rolled_gross - totals.rolled)}`
+                : undefined} />
+        <Stat label="Arrears (net)"
+              value={fmt(totals.arrears)}
+              tone="missed"
+              sub={totals.arrears_gross > totals.arrears
+                ? `Gross ${fmt(totals.arrears_gross)} − recovered later ${fmt(totals.arrears_gross - totals.arrears)}`
+                : undefined} />
       </div>
 
       {busy && <Spinner />}
@@ -158,11 +213,27 @@ export function EvRentPage() {
                         title="Of the collected total, this much was recovery of prior-cycle pending or arrears (not new rent owed this cycle).">
                       {fmt(r.prior_recovered ?? 0)}
                     </Td>
-                    <Td right className={r.rolled_forward > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}>
-                      {fmt(r.rolled_forward)}
+                    <Td right className={r.rolled_forward > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}
+                        title={(r.rolled_recovered_later ?? 0) > 0
+                          ? `${fmt(r.rolled_recovered_later)} of this was recovered later — net ${fmt(r.rolled_forward_net)}`
+                          : undefined}>
+                      {(r.rolled_recovered_later ?? 0) > 0 ? (
+                        <>
+                          <span className="line-through text-slate-400 mr-1">{fmt(r.rolled_forward)}</span>
+                          <span className="text-emerald-700">{fmt(r.rolled_forward_net)}</span>
+                        </>
+                      ) : fmt(r.rolled_forward)}
                     </Td>
-                    <Td right className={r.arrears_rent > 0 ? 'text-red-700 font-semibold' : 'text-slate-400'}>
-                      {fmt(r.arrears_rent)}
+                    <Td right className={r.arrears_rent > 0 ? 'text-red-700 font-semibold' : 'text-slate-400'}
+                        title={(r.arrears_recovered_later ?? 0) > 0
+                          ? `${fmt(r.arrears_recovered_later)} of this was recovered later — net ${fmt(r.arrears_net)}`
+                          : undefined}>
+                      {(r.arrears_recovered_later ?? 0) > 0 ? (
+                        <>
+                          <span className="line-through text-slate-400 mr-1">{fmt(r.arrears_rent)}</span>
+                          <span className="text-emerald-700">{fmt(r.arrears_net)}</span>
+                        </>
+                      ) : fmt(r.arrears_rent)}
                     </Td>
                     <Td>
                       <span className="text-xs text-slate-500">{collectedPct.toFixed(0)}%</span>
@@ -224,11 +295,31 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
             <td className={'px-2 py-1 text-right italic ' + ((r.prior_recovered ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-300')}>
               {fmt(r.prior_recovered ?? 0)}
             </td>
-            <td className={'px-2 py-1 text-right ' + (r.rolled_forward > 0 ? 'text-amber-700 font-medium' : '')}>
-              {fmt(r.rolled_forward)}
+            <td className={'px-2 py-1 text-right ' + (r.rolled_forward > 0 ? 'text-amber-700 font-medium' : '')}
+                title={(r.future_xc_recovered ?? 0) > 0
+                  ? `${fmt(r.future_xc_recovered ?? 0)} of this was recovered at a later cycle`
+                  : undefined}>
+              {(r.future_xc_recovered ?? 0) > 0 ? (
+                <>
+                  <span className="line-through text-slate-400 mr-1">{fmt(r.rolled_forward)}</span>
+                  <span className="text-emerald-700">
+                    {fmt(Math.max(0, r.rolled_forward - (r.future_xc_recovered ?? 0)))}
+                  </span>
+                </>
+              ) : fmt(r.rolled_forward)}
             </td>
-            <td className={'px-2 py-1 text-right ' + (r.arrears_rent > 0 ? 'text-red-700 font-medium' : '')}>
-              {fmt(r.arrears_rent)}
+            <td className={'px-2 py-1 text-right ' + (r.arrears_rent > 0 ? 'text-red-700 font-medium' : '')}
+                title={(r.future_arrears_recovered ?? 0) > 0
+                  ? `${fmt(r.future_arrears_recovered ?? 0)} of this was recovered at a later cycle`
+                  : undefined}>
+              {(r.future_arrears_recovered ?? 0) > 0 ? (
+                <>
+                  <span className="line-through text-slate-400 mr-1">{fmt(r.arrears_rent)}</span>
+                  <span className="text-emerald-700">
+                    {fmt(Math.max(0, r.arrears_rent - (r.future_arrears_recovered ?? 0)))}
+                  </span>
+                </>
+              ) : fmt(r.arrears_rent)}
             </td>
             <td className="px-2 py-1">
               <span className={'text-xs px-1.5 py-0.5 rounded ' +
@@ -252,8 +343,9 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
   )
 }
 
-function Stat({ label, value, tone }:
-  { label: string; value: string; tone: 'expected' | 'charged' | 'rolled' | 'missed' }) {
+function Stat({ label, value, tone, sub }:
+  { label: string; value: string; sub?: string
+    tone: 'expected' | 'charged' | 'rolled' | 'missed' }) {
   const ring = tone === 'missed'   ? 'border-l-4 border-red-400'
              : tone === 'rolled'   ? 'border-l-4 border-amber-400'
              : tone === 'charged'  ? 'border-l-4 border-emerald-400'
@@ -261,6 +353,7 @@ function Stat({ label, value, tone }:
   return <div className={'bg-white rounded-lg shadow p-3 ' + ring}>
     <p className="text-xs text-slate-500">{label}</p>
     <p className="text-lg font-bold">{value}</p>
+    {sub && <p className="text-[10px] text-emerald-700 mt-0.5">{sub}</p>}
   </div>
 }
 function Th({ children }: { children: React.ReactNode }) {

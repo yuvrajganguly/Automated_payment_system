@@ -1,24 +1,17 @@
 import type { TokenResponse } from './types'
 
 const BASE = '/api'
-const TOKEN_KEY = 'payout_token'
 
 let onUnauthorized: () => void = () => {}
 
-export function configureClient(opts: {
-  getToken?: () => string | null  // kept for backward compat; unused
-  onUnauthorized: () => void
-}) {
+export function configureClient(opts: { onUnauthorized: () => void }) {
   onUnauthorized = opts.onUnauthorized
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers)
-  // Read token directly from localStorage so we always see the freshest value,
-  // avoiding effect-ordering races between AuthContext and child page effects.
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  const res = await fetch(BASE + path, { ...init, headers })
+  // Auth travels in an httpOnly cookie; `credentials: 'include'` sends it on
+  // every same-origin request. The JWT is never exposed to JS (XSS-safe).
+  const res = await fetch(BASE + path, { ...init, credentials: 'include' })
   if (res.status === 401) {
     onUnauthorized()
     throw new Error('Session expired - please sign in again')
@@ -47,6 +40,8 @@ export const api = {
     }),
   postForm: <T,>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form }),
+  delete: <T,>(path: string) =>
+    request<T>(path, { method: 'DELETE' }),
   loginForm: async (email: string, password: string): Promise<TokenResponse> => {
     const form = new URLSearchParams()
     form.set('username', email)
@@ -55,6 +50,7 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
+      credentials: 'include',
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
@@ -62,4 +58,5 @@ export const api = {
     }
     return res.json()
   },
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 }

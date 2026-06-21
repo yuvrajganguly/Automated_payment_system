@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { ExportButton } from '../components/ExportButton'
 import { Spinner } from '../components/Spinner'
 import type { Company, TransactionOut } from '../api/types'
 
@@ -41,7 +42,10 @@ export function TransactionsPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">Transactions</h1>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h1 className="text-2xl font-bold">Transactions</h1>
+        <ExportButton path="/ledger/export" name="transactions.xlsx" />
+      </div>
       <p className="text-slate-500 text-sm mb-6">
         Append-only ledger across all riders. Click a Person ID to open the full per-rider history.
       </p>

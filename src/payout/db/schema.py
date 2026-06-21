@@ -139,11 +139,15 @@ CREATE INDEX IF NOT EXISTS idx_txn_rent_guard
 -- attempt also fails, the engine converts the pending amount to ordinary
 -- carryforward (i.e., it's drawn from current_balance going forward).
 CREATE TABLE IF NOT EXISTS balances (
-    person_id          INTEGER PRIMARY KEY REFERENCES person_registry(person_id),
-    current_balance    REAL NOT NULL DEFAULT 0,
-    pending_xc_rent    REAL NOT NULL DEFAULT 0,
-    xc_origin_company  TEXT,
-    last_updated       TEXT
+    person_id            INTEGER PRIMARY KEY REFERENCES person_registry(person_id),
+    current_balance      REAL NOT NULL DEFAULT 0,
+    pending_xc_rent      REAL NOT NULL DEFAULT 0,
+    xc_origin_company    TEXT,
+    -- cycle_end of the cycle that produced this pending_xc_rent shortfall.
+    -- Lets the engine detect "a new cycle's RENT just landed" and collapse
+    -- the old pending_xc into general dues before charging fresh rent.
+    xc_origin_cycle_end  TEXT,
+    last_updated         TEXT
 );
 
 -- ── cod_holds ───────────────────────────────────────────────────────────────
@@ -202,6 +206,93 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT DEFAULT (datetime('now'))
 );
+
+-- ── company_cycles ──────────────────────────────────────────────────────────
+-- One row per committed engine run (per company per cycle). Records the
+-- headline numbers so dashboards can render cross-company stats without
+-- recomputing from transactions every time. ``week_bucket`` is the ISO
+-- week derived from cycle_end (YYYY-Www) — group by this column to roll up
+-- multiple companies' runs into a "global cycle" for the same calendar week.
+CREATE TABLE IF NOT EXISTS company_cycles (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    company              TEXT NOT NULL,
+    cycle_start          TEXT NOT NULL,
+    cycle_end            TEXT NOT NULL,
+    week_bucket          TEXT NOT NULL,
+    processed_at         TEXT DEFAULT (datetime('now')),
+    processed_by         TEXT,
+    rider_count          INTEGER NOT NULL DEFAULT 0,
+    riders_paid          INTEGER NOT NULL DEFAULT 0,
+    riders_in_dues       INTEGER NOT NULL DEFAULT 0,
+    total_release        REAL NOT NULL DEFAULT 0,
+    total_rent_charged   REAL NOT NULL DEFAULT 0,
+    total_rent_collected REAL NOT NULL DEFAULT 0,
+    total_rent_missed    REAL NOT NULL DEFAULT 0,
+    UNIQUE(company, cycle_start, cycle_end)
+);
+CREATE INDEX IF NOT EXISTS idx_company_cycles_bucket
+    ON company_cycles (week_bucket DESC);
+
+-- ── ev_daily_ledger ─────────────────────────────────────────────────────────
+-- Day-level source of truth for "what we owe the EV provider" and "what we
+-- collected". One row per (ev_id, day) for every day an EV has existed
+-- (in_use, idle, or in maintenance). Populated by the engine on every cycle
+-- commit (per-leg expansion) and by EV state changes (assign, return,
+-- maintenance close). Provider-agnostic — works for Raft, Blive, or any
+-- future provider. See payout/domain/ev_daily.py for the helpers.
+CREATE TABLE IF NOT EXISTS ev_daily_ledger (
+    ev_id                  TEXT NOT NULL REFERENCES ev_units(ev_id),
+    day                    TEXT NOT NULL,                       -- ISO date
+    state                  TEXT NOT NULL,                       -- billable | handover_free | return_free | maintenance | unassigned
+    assigned_person_id     INTEGER REFERENCES person_registry(person_id),
+    daily_cost             REAL NOT NULL DEFAULT 0,             -- = weekly_rate / 7 when the day is billable to a rider
+    provider_cost          REAL NOT NULL DEFAULT 0,             -- always weekly_rate/7 — what we owe the EV provider regardless
+    billing_status         TEXT,                                -- billed | missed | recovered | pending
+    cycle_event_id         INTEGER,                             -- the RENT / RENT_MISSED row that produced this billing_status
+    recovery_event_id      INTEGER,                             -- the RENT_RECOVERED / XC_RENT_RECOVERED row that healed a 'missed' day
+    last_updated           TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (ev_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_evdaily_day        ON ev_daily_ledger (day);
+CREATE INDEX IF NOT EXISTS idx_evdaily_status     ON ev_daily_ledger (billing_status);
+CREATE INDEX IF NOT EXISTS idx_evdaily_person_day ON ev_daily_ledger (assigned_person_id, day);
+
+
+-- ── provider_bills ──────────────────────────────────────────────────────────
+-- One row per uploaded provider bill (Raft weekly, Blive monthly, etc.). The
+-- parsed lines live in ``provider_bill_lines``. The tally view joins each
+-- line against our ``ev_daily_ledger`` for the bill's period to surface
+-- discrepancies between the provider's charge and what we computed.
+CREATE TABLE IF NOT EXISTS provider_bills (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT NOT NULL,                     -- 'Raft' | 'Blive' | …
+    period_start    TEXT NOT NULL,                     -- ISO date inclusive
+    period_end      TEXT NOT NULL,                     -- ISO date inclusive
+    bill_total      REAL NOT NULL DEFAULT 0,           -- sum from the file
+    line_count      INTEGER NOT NULL DEFAULT 0,
+    file_name       TEXT,
+    uploaded_at     TEXT DEFAULT (datetime('now')),
+    uploaded_by     TEXT,
+    notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_provider_bills_provider
+    ON provider_bills (provider, period_end DESC);
+
+CREATE TABLE IF NOT EXISTS provider_bill_lines (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    bill_id         INTEGER NOT NULL REFERENCES provider_bills(id),
+    line_no         INTEGER,
+    ev_id_raw       TEXT,                              -- as it appeared in the file
+    ev_id           TEXT,                              -- normalised; NULL if unmatched
+    their_amount    REAL NOT NULL DEFAULT 0,
+    status_note     TEXT,                              -- last column: maintenance / closed / etc.
+    -- Filled when we tally against ev_daily_ledger:
+    our_amount      REAL,
+    discrepancy     REAL,                              -- their_amount − our_amount
+    notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bill_lines_bill ON provider_bill_lines (bill_id);
+CREATE INDEX IF NOT EXISTS idx_bill_lines_ev   ON provider_bill_lines (ev_id);
 
 -- ── audit_log ───────────────────────────────────────────────────────────────
 -- Every state-changing HTTP request (POST / PATCH / DELETE / PUT) made by an

@@ -5,54 +5,75 @@ import type { User } from '../api/types'
 
 interface AuthState {
   user: User | null
-  token: string | null
+  loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined)
-const TOKEN_KEY = 'payout_token'
+// Only non-sensitive display info (email/role) is cached here. The JWT lives in
+// an httpOnly cookie the browser sends automatically — never in JS storage.
 const USER_KEY = 'payout_user'
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState<User | null>(() => {
     const raw = localStorage.getItem(USER_KEY)
     return raw ? (JSON.parse(raw) as User) : null
   })
+  const [loading, setLoading] = useState(true)
+
+  function clearSession() {
+    setUser(null)
+    localStorage.removeItem(USER_KEY)
+  }
 
   useEffect(() => {
     configureClient({
-      getToken: () => token,
       onUnauthorized: () => {
-        setToken(null)
-        setUser(null)
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.removeItem(USER_KEY)
+        clearSession()
         navigate('/login', { replace: true })
       },
     })
-  }, [token, navigate])
+  }, [navigate])
+
+  // On load, confirm the cookie session with the server (rehydrate or clear).
+  // Uses a raw fetch so a 401 here doesn't trigger the global redirect — public
+  // pages (login, forgot-password) must stay reachable when logged out.
+  useEffect(() => {
+    let active = true
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('unauthenticated'))))
+      .then((u: User) => {
+        if (!active) return
+        setUser(u)
+        localStorage.setItem(USER_KEY, JSON.stringify(u))
+      })
+      .catch(() => {
+        if (active) clearSession()
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const login = async (email: string, password: string) => {
     const r = await api.loginForm(email, password)
     const u: User = { email: r.email, role: r.role }
-    setToken(r.access_token)
     setUser(u)
-    localStorage.setItem(TOKEN_KEY, r.access_token)
     localStorage.setItem(USER_KEY, JSON.stringify(u))
   }
 
   const logout = () => {
-    setToken(null)
-    setUser(null)
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(USER_KEY)
+    api.logout().catch(() => {})
+    clearSession()
     navigate('/login', { replace: true })
   }
 
-  const value = useMemo(() => ({ user, token, login, logout }), [user, token])
+  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
