@@ -1,339 +1,286 @@
-"""Demo seed: realistic fleet data for the live portfolio demo.
+"""Demo fleet seed — a realistic, fully-populated dataset for the live demo.
 
-Inserts ~15 persons, riders across 3 companies, 10 EVs, 4 weeks of
-transactions, COD holds, and arrears so every page looks populated.
+Generates a believable multi-company gig fleet anchored to the most recent
+complete Mon-Sun weeks, so the dashboard's default window (the previous week)
+is never empty. It writes the same shapes the real engine does — payouts, EV
+rent billed / missed / recovered, a day-level ``ev_daily_ledger``, per-company
+cycle rollups, arrears and COD holds — using entirely fictional names.
 
-Safe to run repeatedly -- all inserts use INSERT OR IGNORE on natural keys,
-or skip when the table already has rows.
+Guarded by ``_already_seeded``: if the database already has people (i.e. the
+operator's real data), this does nothing.
 """
 
 from __future__ import annotations
 
+import random
 import sqlite3
 from datetime import date, timedelta
 
-# ── cycle helpers ────────────────────────────────────────────────────────────
+COMPANIES = ["Dealshare", "Myntra", "Jiffy", "Zepto", "Blitz"]
+# Rough relative size of each company's rider base.
+CO_WEIGHT = {"Dealshare": 8, "Myntra": 16, "Jiffy": 9, "Zepto": 6, "Blitz": 11}
+MODELS = [("Raft", "Regular", 1250.0), ("Raft", "Blue", 1295.0),
+          ("Blive", "Standard", 1260.0)]
+HUBS = ["Behala", "Dum Dum", "New Alipore", "Kasba", "Nagar Bazar", "Kalyani",
+        "Maheshtala", "Rajpur", "New Town", "Salt Lake", "Garia", "Howrah",
+        "Barasat", "Sonarpur"]
+FIRST = ["Subhankar", "Rahul", "Amit", "Sourav", "Akash", "Rohit", "Bikash",
+         "Suman", "Tarak", "Prakash", "Debashis", "Arjun", "Manoj", "Sanjay",
+         "Raju", "Imran", "Sahil", "Deepak", "Niloy", "Pintu", "Gopal",
+         "Habib", "Kunal", "Sourabh", "Tanmoy", "Biplab", "Ranjan", "Asif"]
+LAST = ["Das", "Ghosh", "Singh", "Mondal", "Roy", "Sardar", "Mistry", "Pal",
+        "Naskar", "Halder", "Dutta", "Barui", "Sadhukhan", "Mahato", "Khan",
+        "Yadav", "Bose", "Sett", "Pramanik", "Hembram"]
+
+N_PERSONS = 48
+EV_SHARE = 0.72            # fraction of riders who hold an EV
+SECOND_CO_SHARE = 0.18     # fraction who also work a second company
+
 
 def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
-TODAY       = date.today()
-CYC4_END    = _monday(TODAY) - timedelta(days=1)          # last complete week end (Sun)
-CYC4_START  = CYC4_END - timedelta(days=6)
-CYC3_START  = CYC4_START - timedelta(days=7)
-CYC3_END    = CYC4_START - timedelta(days=1)
-CYC2_START  = CYC3_START - timedelta(days=7)
-CYC2_END    = CYC3_START - timedelta(days=1)
-CYC1_START  = CYC2_START - timedelta(days=7)
-CYC1_END    = CYC2_START - timedelta(days=1)
 
-def ds(d: date) -> str:
-    return d.isoformat()
+def _recent_weeks(today: date, n: int = 3):
+    """Last ``n`` complete Mon-Sun weeks; newest last = the default window."""
+    this_mon = _monday(today)
+    return [
+        (this_mon - timedelta(days=7 * k), this_mon - timedelta(days=7 * k - 6))
+        for k in range(n, 0, -1)
+    ]
 
-CYCLES = [
-    (ds(CYC1_START), ds(CYC1_END)),
-    (ds(CYC2_START), ds(CYC2_END)),
-    (ds(CYC3_START), ds(CYC3_END)),
-    (ds(CYC4_START), ds(CYC4_END)),
-]
 
-# ── persons ──────────────────────────────────────────────────────────────────
-
-PERSONS = [
-    (1,  "Rahul Kumar",      "4521 3304 8812"),
-    (2,  "Amit Sharma",      "7734 5512 9901"),
-    (3,  "Priya Singh",      "8823 4401 2234"),
-    (4,  "Deepak Yadav",     "6612 9903 3341"),
-    (5,  "Suresh Patel",     "5501 2287 4456"),
-    (6,  "Neha Gupta",       "9934 1123 5567"),
-    (7,  "Ravi Tiwari",      None),
-    (8,  "Kavya Reddy",      "3301 8876 6678"),
-    (9,  "Manish Verma",     "7712 3345 7789"),
-    (10, "Anjali Mishra",    "4490 6623 8890"),
-    (11, "Sanjay Nair",      None),
-    (12, "Pooja Iyer",       "8867 1190 9901"),
-    (13, "Vikram Thakur",    "2234 4478 0012"),
-    (14, "Sunita Rao",       "5578 9912 1123"),
-    (15, "Arun Joshi",       "6645 3301 2234"),
-]
-
-# ── rider_master rows: (rider_id, company, person_id, name, hub) ─────────────
-
-RIDERS = [
-    # Dealshare
-    ("DS1001", "Dealshare", 1,  "Rahul Kumar",   "Kolkata North"),
-    ("DS1002", "Dealshare", 2,  "Amit Sharma",   "Kolkata South"),
-    ("DS1003", "Dealshare", 3,  "Priya Singh",   "Howrah"),
-    ("DS1004", "Dealshare", 4,  "Deepak Yadav",  "Salt Lake"),
-    ("DS1005", "Dealshare", 5,  "Suresh Patel",  "Kolkata North"),
-    ("DS1006", "Dealshare", 11, "Sanjay Nair",   "Howrah"),
-    # Blitz
-    ("BL2001", "Blitz",     6,  "Neha Gupta",    "Park Street"),
-    ("BL2002", "Blitz",     7,  "Ravi Tiwari",   "Ballygunge"),
-    ("BL2003", "Blitz",     8,  "Kavya Reddy",   "Salt Lake"),
-    ("BL2004", "Blitz",     9,  "Manish Verma",  "Dum Dum"),
-    # Myntra
-    ("MYN301", "Myntra",    10, "Anjali Mishra", "New Town"),
-    ("MYN302", "Myntra",    12, "Pooja Iyer",    "Rajarhat"),
-    ("MYN303", "Myntra",    13, "Vikram Thakur", "Sector V"),
-    ("MYN304", "Myntra",    14, "Sunita Rao",    "New Town"),
-    ("MYN305", "Myntra",    15, "Arun Joshi",    "Rajarhat"),
-    # Rider 1 also rides Blitz (multi-company)
-    ("BL2010", "Blitz",     1,  "Rahul Kumar",   "Kolkata North"),
-]
-
-# ── EV assignments: (ev_id, model_key, person_id, handover_date) ─────────────
-# model_key: 0=Raft/Regular, 1=Raft/Blue, 2=Blive/Standard
-
-EV_UNITS = [
-    ("EV-KOL-001", 1),   # Raft Blue
-    ("EV-KOL-002", 1),
-    ("EV-KOL-003", 0),   # Raft Regular
-    ("EV-KOL-004", 0),
-    ("EV-KOL-005", 2),   # Blive Standard
-    ("EV-KOL-006", 2),
-    ("EV-KOL-007", 0),
-    ("EV-KOL-008", 1),
-    ("EV-KOL-009", 2),
-    ("EV-KOL-010", 0),
-]
-
-# person_id → ev_id
-EV_ASSIGNMENTS = {
-    1:  "EV-KOL-001",
-    2:  "EV-KOL-002",
-    3:  "EV-KOL-003",
-    4:  "EV-KOL-004",
-    6:  "EV-KOL-005",
-    7:  "EV-KOL-006",
-    9:  "EV-KOL-007",
-    11: "EV-KOL-008",
-    13: "EV-KOL-009",
-    15: "EV-KOL-010",
-}
-
-# EV weekly rates (mirrors seed.py EV_MODELS order after insert)
-EV_WEEKLY_RATES = [1250.0, 1295.0, 1260.0]  # Regular, Blue, Standard
-
-# ── per-person payout per cycle (company, amount) ───────────────────────────
-
-PAYOUTS: dict[int, list[tuple[str, str, float]]] = {
-    1:  [("Dealshare", "DS1001", 4200), ("Dealshare", "DS1001", 3900),
-         ("Dealshare", "DS1001", 4500), ("Dealshare", "DS1001", 4100)],
-    2:  [("Dealshare", "DS1002", 3800), ("Dealshare", "DS1002", 4100),
-         ("Dealshare", "DS1002", 3700), ("Dealshare", "DS1002", 4300)],
-    3:  [("Dealshare", "DS1003", 3200), ("Dealshare", "DS1003", 2900),
-         ("Dealshare", "DS1003", 1800), ("Dealshare", "DS1003", 3400)],
-    4:  [("Dealshare", "DS1004", 4600), ("Dealshare", "DS1004", 4800),
-         ("Dealshare", "DS1004", 5100), ("Dealshare", "DS1004", 4900)],
-    5:  [("Dealshare", "DS1005", 3100), ("Dealshare", "DS1005", 3400),
-         ("Dealshare", "DS1005", 3000), ("Dealshare", "DS1005", 3600)],
-    6:  [("Blitz",     "BL2001", 5200), ("Blitz",     "BL2001", 4900),
-         ("Blitz",     "BL2001", 5500), ("Blitz",     "BL2001", 5100)],
-    7:  [("Blitz",     "BL2002", 2800), ("Blitz",     "BL2002", 1200),
-         ("Blitz",     "BL2002", 3100), ("Blitz",     "BL2002", 2900)],
-    8:  [("Blitz",     "BL2003", 4100), ("Blitz",     "BL2003", 4400),
-         ("Blitz",     "BL2003", 3900), ("Blitz",     "BL2003", 4200)],
-    9:  [("Blitz",     "BL2004", 3700), ("Blitz",     "BL2004", 3500),
-         ("Blitz",     "BL2004", 3900), ("Blitz",     "BL2004", 3600)],
-    10: [("Myntra",    "MYN301", 6100), ("Myntra",    "MYN301", 5800),
-         ("Myntra",    "MYN301", 6400), ("Myntra",    "MYN301", 6200)],
-    11: [("Dealshare", "DS1006", 2900), ("Dealshare", "DS1006", 3200),
-         ("Dealshare", "DS1006", 2700), ("Dealshare", "DS1006", 3100)],
-    12: [("Myntra",    "MYN302", 5400), ("Myntra",    "MYN302", 5700),
-         ("Myntra",    "MYN302", 5200), ("Myntra",    "MYN302", 5600)],
-    13: [("Myntra",    "MYN303", 4800), ("Myntra",    "MYN303", 4500),
-         ("Myntra",    "MYN303", 5000), ("Myntra",    "MYN303", 4700)],
-    14: [("Myntra",    "MYN304", 5900), ("Myntra",    "MYN304", 6100),
-         ("Myntra",    "MYN304", 5700), ("Myntra",    "MYN304", 6300)],
-    15: [("Myntra",    "MYN305", 3300), ("Myntra",    "MYN305", 3600),
-         ("Myntra",    "MYN305", 3100), ("Myntra",    "MYN305", 3500)],
-}
+def _week_bucket(cycle_end: str) -> str:
+    d = date.fromisoformat(cycle_end)
+    return f"{d.isocalendar().year}-W{d.isocalendar().week:02d}"
 
 
 def _already_seeded(conn: sqlite3.Connection) -> bool:
-    row = conn.execute("SELECT COUNT(*) FROM person_registry").fetchone()
-    return (row[0] or 0) > 0
+    return conn.execute("SELECT COUNT(*) FROM person_registry").fetchone()[0] > 0
 
 
 def seed_demo(conn: sqlite3.Connection) -> None:
-    """Insert demo fleet data. No-op if persons already exist."""
     if _already_seeded(conn):
         return
+    rng = random.Random(7)
+    today = date.today()
+    weeks = _recent_weeks(today, 3)          # [w1, w2, w3]; w3 = previous week
+    newest = weeks[-1]
+    ds = lambda d: d.isoformat()             # noqa: E731
 
-    # ── persons ──────────────────────────────────────────────────────────────
-    for pid, name, kyc in PERSONS:
+    # ── Companies, rate card, EV units ──────────────────────────────────────
+    for c in COMPANIES:
         conn.execute(
-            "INSERT OR IGNORE INTO person_registry "
-            "(person_id, display_name, kyc_no) VALUES (?,?,?)",
-            (pid, name, kyc),
-        )
-
-    # ── riders ───────────────────────────────────────────────────────────────
-    for rider_id, company, person_id, name, hub in RIDERS:
+            "INSERT OR IGNORE INTO companies (company_name, parser_type, is_active) "
+            "VALUES (?,?,1)", (c, c.lower()))
+    model_id = {}
+    for prov, name, rate in MODELS:
         conn.execute(
-            "INSERT OR IGNORE INTO rider_master "
-            "(rider_id, company, person_id, name, hub) VALUES (?,?,?,?,?)",
-            (rider_id, company, person_id, name, hub),
-        )
+            "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate) "
+            "VALUES (?,?,?)", (prov, name, rate))
+        model_id[(prov, name)] = conn.execute(
+            "SELECT model_id FROM ev_models WHERE provider=? AND model_name=?",
+            (prov, name)).fetchone()[0]
 
-    # ── set deduction_company on person (for EV rent tracking) ───────────────
-    for rider_id, company, person_id, _, _ in RIDERS:
+    evs = []   # (ev_id, weekly_rate)
+    for i in range(1, 41):
+        prov, name, rate = MODELS[rng.randrange(len(MODELS))]
+        ev_id = f"{'RAFT' if prov == 'Raft' else 'BLV'}{1400 + i}"
         conn.execute(
-            "UPDATE person_registry SET deduction_company=?, deduction_rider_id=? "
-            "WHERE person_id=? AND deduction_company IS NULL",
-            (company, rider_id, person_id),
-        )
+            "INSERT OR IGNORE INTO ev_units (ev_id, model_id, status) VALUES (?,?, 'in_use')",
+            (ev_id, model_id[(prov, name)]))
+        evs.append((ev_id, rate))
+    rng.shuffle(evs)
+    ev_pool = list(evs)
 
-    # ── fetch model_ids in insertion order ───────────────────────────────────
-    model_rows = conn.execute(
-        "SELECT model_id FROM ev_models ORDER BY model_id"
-    ).fetchall()
-    model_ids = [r[0] for r in model_rows]  # [Regular, Blue, Standard]
+    weighted_cos = [c for c in COMPANIES for _ in range(CO_WEIGHT[c])]
 
-    # ── EV units ─────────────────────────────────────────────────────────────
-    for ev_id, model_idx in EV_UNITS:
-        conn.execute(
-            "INSERT OR IGNORE INTO ev_units (ev_id, model_id, status) VALUES (?,?,?)",
-            (ev_id, model_ids[model_idx], "in_use"),
-        )
-
-    # ── EV assignments (current, open) ───────────────────────────────────────
-    handover = ds(CYC1_START - timedelta(days=14))
-    for person_id, ev_id in EV_ASSIGNMENTS.items():
-        conn.execute(
-            "INSERT OR IGNORE INTO ev_assignments "
-            "(person_id, ev_id, handover_date) VALUES (?,?,?)",
-            (person_id, ev_id, handover),
-        )
-        # weekly rate for this EV
-        mid = conn.execute(
-            "SELECT model_id FROM ev_units WHERE ev_id=?", (ev_id,)
-        ).fetchone()[0]
-        weekly = conn.execute(
-            "SELECT weekly_rate FROM ev_models WHERE model_id=?", (mid,)
-        ).fetchone()[0]
-        # update person deduction link
-        conn.execute(
-            "UPDATE person_registry SET deduction_company=deduction_company "
-            "WHERE person_id=?", (person_id,)
-        )
-        _ = weekly  # used below in transactions
-
-    # ── transactions + balances ───────────────────────────────────────────────
-    # For each person build 4 cycles of: PAYOUT → RENT (if EV) → net balance
-    for person_id, payout_rows in PAYOUTS.items():
-        running_balance = 0.0
-
-        # carry-forward dues for person 3 (cycle 3 payout was low)
-        ev_id = EV_ASSIGNMENTS.get(person_id)
-        ev_weekly = 0.0
-        if ev_id:
-            mid = conn.execute(
-                "SELECT model_id FROM ev_units WHERE ev_id=?", (ev_id,)
-            ).fetchone()[0]
-            ev_weekly = conn.execute(
-                "SELECT weekly_rate FROM ev_models WHERE model_id=?", (mid,)
-            ).fetchone()[0]
-
-        for i, (cyc_start, cyc_end) in enumerate(CYCLES):
-            company, rider_id, gross = payout_rows[i]
-
-            # PAYOUT transaction
-            running_balance += gross
+    # ── People ──────────────────────────────────────────────────────────────
+    persons = []
+    for i in range(N_PERSONS):
+        name = f"{rng.choice(FIRST)} {rng.choice(LAST)}"
+        pid = conn.execute(
+            "INSERT INTO person_registry (display_name) VALUES (?)", (name,)).lastrowid
+        primary = rng.choice(weighted_cos)
+        cos = [primary]
+        if rng.random() < SECOND_CO_SHARE:
+            alt = rng.choice([c for c in COMPANIES if c != primary])
+            cos.append(alt)
+        hub = rng.choice(HUBS)
+        for ci, co in enumerate(cos):
+            rid = f"{co[:2].upper()}{1000 + i}{ci}"
             conn.execute(
-                "INSERT INTO transactions "
-                "(person_id, rider_id, company, cycle_start, cycle_end, "
-                " event_type, amount, balance_after, remarks, created_by) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (person_id, rider_id, company, cyc_start, cyc_end,
-                 "PAYOUT", gross, running_balance,
-                 f"Payout cycle {cyc_start}", "system"),
-            )
+                "INSERT INTO rider_master (rider_id, company, person_id, name, hub, "
+                "vehicle, account_no, ifsc, is_active) VALUES (?,?,?,?,?,?,?,?,1)",
+                (rid, co, pid, name, hub, "EV", f"9{rng.randint(10**9, 10**10 - 1)}",
+                 "HDFC0001234"))
+        has_ev = rng.random() < EV_SHARE and ev_pool
+        ev = ev_pool.pop() if has_ev else None
+        if ev:
+            conn.execute(
+                "INSERT INTO ev_assignments (person_id, ev_id, handover_date, "
+                "rent_charged_through) VALUES (?,?,?,?)",
+                (pid, ev[0], ds(weeks[0][0] - timedelta(days=rng.randint(7, 40))), None))
+            conn.execute(
+                "UPDATE person_registry SET deduction_company=?, deduction_rider_id=? "
+                "WHERE person_id=?", (primary, f"{primary[:2].upper()}{1000 + i}0", pid))
+        persons.append({
+            "pid": pid, "name": name, "primary": primary, "cos": cos, "hub": hub,
+            "rid": f"{primary[:2].upper()}{1000 + i}0", "ev": ev,
+            "reliability": rng.uniform(0.80, 0.99),
+        })
 
-            # RENT transaction (if person has an EV)
-            if ev_weekly:
-                rent = -ev_weekly
-                if running_balance + rent < 0:
-                    # Can't cover — mark as missed
-                    rent_actual = -running_balance if running_balance > 0 else 0
-                    missed = ev_weekly - abs(rent_actual)
-                    if rent_actual:
-                        running_balance -= rent_actual
-                        conn.execute(
-                            "INSERT INTO transactions "
-                            "(person_id, rider_id, company, cycle_start, cycle_end, "
-                            " event_type, amount, balance_after, days, remarks, created_by) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            (person_id, rider_id, company, cyc_start, cyc_end,
-                             "RENT", -rent_actual, running_balance, 7,
-                             "Partial EV rent", "system"),
-                        )
-                    conn.execute(
-                        "INSERT INTO transactions "
-                        "(person_id, rider_id, company, cycle_start, cycle_end, "
-                        " event_type, amount, balance_after, days, remarks, created_by) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (person_id, rider_id, company, cyc_start, cyc_end,
-                         "RENT_MISSED", -missed, running_balance, 7,
-                         "EV rent shortfall carried to arrears", "system"),
-                    )
-                    # update arrears
-                    conn.execute(
-                        "INSERT INTO ev_arrears (person_id, total_missed, outstanding) "
-                        "VALUES (?,?,?) ON CONFLICT(person_id) DO UPDATE SET "
-                        "total_missed=total_missed+excluded.total_missed, "
-                        "outstanding=outstanding+excluded.outstanding",
-                        (person_id, missed, missed),
-                    )
+    # ── Cycles: payouts + rent + day ledger + rollups ───────────────────────
+    cyc = {}                       # (company, w) -> aggregate dict
+    arrears = {}                   # pid -> {missed, recovered}
+    missed_days = {}               # pid -> list of (ev_id, day, cost) still missed
+
+    def agg(co, w):
+        k = (co, w)
+        cyc.setdefault(k, dict(rider_count=0, riders_paid=0, riders_in_dues=0,
+                               total_release=0.0, total_rent_charged=0.0,
+                               total_rent_collected=0.0, total_rent_missed=0.0))
+        return cyc[k]
+
+    def txn(pid, rid, co, w, etype, amount, *, days=None, remarks="", by="engine"):
+        return conn.execute(
+            "INSERT INTO transactions (person_id, rider_id, company, cycle_start, "
+            "cycle_end, event_type, amount, balance_after, days, remarks, created_by, "
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (pid, rid, co, ds(w[0]), ds(w[1]), etype, amount, 0.0, days, remarks, by,
+             f"{ds(w[1])} 12:00:00"),
+        ).lastrowid
+
+    def ledger(ev_id, w, pid, daily, status, event_id):
+        d = w[0]
+        while d <= w[1]:
+            conn.execute(
+                "INSERT OR REPLACE INTO ev_daily_ledger (ev_id, day, state, "
+                "assigned_person_id, daily_cost, provider_cost, billing_status, "
+                "cycle_event_id) VALUES (?,?, 'billable',?,?,?,?,?)",
+                (ev_id, ds(d), pid, daily, daily, status, event_id))
+            d += timedelta(days=1)
+
+    for wi, w in enumerate(weeks):
+        for p in persons:
+            co = p["primary"]
+            a = agg(co, w)
+            # Absences cluster in the newest week so we get visible inactives.
+            present = rng.random() < (p["reliability"] - (0.10 if wi == len(weeks) - 1 else 0.0))
+            ev = p["ev"]
+            rate = ev[1] if ev else 0.0
+            daily = round(rate / 7.0, 2)
+            if present:
+                a["rider_count"] += 1
+                a["riders_paid"] += 1
+                payout = float(rng.randint(14, 90) * 100)   # 1400..9000
+                txn(p["pid"], p["rid"], co, w, "PAYOUT", payout,
+                    remarks="weekly payout")
+                if ev:
+                    rid_txn = txn(p["pid"], p["rid"], co, w, "RENT", -rate, days=7,
+                                  remarks="EV rent")
+                    ledger(ev[0], w, p["pid"], daily, "billed", rid_txn)
+                    txn(p["pid"], p["rid"], co, w, "RENT_COLLECTED", rate,
+                        remarks="rent collected from payout")
+                    a["total_rent_charged"] += rate
+                    a["total_rent_collected"] += rate
+                    release = max(0.0, payout - rate)
                 else:
-                    running_balance += rent
-                    conn.execute(
-                        "INSERT INTO transactions "
-                        "(person_id, rider_id, company, cycle_start, cycle_end, "
-                        " event_type, amount, balance_after, days, remarks, created_by) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (person_id, rider_id, company, cyc_start, cyc_end,
-                         "RENT", rent, running_balance, 7,
-                         "Weekly EV rent", "system"),
-                    )
+                    release = payout
+                txn(p["pid"], p["rid"], co, w, "RELEASE", -release,
+                    remarks="net released")
+                a["total_release"] += release
+            elif ev:
+                # Absent EV holder -> rent missed -> arrears, missed day-rows.
+                mid = txn(p["pid"], p["rid"], co, w, "RENT_MISSED", -rate, days=7,
+                          remarks="absent from payout")
+                ledger(ev[0], w, p["pid"], daily, "missed", mid)
+                ar = arrears.setdefault(p["pid"], {"missed": 0.0, "recovered": 0.0})
+                ar["missed"] += rate
+                md = missed_days.setdefault(p["pid"], [])
+                d = w[0]
+                while d <= w[1]:
+                    md.append((ev[0], ds(d)))
+                    d += timedelta(days=1)
+                a["rider_count"] += 1
+                a["riders_in_dues"] += 1
+                a["total_rent_missed"] += rate
 
-        # final balance
+    # ── Recoveries: a few riders clear old arrears, dated in the newest week ─
+    candidates = [p for p in persons if p["pid"] in arrears and p["ev"]]
+    rng.shuffle(candidates)
+    for p in candidates[:6]:
+        ar = arrears[p["pid"]]
+        out = ar["missed"] - ar["recovered"]
+        if out <= 0:
+            continue
+        pay = round(min(out, p["ev"][1]), 2)       # claw back ~one week
+        rev = txn(p["pid"], p["rid"], p["primary"], newest, "RENT_RECOVERED", pay,
+                  remarks="arrears cleared (manual)", by="demo")
+        # Flip that many missed day-rows to 'recovered'.
+        daily = round(p["ev"][1] / 7.0, 2)
+        budget = pay
+        for ev_id, day in list(missed_days.get(p["pid"], [])):
+            if budget + 0.01 < daily:
+                break
+            conn.execute(
+                "UPDATE ev_daily_ledger SET billing_status='recovered', recovery_event_id=? "
+                "WHERE ev_id=? AND day=?", (rev, ev_id, day))
+            budget -= daily
+            missed_days[p["pid"]].remove((ev_id, day))
+        ar["recovered"] += pay
+
+    # ── Arrears table ───────────────────────────────────────────────────────
+    for pid, ar in arrears.items():
+        out = round(ar["missed"] - ar["recovered"], 2)
+        conn.execute(
+            "INSERT OR REPLACE INTO ev_arrears (person_id, total_missed, "
+            "total_recovered, outstanding, last_updated) VALUES (?,?,?,?, date('now'))",
+            (pid, round(ar["missed"], 2), round(ar["recovered"], 2), out))
+
+    # ── COD holds (newest week) ─────────────────────────────────────────────
+    cod_persons = rng.sample(persons, 16)
+    for p in cod_persons:
+        src = "jiffy_sheet" if p["primary"] == "Jiffy" else "myntra_column"
+        conn.execute(
+            "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, "
+            "person_id, worker_code, order_number, amount, payment_mode, txn_status, "
+            "source, created_at) VALUES (?,?,?,?,?,?,?,?, 'COD', 'pending', ?, ?)",
+            (ds(newest[0]), ds(newest[1]), p["primary"], p["rid"], p["pid"], p["rid"],
+             f"ORD{rng.randint(100000, 999999)}", float(rng.randint(2, 18) * 100),
+             src, f"{ds(newest[1])} 12:00:00"))
+
+    # ── company_cycles rollups ──────────────────────────────────────────────
+    for (co, w), a in cyc.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO company_cycles (company, cycle_start, cycle_end, "
+            "week_bucket, processed_by, rider_count, riders_paid, riders_in_dues, "
+            "total_release, total_rent_charged, total_rent_collected, total_rent_missed) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (co, ds(w[0]), ds(w[1]), _week_bucket(ds(w[1])), "demo",
+             a["rider_count"], a["riders_paid"], a["riders_in_dues"],
+             round(a["total_release"], 2), round(a["total_rent_charged"], 2),
+             round(a["total_rent_collected"], 2), round(a["total_rent_missed"], 2)))
+
+    # ── balances + status ───────────────────────────────────────────────────
+    present_newest = {
+        r["person_id"] for r in conn.execute(
+            "SELECT DISTINCT person_id FROM transactions WHERE event_type='PAYOUT' "
+            "AND cycle_end=?", (ds(newest[1]),))}
+    for p in persons:
+        out = arrears.get(p["pid"], {})
+        bal = -round(out.get("missed", 0.0) - out.get("recovered", 0.0), 2) \
+            if p["pid"] in arrears else 0.0
         conn.execute(
             "INSERT OR REPLACE INTO balances (person_id, current_balance, last_updated) "
-            "VALUES (?,?, datetime('now'))",
-            (person_id, round(running_balance, 2)),
-        )
-        # status tracking
+            "VALUES (?,?, datetime('now'))", (p["pid"], 0.0))
+        active = p["pid"] in present_newest
         conn.execute(
-            "INSERT OR IGNORE INTO status_tracking (person_id, status, last_seen) "
-            "VALUES (?, 'active', date('now'))",
-            (person_id,),
-        )
-
-    # ── COD holds (Myntra) ────────────────────────────────────────────────────
-    cod_data = [
-        (ds(CYC3_START), ds(CYC3_END), "Myntra", "MYN301", 10, "ORD-88823", 450.0),
-        (ds(CYC3_START), ds(CYC3_END), "Myntra", "MYN303", 13, "ORD-88901", 320.0),
-        (ds(CYC4_START), ds(CYC4_END), "Myntra", "MYN302", 12, "ORD-90112", 780.0),
-        (ds(CYC4_START), ds(CYC4_END), "Myntra", "MYN305", 15, "ORD-90245", 210.0),
-        (ds(CYC4_START), ds(CYC4_END), "Myntra", "MYN301", 10, "ORD-90389", 560.0),
-    ]
-    for cs, ce, company, rider_id, person_id, order_no, amount in cod_data:
-        conn.execute(
-            "INSERT OR IGNORE INTO cod_holds "
-            "(cycle_start, cycle_end, company, rider_id, person_id, "
-            " order_number, amount, source) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (cs, ce, company, rider_id, person_id, order_no, amount, "myntra_column"),
-        )
-
-    # ── one EV in maintenance ─────────────────────────────────────────────────
-    conn.execute(
-        "INSERT OR IGNORE INTO ev_maintenance "
-        "(ev_id, from_date, reason, created_by) VALUES (?,?,?,?)",
-        ("EV-KOL-006", ds(CYC4_START), "Battery replacement", "admin@demo.com"),
-    )
+            "INSERT OR REPLACE INTO status_tracking (person_id, status, last_seen) "
+            "VALUES (?,?,?)",
+            (p["pid"], "active" if active else "inactive", ds(newest[1])))
+        _ = bal
 
     conn.commit()
-    print("[demo_seed] Inserted demo fleet data: 15 persons, 16 riders, 10 EVs, 4 cycles.")
+    print(f"[demo_seed] Seeded demo fleet: {len(persons)} riders across "
+          f"{len(COMPANIES)} companies, weeks {ds(weeks[0][0])}..{ds(newest[1])}.")
