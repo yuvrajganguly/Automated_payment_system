@@ -188,24 +188,9 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ── 14 window-scoped stats (date-range based) ───────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-2">
-        <Card metric="active_riders" label="Active Riders" value={fmt(data.stats.active_riders)}
-              tone="emerald" tip="Riders who had a PAYOUT in any of their (selected) companies during the window."
-              onClick={setDrawerMetric} />
-        <Card metric="inactive_riders" label="Inactive Riders" value={fmt(data.stats.inactive_riders)}
-              tone="rose" tip="Riders with an active rider_master row in scope but no PAYOUT anywhere they work during the window. Click to see who."
-              onClick={setDrawerMetric} />
-        <Card metric="active_evs" label="Active EVs" value={fmt(data.stats.active_evs)}
-              tone="emerald" tip="EVs that earned rent (billed or recovered days) during the window."
-              onClick={setDrawerMetric} />
-        <Card metric="inactive_evs" label="Inactive EVs" value={fmt(data.stats.inactive_evs)}
-              tone="rose" tip="EVs that had at least one 'missed' day in the window (rider absent)."
-              onClick={setDrawerMetric} />
-        <Card metric="untouched_evs" label="Untouched EVs" value={fmt(data.stats.untouched_evs)}
-              tone="slate"
-              tip="In_use EVs with NO ledger activity in the window (idle, in maintenance, or no cycle has covered them yet). Active + Inactive + Untouched = total in_use."
-              onClick={setDrawerMetric} />
+      {/* ── Stat tiers (grouped for hierarchy) ───────────────────── */}
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 mt-1">Rent this period</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5">
         <Card metric="rent_expected" label="Rent Expected" value={fmtFull(data.stats.rent_expected)}
               tone="slate" tip="Sum of daily rent we should have collected for the window — every billable EV-day at its daily rate."
               onClick={setDrawerMetric} />
@@ -218,23 +203,50 @@ export function DashboardPage() {
         <Card metric="arrears_recovered" label="Arrears Recovered" value={fmtFull(data.stats.arrears_recovered)}
               tone="emerald" tip="Old missed rent clawed back in this window (RENT_RECOVERED + XC_RENT_RECOVERED)."
               onClick={setDrawerMetric} />
-        <Card metric="total_arrears" label="Total Arrears (live)" value={fmtFull(data.stats.total_arrears)}
+      </div>
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 mt-1">Needs attention</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+        <Card metric="inactive_riders" label="Inactive Riders" value={fmt(data.stats.inactive_riders)}
+              tone="rose" tip="Riders with an active rider_master row in scope but no PAYOUT anywhere they work during the window. Click to see who."
+              onClick={setDrawerMetric} />
+        <Card metric="total_arrears" label="Due Rent (arrears, live)" value={fmtFull(data.stats.total_arrears)}
               tone="rose" tip="Snapshot, not window-scoped: EV arrears outstanding + general dues across every rider right now."
               onClick={setDrawerMetric} />
-        <Card metric="manual_rent" label="Rent Paid Manually" value={fmtFull(data.stats.manual_rent)}
-              tone="indigo" tip="Manual rent payments logged in the window (cash / UPI / off-bank)."
+        <Card metric="inactive_evs" label="Inactive EVs" value={fmt(data.stats.inactive_evs)}
+              tone="rose" tip="EVs that had at least one 'missed' day in the window (rider absent)."
               onClick={setDrawerMetric} />
-        <Card metric="cod" label="COD" value={fmtFull(data.stats.cod)}
-              tone="purple" tip="COD held in the window."
+      </div>
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 mt-1">Fleet & activity</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5">
+        <Card metric="active_riders" label="Active Riders" value={fmt(data.stats.active_riders)}
+              tone="slate" tip="Riders who had a PAYOUT in any of their (selected) companies during the window."
               onClick={setDrawerMetric} />
-        <Card metric="hold" label="HOLD" value={fmtFull(data.stats.hold)}
-              tone="amber" tip="Money held back from rider payouts in the window (gross payout − net released)."
+        <Card metric="active_evs" label="Active EVs" value={fmt(data.stats.active_evs)}
+              tone="slate" tip="EVs that earned rent (billed or recovered days) during the window."
               onClick={setDrawerMetric} />
-        <Card metric="payout" label="Payout" value={fmtFull(data.stats.payout)}
-              tone="blue" tip="Net cash released to riders during the window."
+        <Card metric="untouched_evs" label="Untouched EVs" value={fmt(data.stats.untouched_evs)}
+              tone="slate" tip="In_use EVs with NO ledger activity in the window (idle, in maintenance, or no cycle has covered them yet). Active + Inactive + Untouched = total in_use."
               onClick={setDrawerMetric} />
         <Card metric="provider_owed" label="Owed to Providers" value={fmtFull(data.stats.provider_owed)}
               tone="slate" tip="What we owe Raft / Blive / etc. for the window — daily provider cost across every EV that had ledger rows."
+              onClick={setDrawerMetric} />
+      </div>
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 mt-1">Money movement</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5">
+        <Card metric="payout" label="Payout" value={fmtFull(data.stats.payout)}
+              tone="slate" tip="Net cash released to riders during the window."
+              onClick={setDrawerMetric} />
+        <Card metric="hold" label="HOLD" value={fmtFull(data.stats.hold)}
+              tone="slate" tip="Money held back from rider payouts in the window (gross payout − net released)."
+              onClick={setDrawerMetric} />
+        <Card metric="cod" label="COD" value={fmtFull(data.stats.cod)}
+              tone="slate" tip="COD held in the window."
+              onClick={setDrawerMetric} />
+        <Card metric="manual_rent" label="Rent Paid Manually" value={fmtFull(data.stats.manual_rent)}
+              tone="slate" tip="Manual rent payments logged in the window (cash / UPI / off-bank)."
               onClick={setDrawerMetric} />
       </div>
 
