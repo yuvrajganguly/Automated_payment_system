@@ -197,3 +197,49 @@ def attribute_recovery(conn, *, person_id, recovery_event_id, amount,
         remaining -= cost
         healed += cost
     return round(healed, 2)
+
+
+def attribute_pending(conn, *, person_id, event_id, amount,
+                      day_from=None, day_to=None):
+    """Mark this person's oldest 'pending' (not-yet-processed billable) day-rows
+    in ``[day_from, day_to]`` as 'billed', pointing at ``event_id``, up to
+    ``amount`` worth of daily_cost.
+
+    Used when a manual rent payment covers a cycle the engine hasn't processed
+    yet: without this the days stay 'pending' (uncollected) on the dashboard /
+    provider report even though the rider has paid. Only days inside the given
+    window are touched, so a payment can't silently absorb unrelated future
+    days. Returns the amount actually attributed.
+    """
+    remaining = float(amount)
+    if remaining <= 0:
+        return 0.0
+    applied = 0.0
+    q = (
+        "SELECT ev_id, day, daily_cost FROM ev_daily_ledger "
+        "WHERE assigned_person_id=? "
+        "  AND (billing_status='pending' OR (billing_status IS NULL AND state='billable')) "
+    )
+    params: list = [person_id]
+    if day_from is not None:
+        q += "AND day >= ? "
+        params.append(day_from if isinstance(day_from, str) else day_from.isoformat())
+    if day_to is not None:
+        q += "AND day <= ? "
+        params.append(day_to if isinstance(day_to, str) else day_to.isoformat())
+    q += "ORDER BY day ASC"
+    for r in conn.execute(q, params).fetchall():
+        cost = float(r["daily_cost"] or 0)
+        if cost <= 0:
+            continue
+        if remaining + 0.005 < cost:
+            break  # not enough left to cover even one more day
+        conn.execute(
+            "UPDATE ev_daily_ledger SET billing_status='billed', "
+            "  cycle_event_id=?, last_updated=datetime('now') "
+            "WHERE ev_id=? AND day=?",
+            (event_id, r["ev_id"], r["day"]),
+        )
+        remaining -= cost
+        applied += cost
+    return round(applied, 2)

@@ -276,14 +276,23 @@ def post_rent_payment(body: RentPaymentIn,
                 (pid, rider_id, company, cs, ce,
                  applied_to_rent, balance,
                  f"manual rent payment ({note})", user["email"])).lastrowid
-            # Daily ledger: also heal missed days for this person with the
-            # rent-side amount (in case attribute_recovery's arrears walk
-            # didn't soak up everything missed yet).
-            from payout.domain.ev_daily import attribute_recovery
-            attribute_recovery(
+            # Daily ledger: heal any still-'missed' days first (safety net if
+            # the arrears walk above didn't soak them all up)...
+            from payout.domain.ev_daily import attribute_pending, attribute_recovery
+            healed = attribute_recovery(
                 conn, person_id=pid, recovery_event_id=collected_txn_id,
                 amount=applied_to_rent,
             )
+            # ...then, when the payment names an explicit coverage window, mark
+            # the leftover against 'pending' days in that window as 'billed', so
+            # a manual pre-payment for a not-yet-run cycle reads as collected
+            # (not pending) on the dashboard and provider reconciliation.
+            leftover = round(applied_to_rent - (healed or 0.0), 2)
+            if leftover > 0 and body.period_start and body.period_end:
+                attribute_pending(
+                    conn, person_id=pid, event_id=collected_txn_id,
+                    amount=leftover, day_from=cs, day_to=ce,
+                )
 
         # If the caller specified a coverage window and the payment actually
         # paid down some rent, advance the EV's rent_charged_through so the
