@@ -149,6 +149,9 @@ def dashboard_summary(
             f"                    THEN l.daily_cost ELSE 0 END), 0) AS collected, "
             f"  COALESCE(SUM(CASE WHEN l.billing_status='missed' "
             f"                    THEN l.daily_cost ELSE 0 END), 0) AS missed_day_sum, "
+            f"  COALESCE(SUM(CASE WHEN l.billing_status='pending' "
+            f"                    OR (l.billing_status IS NULL AND l.state='billable') "
+            f"                    THEN l.daily_cost ELSE 0 END), 0) AS pending_day_sum, "
             f"  COALESCE(SUM(l.provider_cost), 0) AS provider_owed "
             f"FROM ev_daily_ledger l "
             f"WHERE l.day BETWEEN ? AND ? {led_co_filter}",
@@ -156,7 +159,12 @@ def dashboard_summary(
         ).fetchone()
         rent_expected = float(rent_sums["expected"] or 0)
         rent_collected = float(rent_sums["collected"] or 0)
-        rent_missed = max(0.0, rent_expected - rent_collected)
+        # 'missed' = rider absent, rent fell to arrears (a real loss).
+        # 'pending' = billable days no cycle has processed yet (not a loss,
+        # just not collected). Splitting them stops a current, half-run
+        # week from looking like missed money.
+        rent_missed = float(rent_sums["missed_day_sum"] or 0)
+        rent_pending = float(rent_sums["pending_day_sum"] or 0)
         provider_owed = float(rent_sums["provider_owed"] or 0)
 
         # ── Active / Inactive riders ─────────────────────────────────────
@@ -177,11 +185,23 @@ def dashboard_summary(
         ).fetchall()}
         # All persons who have an active rider_master row in scope. Inactive
         # is this set minus the active set.
-        scope_pids = {r["person_id"] for r in conn.execute(
-            f"SELECT DISTINCT rm.person_id FROM rider_master rm "
-            f"WHERE rm.is_active=1 {co_scope}",
-            co_scope_params,
-        ).fetchall()}
+        # Only a company that actually processed a payout in the window can
+        # render its riders 'inactive' — otherwise a company that simply
+        # did not upload this week marks all its riders absent (false +ve).
+        companies_ran = [r["company"] for r in conn.execute(
+            f"SELECT DISTINCT t.company FROM transactions t "
+            f"WHERE t.event_type='PAYOUT' {scope}",
+            scope_params,
+        ).fetchall()]
+        if companies_ran:
+            ran_ph = ",".join("?" for _ in companies_ran)
+            scope_pids = {r["person_id"] for r in conn.execute(
+                f"SELECT DISTINCT rm.person_id FROM rider_master rm "
+                f"WHERE rm.is_active=1 {co_scope} AND rm.company IN ({ran_ph})",
+                co_scope_params + list(companies_ran),
+            ).fetchall()}
+        else:
+            scope_pids = set()
         active_riders = len(active_pids)
         inactive_pids = scope_pids - active_pids
         inactive_riders = len(inactive_pids)
@@ -281,6 +301,7 @@ def dashboard_summary(
             "rent_expected":     round(rent_expected, 2),
             "rent_collected":    round(rent_collected, 2),
             "rent_missed":       round(rent_missed, 2),
+            "rent_pending":      round(rent_pending, 2),
             "arrears_recovered": round(arrears_recov, 2),
             "total_arrears":     round(total_arrears, 2),
             "manual_rent":       round(manual_rent, 2),
@@ -456,7 +477,7 @@ def dashboard_summary(
 _METRICS = {
     "active_riders", "inactive_riders",
     "active_evs", "inactive_evs", "untouched_evs",
-    "rent_expected", "rent_collected", "rent_missed",
+    "rent_expected", "rent_collected", "rent_missed", "rent_pending",
     "arrears_recovered", "manual_rent", "cod", "hold", "payout",
     "total_arrears", "provider_owed",
 }
@@ -699,30 +720,44 @@ def dashboard_breakdown(
                 sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "rent_missed":
-            title = "Rent missed (expected − collected) per rider"
-            columns = ["person_id", "name", "days_expected",
-                       "expected", "collected", "missed"]
+            title = "Rent missed (rider absent -> arrears) per rider"
+            columns = ["person_id", "name", "days_missed", "missed"]
             sql = (
                 f"SELECT l.assigned_person_id AS person_id, "
                 f"       pr.display_name AS name, "
-                f"       SUM(CASE WHEN l.state='billable' THEN 1 ELSE 0 END) AS days_expected, "
-                f"       SUM(CASE WHEN l.state='billable' THEN l.daily_cost ELSE 0 END) AS expected, "
-                f"       SUM(CASE WHEN l.billing_status IN ('billed','recovered') "
-                f"                THEN l.daily_cost ELSE 0 END) AS collected "
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN 1 ELSE 0 END) AS days_missed, "
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) AS missed "
+                f"FROM ev_daily_ledger l "
+                f"JOIN person_registry pr ON pr.person_id=l.assigned_person_id "
+                f"WHERE l.day BETWEEN ? AND ? AND l.billing_status='missed' {led_co_filter} "
+                f"GROUP BY l.assigned_person_id, pr.display_name "
+                f"ORDER BY missed DESC LIMIT ?"
+            )
+            rows = [dict(r) for r in conn.execute(
+                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+
+        elif metric == "rent_pending":
+            title = "Rent pending - billable days no cycle has processed yet"
+            columns = ["person_id", "name", "days_pending", "pending"]
+            sql = (
+                f"SELECT l.assigned_person_id AS person_id, "
+                f"       pr.display_name AS name, "
+                f"       SUM(CASE WHEN l.billing_status='pending' "
+                f"                OR (l.billing_status IS NULL AND l.state='billable') "
+                f"                THEN 1 ELSE 0 END) AS days_pending, "
+                f"       SUM(CASE WHEN l.billing_status='pending' "
+                f"                OR (l.billing_status IS NULL AND l.state='billable') "
+                f"                THEN l.daily_cost ELSE 0 END) AS pending "
                 f"FROM ev_daily_ledger l "
                 f"JOIN person_registry pr ON pr.person_id=l.assigned_person_id "
                 f"WHERE l.day BETWEEN ? AND ? {led_co_filter} "
+                f"  AND (l.billing_status='pending' "
+                f"       OR (l.billing_status IS NULL AND l.state='billable')) "
                 f"GROUP BY l.assigned_person_id, pr.display_name "
-                f"HAVING expected > collected "
-                f"ORDER BY (expected - collected) DESC LIMIT ?"
+                f"ORDER BY pending DESC LIMIT ?"
             )
-            rows = []
-            for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit]):
-                d = dict(r)
-                d["missed"] = round(float(d["expected"] or 0)
-                                    - float(d["collected"] or 0), 2)
-                rows.append(d)
+            rows = [dict(r) for r in conn.execute(
+                sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "arrears_recovered":
             title = "Old arrears clawed back this cycle"

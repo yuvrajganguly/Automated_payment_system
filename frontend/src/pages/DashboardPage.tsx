@@ -26,6 +26,7 @@ interface Stats {
   rent_expected: number
   rent_collected: number
   rent_missed: number
+  rent_pending: number
   arrears_recovered: number
   total_arrears: number
   manual_rent: number
@@ -190,7 +191,7 @@ export function DashboardPage() {
 
       {/* ── Stat tiers (grouped for hierarchy) ───────────────────── */}
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 mt-1">Rent this period</p>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         <Card metric="rent_expected" label="Rent Expected" value={fmtFull(data.stats.rent_expected)}
               tone="slate" tip="Sum of daily rent we should have collected for the window — every billable EV-day at its daily rate."
               onClick={setDrawerMetric} />
@@ -198,7 +199,10 @@ export function DashboardPage() {
               tone="emerald" tip="Actually collected — daily rent for every 'billed' and 'recovered' day in the window."
               onClick={setDrawerMetric} />
         <Card metric="rent_missed" label="Rent Missed" value={fmtFull(data.stats.rent_missed)}
-              tone="rose" tip="Expected − Collected. Includes absent riders' rent AND partial-collection shortfalls."
+              tone="rose" tip="Rider was absent so rent fell to arrears this window — a real loss. Click to see who."
+              onClick={setDrawerMetric} />
+        <Card metric="rent_pending" label="Rent Pending" value={fmtFull(data.stats.rent_pending)}
+              tone="amber" tip="Billable EV-days no cycle has processed yet — not lost, just not collected. Shrinks as cycles run."
               onClick={setDrawerMetric} />
         <Card metric="arrears_recovered" label="Arrears Recovered" value={fmtFull(data.stats.arrears_recovered)}
               tone="emerald" tip="Old missed rent clawed back in this window (RENT_RECOVERED + XC_RENT_RECOVERED)."
