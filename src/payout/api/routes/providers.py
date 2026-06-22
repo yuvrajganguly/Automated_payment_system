@@ -30,6 +30,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.fleet_sync import IngestRow, ingest_master_rows
 from payout.domain.reconciliation import provider_rider_reconciliation
+from payout.money import to_paise
 from payout.exports import xlsx_response
 from payout.parsers.base import match_column
 
@@ -209,6 +210,7 @@ def provider_reconciliation_export(
                  "Recovered", "Pending", "Collection %", "Settled via"],
         rows=rows,
         numeric_cols=(3, 4, 5, 6, 7, 8),
+        money_cols=(3, 4, 5, 6, 7),
         totals_cols=(3, 4, 5, 6, 7),
         left_align_cols=(1, 2, 9),
     )
@@ -272,7 +274,7 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
             continue
         line_no += 1
         try:
-            amount = float(str(amt).replace(",", "").replace("₹", "").strip()) if amt else 0.0
+            amount = to_paise(str(amt).replace(",", "").replace("₹", "").strip()) if amt else 0
         except ValueError:
             amount = 0.0
         out.append({
@@ -309,7 +311,7 @@ async def upload_bill(
         raise HTTPException(400, "No usable rows found in the file.")
 
     df_iso, dt_iso = d_from.isoformat(), d_to.isoformat()
-    bill_total = round(sum(L["their_amount"] for L in lines), 2)
+    bill_total = sum(L["their_amount"] for L in lines)  # paise
 
     with get_connection() as conn:
         cur = conn.execute(

@@ -17,7 +17,8 @@ def test_to_rupees():
 def test_prorate_full_week_is_exact():
     assert prorate(125000, 7) == 125000
     assert prorate(129500, 7) == 129500
-    assert prorate(125000, 9) == 125000    # catch-up capped? no: >=7 -> full
+    assert prorate(125000, 14) == 250000   # catch-up: 2 weeks
+    assert prorate(125000, 9) == 160714    # >1wk prorates up, not capped
 
 
 def test_prorate_partial_rounds_once():

@@ -20,18 +20,18 @@ def _blive_rider(db, handover=None):
 
 def test_maintenance_reduces_rent(db):
     pid = _blive_rider(db)
-    assert resolve_rent(db, pid, CS, CE).rent == 1260.0
+    assert resolve_rent(db, pid, CS, CE).rent == 126000.0
     log_maintenance(db, "B1", date(2026, 3, 4), date(2026, 3, 5), "workshop", "t")
     db.commit()
     info = resolve_rent(db, pid, CS, CE)
     assert info.maintenance_days == 2 and info.days == 5
-    assert info.rent == pytest.approx(900.0)
+    assert info.rent == pytest.approx(90000.0)
 
 
 def test_ad_hoc_waive_days(db):
     pid = _blive_rider(db)
     info = resolve_rent(db, pid, CS, CE, waive_days=2)
-    assert info.days == 5 and info.rent == pytest.approx(900.0)
+    assert info.days == 5 and info.rent == pytest.approx(90000.0)
 
 
 def test_full_waiver(db):

@@ -60,6 +60,7 @@ def export_ev_units(status: Optional[str] = None,
         filename_stem="ev_units", sheet_name="EVS",
         headers=headers, rows=out,
         numeric_cols=(4,), totals_cols=(4,),
+        money_cols=(4,),
         left_align_cols=(6, 11),
     )
 

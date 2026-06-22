@@ -14,6 +14,7 @@ from typing import Iterable, Sequence
 
 from fastapi import Response
 from openpyxl import Workbook
+from payout.money import to_rupees
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -53,6 +54,7 @@ def build_xlsx(
     numeric_cols: Sequence[int] = (),
     totals_cols: Sequence[int] = (),
     left_align_cols: Sequence[int] = (),
+    money_cols: Sequence[int] = (),
 ) -> BytesIO:
     """Build a one-sheet styled .xlsx in memory.
 
@@ -79,8 +81,13 @@ def build_xlsx(
         c.border = _border()
     ws.freeze_panes = "A2"
 
-    # Body.
+    # Body. Money columns are stored as integer paise internally -> rupees here.
     rows = list(rows)
+    if money_cols:
+        mset = set(money_cols)
+        rows = [[(to_rupees(v) if (i + 1) in mset and isinstance(v, (int, float))
+                  and not isinstance(v, bool) else v)
+                 for i, v in enumerate(r)] for r in rows]
     for i, row in enumerate(rows, 2):
         for col, v in enumerate(row, 1):
             c = ws.cell(row=i, column=col, value=v)
@@ -125,6 +132,7 @@ def add_styled_sheet(
     numeric_cols: Sequence[int] = (),
     totals_cols: Sequence[int] = (),
     left_align_cols: Sequence[int] = (),
+    money_cols: Sequence[int] = (),
 ) -> None:
     """Append one styled sheet to an existing Workbook.
 
@@ -198,6 +206,7 @@ def xlsx_response(
     numeric_cols: Sequence[int] = (),
     totals_cols: Sequence[int] = (),
     left_align_cols: Sequence[int] = (),
+    money_cols: Sequence[int] = (),
 ) -> Response:
     """Wrap ``build_xlsx`` in a FastAPI Response with proper headers.
 
@@ -207,7 +216,7 @@ def xlsx_response(
     buf = build_xlsx(
         sheet_name=sheet_name, headers=headers, rows=rows,
         numeric_cols=numeric_cols, totals_cols=totals_cols,
-        left_align_cols=left_align_cols,
+        left_align_cols=left_align_cols, money_cols=money_cols,
     )
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     name = f"{filename_stem}_{stamp}.xlsx"

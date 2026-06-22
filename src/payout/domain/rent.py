@@ -108,11 +108,9 @@ def chargeable_days(cycle_start, cycle_end, handover_date,
 
 
 def rent_for_days(weekly_rate, days):
-    if days <= 0:
-        return 0.0
-    if days == STANDARD_CYCLE_DAYS:
-        return float(weekly_rate)
-    return weekly_rate / 7.0 * days
+    """Rent for ``days`` of a weekly rate, in integer paise (rounded once)."""
+    from payout.money import prorate
+    return prorate(int(weekly_rate), days, STANDARD_CYCLE_DAYS)
 
 
 def maintenance_days_in_window(conn, ev_id, win_start, win_end):
@@ -214,7 +212,7 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
 
     built_legs: list[AssignmentLeg] = []
     total_base = total_maint = total_waived = total_days = 0
-    total_rent = 0.0
+    total_rent = 0
     rent_from_overall: date | None = None
     rent_through_overall: date | None = None
     open_leg = None
@@ -227,7 +225,7 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
         built = AssignmentLeg(
             assignment_id=r["assignment_id"], ev_id=r["ev_id"],
             provider=r["provider"], model=r["model_name"],
-            weekly_rate=float(r["weekly_rate"]),
+            weekly_rate=int(r["weekly_rate"]),
             handover_date=leg["hod"], returned_date=leg["ret"],
             rent_charged_through=leg["charged"],
             days=eff_days, base_days=leg["base"],
@@ -256,9 +254,9 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
 
     # Overrides apply to the TOTAL.
     if rent_override is not None:
-        total_rent = float(rent_override)
+        total_rent = int(rent_override)
     elif waive_all:
-        total_rent = 0.0
+        total_rent = 0
 
     display = open_leg or most_recent_returned or built_legs[0]
     return RentInfo(

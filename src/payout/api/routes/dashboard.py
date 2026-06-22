@@ -20,6 +20,7 @@ from openpyxl import Workbook
 from payout.api.auth import get_current_user
 from payout.db import get_connection
 from payout.exports import add_styled_sheet, workbook_response
+from payout.money import to_rupees
 
 router = APIRouter()
 
@@ -985,19 +986,19 @@ def dashboard_export(
                 ("Scope", scope_label),
                 ("Cycle ends included", ", ".join(cycle_ends) or "—"),
                 ("Active Riders", sums["active_riders"] or 0),
-                ("Rent Charged",      rent_charged),
-                ("Rent Collected",    rent_collected),
-                ("Rent Dues (shortfall)", rent_dues),
-                ("Rent Missed",       float(sums["rent_missed"] or 0)),
-                ("Arrears Recovered", float(sums["arrears_recovered"] or 0)),
-                ("Manual Rent",       float(sums["manual_rent"] or 0)),
-                ("COD",               cod_total),
-                ("HOLD (gross − net)", max(0.0, gross - payout)),
-                ("Payout (released)", payout),
+                ("Rent Charged",      to_rupees(rent_charged)),
+                ("Rent Collected",    to_rupees(rent_collected)),
+                ("Rent Dues (shortfall)", to_rupees(rent_dues)),
+                ("Rent Missed",       to_rupees(float(sums["rent_missed"] or 0))),
+                ("Arrears Recovered", to_rupees(float(sums["arrears_recovered"] or 0))),
+                ("Manual Rent",       to_rupees(float(sums["manual_rent"] or 0))),
+                ("COD",               to_rupees(cod_total)),
+                ("HOLD (gross − net)", to_rupees(max(0.0, gross - payout))),
+                ("Payout (released)", to_rupees(payout)),
                 ("— Live —", ""),
-                ("Total EV arrears (live)", ev_arr),
-                ("Total general dues (live)", old_dues),
-                ("Total arrears (EV + dues)", ev_arr + old_dues),
+                ("Total EV arrears (live)", to_rupees(ev_arr)),
+                ("Total general dues (live)", to_rupees(old_dues)),
+                ("Total arrears (EV + dues)", to_rupees(ev_arr + old_dues)),
             ],
             numeric_cols=(2,),
             left_align_cols=(1,),
@@ -1037,6 +1038,7 @@ def dashboard_export(
             ],
             numeric_cols=(5, 6, 7, 8, 9),
             totals_cols=(5, 6, 7, 8, 9),
+            money_cols=(5, 6, 7, 8, 9),
             left_align_cols=(2,),
         )
 
@@ -1075,6 +1077,7 @@ def dashboard_export(
                 for r in arr_rows
             ],
             numeric_cols=(5, 6, 7),
+            money_cols=(5, 6, 7),
             totals_cols=(5, 6, 7),
             left_align_cols=(2, 3, 4),
         )
@@ -1098,7 +1101,7 @@ def dashboard_export(
             rows=[(r["ev_id"], r["person_id"], r["name"], r["company"],
                    float(r["rent"] or 0), float(r["collected"] or 0))
                   for r in active_ev_rows],
-            numeric_cols=(5, 6), totals_cols=(5, 6), left_align_cols=(3,),
+            numeric_cols=(5, 6), totals_cols=(5, 6), money_cols=(5, 6), left_align_cols=(3,),
         )
 
         # 5. Inactive EVs
@@ -1118,7 +1121,7 @@ def dashboard_export(
             headers=["EV ID", "Person ID", "Name", "Company", "Missed"],
             rows=[(r["ev_id"], r["person_id"], r["name"], r["company"],
                    float(r["missed"] or 0)) for r in inactive_ev_rows],
-            numeric_cols=(5,), totals_cols=(5,), left_align_cols=(3,),
+            numeric_cols=(5,), totals_cols=(5,), money_cols=(5,), left_align_cols=(3,),
         )
 
         # 6. Money flow per rider
@@ -1155,6 +1158,7 @@ def dashboard_export(
             ) for r in money_rows],
             numeric_cols=(4, 5, 6, 7, 8, 9),
             totals_cols=(4, 5, 6, 7, 8, 9),
+            money_cols=(4, 5, 6, 7, 8, 9),
             left_align_cols=(2,),
         )
 
@@ -1179,7 +1183,7 @@ def dashboard_export(
                    r["cycle_start"], r["cycle_end"], float(r["amount"] or 0),
                    r["remarks"] or "", r["created_by"] or "",
                    r["created_at"] or "") for r in manual_rows],
-            numeric_cols=(7,), totals_cols=(7,), left_align_cols=(3, 8, 9, 10),
+            numeric_cols=(7,), totals_cols=(7,), money_cols=(7,), left_align_cols=(3, 8, 9, 10),
         )
 
         # 8. COD details
@@ -1200,7 +1204,7 @@ def dashboard_export(
                    r["order_number"] or "", r["payment_mode"] or "",
                    r["txn_status"] or "", r["cleared_at"] or "",
                    r["cleared_by"] or "") for r in cod_rows],
-            numeric_cols=(6,), totals_cols=(6,), left_align_cols=(7, 8, 9, 11),
+            numeric_cols=(6,), totals_cols=(6,), money_cols=(6,), left_align_cols=(7, 8, 9, 11),
         )
 
         # 9. Per-company cycle history (full)
@@ -1225,6 +1229,7 @@ def dashboard_export(
                    float(r["total_rent_missed"] or 0),
                    r["processed_at"], r["processed_by"]) for r in cyc_history],
             numeric_cols=(8, 9, 10, 11),
+            money_cols=(8, 9, 10, 11),
             left_align_cols=(12, 13),
         )
 

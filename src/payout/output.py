@@ -10,6 +10,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from payout.db import get_connection
+from payout.money import to_rupees
 
 HDR_FG = "1F4E79"; HDR_TX = "FFFFFF"
 HOLD_FILL = "FFD966"; DUES_FILL = "FCE4D6"; FLAG_FILL = "FF7F7F"
@@ -47,8 +48,14 @@ def _style_row(ws, row_idx, n_cols, fill=None, bold=False):
 
 
 def _set_num(ws, row_idx, cols):
+    """Format the given (money) columns as INR and convert stored paise to
+    rupees. SUM-formula cells (strings) are left alone; they sum the already
+    converted rupee cells above them."""
     for col in cols:
-        ws.cell(row=row_idx, column=col).number_format = NUM
+        c = ws.cell(row=row_idx, column=col)
+        if isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
+            c.value = to_rupees(c.value)
+        c.number_format = NUM
 
 
 def _auto_width(ws, min_w=10, max_w=42):
@@ -66,7 +73,7 @@ PAY_HEADERS = ["Person ID","Rider ID","Name","Hub","Vehicle","EV ID","Orders",
                "Remarks","Account No","IFSC","Manual Adjustment","Notes"]
 # Numeric (right-align + thousands separator) columns. Orders=7 stays integer-ish
 # but we leave it in the numeric set so it formats consistently.
-PAY_NUM = [7, 8, 9, 10, 11, 12, 13, 14, 15, 19]
+PAY_NUM = [8, 9, 10, 11, 12, 13, 14, 15, 19]   # money only (Orders=7 excluded)
 PAY_SUM = [7, 8, 9, 10, 11, 12, 13, 14, 15]
 
 
@@ -112,7 +119,7 @@ def _pay_sheet(wb, rows):
 DUES_HEADERS = ["Person ID","Rider ID","Name","Hub","Vehicle","EV ID","Model",
                 "Orders","Gross Payout","Rent Charged","Arrears Recovered",
                 "Dues Cleared","Previous Dues","Carry Forward","Account No","IFSC"]
-DUES_NUM = [8, 9, 10, 11, 12, 13, 14]
+DUES_NUM = [9, 10, 11, 12, 13, 14]             # money only (Orders=8 excluded)
 DUES_SUM = [8, 9, 10, 11, 12, 13, 14]
 
 
@@ -205,7 +212,9 @@ def _hold_sheet(wb, conn, company, cs, ce):
             ws.cell(row=i, column=col, value=v).alignment = Alignment(
                 horizontal="left" if col == 2 else "center", vertical="center")
         _style_row(ws, i, len(HOLD_HEADERS), fill=HOLD_FILL)
-        ws.cell(row=i, column=3).number_format = NUM
+        _hc = ws.cell(row=i, column=3)
+        if isinstance(_hc.value,(int,float)) and not isinstance(_hc.value,bool): _hc.value = to_rupees(_hc.value)
+        _hc.number_format = NUM
     start = len(rows) + 4
     if start > 4:
         ws.cell(row=start - 1, column=1, value="Line Items").font = _body_font(bold=True)
@@ -221,7 +230,9 @@ def _hold_sheet(wb, conn, company, cs, ce):
         for col, v in enumerate(vals, 1):
             ws.cell(row=i, column=col, value=v).alignment = Alignment(horizontal="center")
         _style_row(ws, i, len(LINE_HEADERS))
-        ws.cell(row=i, column=3).number_format = NUM
+        _hc = ws.cell(row=i, column=3)
+        if isinstance(_hc.value,(int,float)) and not isinstance(_hc.value,bool): _hc.value = to_rupees(_hc.value)
+        _hc.number_format = NUM
     _auto_width(ws)
 
 

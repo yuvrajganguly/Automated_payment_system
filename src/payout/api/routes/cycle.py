@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from payout.api.auth import get_current_user
 from payout.api.schemas import RiderOverrideIn
 from payout.domain.engine import CycleOverrides, RiderOverride, process_cycle
+from payout.money import to_paise
 from payout.output import build_output, build_output_filename
 
 router = APIRouter()
@@ -48,7 +49,7 @@ def _parse_overrides(raw: str | None) -> CycleOverrides:
         ov = RiderOverrideIn.model_validate(item)
         per_rider[ov.rider_id] = RiderOverride(
             waive_days=ov.waive_days, waive_all=ov.waive_all,
-            rent_override=ov.rent_override,
+            rent_override=(to_paise(ov.rent_override) if ov.rent_override is not None else None),
             force_hold=ov.force_hold, force_release=ov.force_release,
         )
     return CycleOverrides(per_rider=per_rider, adjustments=data.get("adjustments", []) or [])

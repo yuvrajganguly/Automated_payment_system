@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS ev_models (
     model_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     provider    TEXT NOT NULL,
     model_name  TEXT NOT NULL,
-    weekly_rate REAL NOT NULL,
+    weekly_rate INTEGER NOT NULL,
     UNIQUE (provider, model_name)
 );
 
@@ -96,12 +96,12 @@ CREATE INDEX IF NOT EXISTS idx_assignment_ev     ON ev_assignments (ev_id);
 --     from a payout rolls forward and is clawed back exactly like EV rent.
 CREATE TABLE IF NOT EXISTS ev_arrears (
     person_id        INTEGER PRIMARY KEY REFERENCES person_registry(person_id),
-    total_missed     REAL NOT NULL DEFAULT 0,
-    total_recovered  REAL NOT NULL DEFAULT 0,
-    outstanding      REAL NOT NULL DEFAULT 0,
-    cod_missed       REAL NOT NULL DEFAULT 0,
-    cod_recovered    REAL NOT NULL DEFAULT 0,
-    cod_outstanding  REAL NOT NULL DEFAULT 0,
+    total_missed     INTEGER NOT NULL DEFAULT 0,
+    total_recovered  INTEGER NOT NULL DEFAULT 0,
+    outstanding      INTEGER NOT NULL DEFAULT 0,
+    cod_missed       INTEGER NOT NULL DEFAULT 0,
+    cod_recovered    INTEGER NOT NULL DEFAULT 0,
+    cod_outstanding  INTEGER NOT NULL DEFAULT 0,
     last_updated     TEXT
 );
 
@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     cycle_start   TEXT NOT NULL,
     cycle_end     TEXT NOT NULL,
     event_type    TEXT NOT NULL,
-    amount        REAL NOT NULL,
-    balance_after REAL NOT NULL,
+    amount        INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
     days          INTEGER,
     remarks       TEXT,
     created_at    TEXT DEFAULT (datetime('now')),
@@ -140,8 +140,8 @@ CREATE INDEX IF NOT EXISTS idx_txn_rent_guard
 -- carryforward (i.e., it's drawn from current_balance going forward).
 CREATE TABLE IF NOT EXISTS balances (
     person_id            INTEGER PRIMARY KEY REFERENCES person_registry(person_id),
-    current_balance      REAL NOT NULL DEFAULT 0,
-    pending_xc_rent      REAL NOT NULL DEFAULT 0,
+    current_balance      INTEGER NOT NULL DEFAULT 0,
+    pending_xc_rent      INTEGER NOT NULL DEFAULT 0,
     xc_origin_company    TEXT,
     -- cycle_end of the cycle that produced this pending_xc_rent shortfall.
     -- Lets the engine detect "a new cycle's RENT just landed" and collapse
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS cod_holds (
     person_id    INTEGER REFERENCES person_registry(person_id),
     worker_code  TEXT,
     order_number TEXT,
-    amount       REAL NOT NULL DEFAULT 0,
+    amount       INTEGER NOT NULL DEFAULT 0,
     payment_mode TEXT,
     txn_status   TEXT,
     source       TEXT NOT NULL,
@@ -224,10 +224,10 @@ CREATE TABLE IF NOT EXISTS company_cycles (
     rider_count          INTEGER NOT NULL DEFAULT 0,
     riders_paid          INTEGER NOT NULL DEFAULT 0,
     riders_in_dues       INTEGER NOT NULL DEFAULT 0,
-    total_release        REAL NOT NULL DEFAULT 0,
-    total_rent_charged   REAL NOT NULL DEFAULT 0,
-    total_rent_collected REAL NOT NULL DEFAULT 0,
-    total_rent_missed    REAL NOT NULL DEFAULT 0,
+    total_release        INTEGER NOT NULL DEFAULT 0,
+    total_rent_charged   INTEGER NOT NULL DEFAULT 0,
+    total_rent_collected INTEGER NOT NULL DEFAULT 0,
+    total_rent_missed    INTEGER NOT NULL DEFAULT 0,
     UNIQUE(company, cycle_start, cycle_end)
 );
 CREATE INDEX IF NOT EXISTS idx_company_cycles_bucket
@@ -245,8 +245,8 @@ CREATE TABLE IF NOT EXISTS ev_daily_ledger (
     day                    TEXT NOT NULL,                       -- ISO date
     state                  TEXT NOT NULL,                       -- billable | handover_free | return_free | maintenance | unassigned
     assigned_person_id     INTEGER REFERENCES person_registry(person_id),
-    daily_cost             REAL NOT NULL DEFAULT 0,             -- = weekly_rate / 7 when the day is billable to a rider
-    provider_cost          REAL NOT NULL DEFAULT 0,             -- always weekly_rate/7 — what we owe the EV provider regardless
+    daily_cost             INTEGER NOT NULL DEFAULT 0,             -- = weekly_rate / 7 when the day is billable to a rider
+    provider_cost          INTEGER NOT NULL DEFAULT 0,             -- always weekly_rate/7 — what we owe the EV provider regardless
     billing_status         TEXT,                                -- billed | missed | recovered | pending
     cycle_event_id         INTEGER,                             -- the RENT / RENT_MISSED row that produced this billing_status
     recovery_event_id      INTEGER,                             -- the RENT_RECOVERED / XC_RENT_RECOVERED row that healed a 'missed' day
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS provider_bills (
     provider        TEXT NOT NULL,                     -- 'Raft' | 'Blive' | …
     period_start    TEXT NOT NULL,                     -- ISO date inclusive
     period_end      TEXT NOT NULL,                     -- ISO date inclusive
-    bill_total      REAL NOT NULL DEFAULT 0,           -- sum from the file
+    bill_total      INTEGER NOT NULL DEFAULT 0,           -- sum from the file
     line_count      INTEGER NOT NULL DEFAULT 0,
     file_name       TEXT,
     uploaded_at     TEXT DEFAULT (datetime('now')),
@@ -284,11 +284,11 @@ CREATE TABLE IF NOT EXISTS provider_bill_lines (
     line_no         INTEGER,
     ev_id_raw       TEXT,                              -- as it appeared in the file
     ev_id           TEXT,                              -- normalised; NULL if unmatched
-    their_amount    REAL NOT NULL DEFAULT 0,
+    their_amount    INTEGER NOT NULL DEFAULT 0,
     status_note     TEXT,                              -- last column: maintenance / closed / etc.
     -- Filled when we tally against ev_daily_ledger:
-    our_amount      REAL,
-    discrepancy     REAL,                              -- their_amount − our_amount
+    our_amount      INTEGER,
+    discrepancy     INTEGER,                              -- their_amount − our_amount
     notes           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_bill_lines_bill ON provider_bill_lines (bill_id);
@@ -371,7 +371,7 @@ CREATE TABLE IF NOT EXISTS payment_lines (
     bene_name        TEXT,
     bene_account_no  TEXT,
     bene_ifsc        TEXT,
-    amount           REAL NOT NULL DEFAULT 0,
+    amount           INTEGER NOT NULL DEFAULT 0,
     remark           TEXT,
     pymt_date        TEXT,
     bank_status      TEXT,

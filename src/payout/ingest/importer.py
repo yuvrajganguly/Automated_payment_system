@@ -20,6 +20,7 @@ from io import BytesIO
 import pandas as pd
 
 from payout.db import get_connection
+from payout.money import to_paise
 from payout.parsers.base import match_column, read_table, to_float
 
 _ROSTER_KEYS = ("roster",)
@@ -249,9 +250,9 @@ def _import_balances(conn, xl, report, created_by):
         seen.add(person_id)
         if conn.execute("SELECT 1 FROM transactions WHERE person_id=? AND event_type='OPENING'", (person_id,)).fetchone():
             skipped += 1; continue
-        dues = to_float(_cell(row, c["dues"])) or 0.0
-        arr = to_float(_cell(row, c["arr"])) or 0.0
-        cod = (to_float(_cell(row, c["cod"])) or 0.0) if c.get("cod") else 0.0
+        dues = to_paise(to_float(_cell(row, c["dues"])) or 0)
+        arr = to_paise(to_float(_cell(row, c["arr"])) or 0)
+        cod = to_paise(to_float(_cell(row, c["cod"])) or 0) if c.get("cod") else 0
         if dues == 0 and arr == 0 and cod == 0:
             continue
         final_bal = -abs(dues)

@@ -92,8 +92,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from payout.api.middleware import AuditLogMiddleware  # noqa: E402
+from payout.api.middleware import AuditLogMiddleware, RupeeizeMiddleware  # noqa: E402
 app.add_middleware(AuditLogMiddleware)
+app.add_middleware(RupeeizeMiddleware)
 
 app.include_router(auth_routes.router,    prefix="/api/auth",      tags=["auth"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])

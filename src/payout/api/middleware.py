@@ -89,3 +89,32 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             pass
 
         return response
+
+
+class RupeeizeMiddleware(BaseHTTPMiddleware):
+    """Convert internal integer **paise** to rupee floats on the way out.
+
+    Domain + DB store money as paise; this is the single egress point that
+    turns every JSON money field (see payout.money.MONEY_KEYS) back into
+    rupees so the API/clients are unchanged. Binary downloads (xlsx) skip this
+    and convert in their own builders.
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        ctype = response.headers.get("content-type", "")
+        if not ctype.startswith("application/json"):
+            return response
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            import json as _json
+            from payout.money import rupeeize
+            data = rupeeize(_json.loads(body))
+            payload = _json.dumps(data).encode("utf-8")
+        except Exception:
+            return Response(content=body, status_code=response.status_code,
+                            headers=dict(response.headers), media_type=ctype)
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        return Response(content=payload, status_code=response.status_code,
+                        headers=headers, media_type="application/json")

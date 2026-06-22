@@ -19,8 +19,8 @@ from datetime import date, timedelta
 COMPANIES = ["Dealshare", "Myntra", "Jiffy", "Zepto", "Blitz"]
 # Rough relative size of each company's rider base.
 CO_WEIGHT = {"Dealshare": 8, "Myntra": 16, "Jiffy": 9, "Zepto": 6, "Blitz": 11}
-MODELS = [("Raft", "Regular", 1250.0), ("Raft", "Blue", 1295.0),
-          ("Blive", "Standard", 1260.0)]
+MODELS = [("Raft", "Regular", 125000), ("Raft", "Blue", 129500),
+          ("Blive", "Standard", 126000)]  # paise
 HUBS = ["Behala", "Dum Dum", "New Alipore", "Kasba", "Nagar Bazar", "Kalyani",
         "Maheshtala", "Rajpur", "New Town", "Salt Lake", "Garia", "Howrah",
         "Barasat", "Sonarpur"]
@@ -151,15 +151,20 @@ def seed_demo(conn: sqlite3.Connection) -> None:
              f"{ds(w[1])} 12:00:00"),
         ).lastrowid
 
-    def ledger(ev_id, w, pid, daily, status, event_id):
+    def ledger(ev_id, w, pid, rate, status, event_id):
+        from payout.money import split_evenly
+        days = []
         d = w[0]
         while d <= w[1]:
+            days.append(d); d += timedelta(days=1)
+        prov = round(rate / 7)
+        parts = split_evenly(rate, len(days))      # rider cost sums to the week's rate
+        for i, dd in enumerate(days):
             conn.execute(
                 "INSERT OR REPLACE INTO ev_daily_ledger (ev_id, day, state, "
                 "assigned_person_id, daily_cost, provider_cost, billing_status, "
                 "cycle_event_id) VALUES (?,?, 'billable',?,?,?,?,?)",
-                (ev_id, ds(d), pid, daily, daily, status, event_id))
-            d += timedelta(days=1)
+                (ev_id, ds(dd), pid, parts[i], prov, status, event_id))
 
     for wi, w in enumerate(weeks):
         for p in persons:
@@ -169,22 +174,22 @@ def seed_demo(conn: sqlite3.Connection) -> None:
             present = rng.random() < (p["reliability"] - (0.10 if wi == len(weeks) - 1 else 0.0))
             ev = p["ev"]
             rate = ev[1] if ev else 0.0
-            daily = round(rate / 7.0, 2)
+            daily = round(rate / 7)        # paise
             if present:
                 a["rider_count"] += 1
                 a["riders_paid"] += 1
-                payout = float(rng.randint(14, 90) * 100)   # 1400..9000
+                payout = rng.randint(14, 90) * 10000        # paise (1400..9000 rupees)
                 txn(p["pid"], p["rid"], co, w, "PAYOUT", payout,
                     remarks="weekly payout")
                 if ev:
                     rid_txn = txn(p["pid"], p["rid"], co, w, "RENT", -rate, days=7,
                                   remarks="EV rent")
-                    ledger(ev[0], w, p["pid"], daily, "billed", rid_txn)
+                    ledger(ev[0], w, p["pid"], rate, "billed", rid_txn)
                     txn(p["pid"], p["rid"], co, w, "RENT_COLLECTED", rate,
                         remarks="rent collected from payout")
                     a["total_rent_charged"] += rate
                     a["total_rent_collected"] += rate
-                    release = max(0.0, payout - rate)
+                    release = max(0, payout - rate)
                 else:
                     release = payout
                 txn(p["pid"], p["rid"], co, w, "RELEASE", -release,
@@ -194,7 +199,7 @@ def seed_demo(conn: sqlite3.Connection) -> None:
                 # Absent EV holder -> rent missed -> arrears, missed day-rows.
                 mid = txn(p["pid"], p["rid"], co, w, "RENT_MISSED", -rate, days=7,
                           remarks="absent from payout")
-                ledger(ev[0], w, p["pid"], daily, "missed", mid)
+                ledger(ev[0], w, p["pid"], rate, "missed", mid)
                 ar = arrears.setdefault(p["pid"], {"missed": 0.0, "recovered": 0.0})
                 ar["missed"] += rate
                 md = missed_days.setdefault(p["pid"], [])
@@ -214,7 +219,7 @@ def seed_demo(conn: sqlite3.Connection) -> None:
         out = ar["missed"] - ar["recovered"]
         if out <= 0:
             continue
-        pay = round(min(out, p["ev"][1]), 2)       # claw back ~one week
+        pay = min(out, p["ev"][1])                 # claw back ~one week (paise)
         rev = txn(p["pid"], p["rid"], p["primary"], newest, "RENT_RECOVERED", pay,
                   remarks="arrears cleared (manual)", by="demo")
         # Flip that many missed day-rows to 'recovered'.
@@ -232,11 +237,11 @@ def seed_demo(conn: sqlite3.Connection) -> None:
 
     # ── Arrears table ───────────────────────────────────────────────────────
     for pid, ar in arrears.items():
-        out = round(ar["missed"] - ar["recovered"], 2)
+        out = ar["missed"] - ar["recovered"]
         conn.execute(
             "INSERT OR REPLACE INTO ev_arrears (person_id, total_missed, "
             "total_recovered, outstanding, last_updated) VALUES (?,?,?,?, date('now'))",
-            (pid, round(ar["missed"], 2), round(ar["recovered"], 2), out))
+            (pid, ar["missed"], ar["recovered"], out))
 
     # ── COD holds (newest week) ─────────────────────────────────────────────
     cod_persons = rng.sample(persons, 16)
@@ -247,7 +252,7 @@ def seed_demo(conn: sqlite3.Connection) -> None:
             "person_id, worker_code, order_number, amount, payment_mode, txn_status, "
             "source, created_at) VALUES (?,?,?,?,?,?,?,?, 'COD', 'pending', ?, ?)",
             (ds(newest[0]), ds(newest[1]), p["primary"], p["rid"], p["pid"], p["rid"],
-             f"ORD{rng.randint(100000, 999999)}", float(rng.randint(2, 18) * 100),
+             f"ORD{rng.randint(100000, 999999)}", rng.randint(2, 18) * 10000,   # paise
              src, f"{ds(newest[1])} 12:00:00"))
 
     # ── company_cycles rollups ──────────────────────────────────────────────
@@ -259,8 +264,8 @@ def seed_demo(conn: sqlite3.Connection) -> None:
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (co, ds(w[0]), ds(w[1]), _week_bucket(ds(w[1])), "demo",
              a["rider_count"], a["riders_paid"], a["riders_in_dues"],
-             round(a["total_release"], 2), round(a["total_rent_charged"], 2),
-             round(a["total_rent_collected"], 2), round(a["total_rent_missed"], 2)))
+             a["total_release"], a["total_rent_charged"],
+             a["total_rent_collected"], a["total_rent_missed"]))
 
     # ── balances + status ───────────────────────────────────────────────────
     present_newest = {

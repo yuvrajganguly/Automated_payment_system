@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import AdjustmentIn, RentPaymentIn, TransactionOut
 from payout.db import get_connection
+from payout.money import to_paise
 from payout.domain.adjustments import post_adjustment
 from payout.exports import xlsx_response
 
@@ -52,6 +53,7 @@ def export_transactions(
         filename_stem="transactions", sheet_name="TXNS",
         headers=headers, rows=out,
         numeric_cols=(8, 9),
+        money_cols=(8, 9),
         left_align_cols=(11, 13),
     )
 
@@ -226,7 +228,7 @@ def post_rent_payment(body: RentPaymentIn,
 
         applied_to_arrears = 0.0
         applied_to_rent = 0.0
-        remaining = float(body.amount)
+        remaining = to_paise(body.amount)
 
         # IMPORTANT — the balance does NOT change here.
         # Background: RENT_MISSED only touches ev_arrears.outstanding; it never
@@ -333,9 +335,10 @@ def post_adjustment_endpoint(body: AdjustmentIn,
     with get_connection() as conn:
         pid = _resolve_person_id(conn, person_id=body.person_id,
                                  rider_id=body.rider_id, company=body.company)
+        amt_p = to_paise(body.amount)
         new_balance = post_adjustment(
-            conn, pid, body.amount, body.reason, user["email"],
+            conn, pid, amt_p, body.reason, user["email"],
             rider_id=body.rider_id or "", company=body.company or "",
         )
         conn.commit()
-    return {"person_id": pid, "amount": body.amount, "new_balance": new_balance}
+    return {"person_id": pid, "amount": amt_p, "new_balance": new_balance}

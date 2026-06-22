@@ -96,12 +96,13 @@ def materialize_cycle_for_person(
     handover day itself becomes ``handover_free``; the day before return
     becomes ``return_free``.
     """
+    from payout.money import split_evenly
     cs = cycle_start if hasattr(cycle_start, "isoformat") else date.fromisoformat(cycle_start)
     ce = cycle_end if hasattr(cycle_end, "isoformat") else date.fromisoformat(cycle_end)
     for leg in legs:
         ev_id = leg.ev_id
-        weekly = leg.weekly_rate
-        daily = weekly / 7.0
+        weekly = int(leg.weekly_rate)          # paise
+        daily = round(weekly / 7)              # provider per-day (paise), uniform
         hod = leg.handover_date
         ret = leg.returned_date
         # The leg's contributing window inside this cycle. When None, the leg
@@ -124,30 +125,39 @@ def materialize_cycle_for_person(
         def in_maint(day):
             return any(lo <= day <= hi for lo, hi in maint)
 
-        # For every day of the leg's overlap with the cycle, write a row.
+        # For every day of the leg's overlap with the cycle, classify it, then
+        # split the leg's (exact, prorated) rent across the in-window billable
+        # days so the day-ledger reconciles to the RENT row to the paisa.
         leg_lo = max(cs, hod) if hod else cs
         leg_hi = min(ce, ret) if ret else ce
+        rows = []          # [day, state, this_billing, this_event, kind]
         for day in _iter_days(leg_lo, leg_hi):
-            state = "billable"
-            this_daily = daily
-            this_billing = billing_status
-            this_event = billing_event_id
+            state = "billable"; this_billing = billing_status; this_event = billing_event_id
+            kind = "in_window"
             if hod and day == hod:
-                state = "handover_free"; this_daily = 0.0; this_billing = None; this_event = None
+                state = "handover_free"; this_billing = None; this_event = None; kind = "free"
             elif ret and day == ret:
-                state = "return_free"; this_daily = 0.0; this_billing = None; this_event = None
+                state = "return_free"; this_billing = None; this_event = None; kind = "free"
             elif in_maint(day):
-                state = "maintenance"; this_daily = 0.0; this_billing = None; this_event = None
+                state = "maintenance"; this_billing = None; this_event = None; kind = "free"
             elif win_lo and win_hi and (day < win_lo or day > win_hi):
-                # Outside the chargeable window of this leg in this cycle
-                # (e.g. already billed in a prior cycle).
-                this_billing = None; this_event = None
+                # Already billed in a prior cycle: keep a rider cost, no billing.
+                this_billing = None; this_event = None; kind = "out_window"
+            rows.append([day, state, this_billing, this_event, kind])
+        in_window_idx = [i for i, r in enumerate(rows) if r[4] == "in_window"]
+        parts = split_evenly(int(leg.rent), len(in_window_idx)) if in_window_idx else []
+        part_map = {idx: parts[j] for j, idx in enumerate(in_window_idx)}
+        for i, (day, state, this_billing, this_event, kind) in enumerate(rows):
+            if kind == "free":
+                this_daily = 0
+            elif kind == "out_window":
+                this_daily = daily          # carryover cost (billed in a prior cycle)
+            else:
+                this_daily = part_map.get(i, 0)
             _upsert_row(
-                conn, ev_id=ev_id, day=day, state=state,
-                person_id=person_id,
+                conn, ev_id=ev_id, day=day, state=state, person_id=person_id,
                 daily_cost=this_daily, provider_cost=daily,
-                billing_status=this_billing,
-                cycle_event_id=this_event,
+                billing_status=this_billing, cycle_event_id=this_event,
             )
 
 
@@ -155,7 +165,7 @@ def materialize_unassigned_window(conn, *, ev_id, start, end_inclusive, weekly_r
     """Write 'unassigned' rows for an EV that wasn't held by anyone over the
     window. provider_cost is still owed (we pay the provider regardless).
     """
-    daily = weekly_rate / 7.0
+    daily = round(int(weekly_rate) / 7)   # paise
     for day in _iter_days(start, end_inclusive):
         _upsert_row(
             conn, ev_id=ev_id, day=day, state="unassigned",

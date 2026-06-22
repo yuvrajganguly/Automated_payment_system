@@ -81,6 +81,7 @@ def export_arrears(_: dict = Depends(get_current_user)):
         sheet_name="ARREARS",
         headers=headers, rows=rows,
         numeric_cols=(7, 8, 9),
+        money_cols=(7, 8, 9),
         totals_cols=(7, 8, 9),
         left_align_cols=(2, 3, 4),
     )

@@ -53,9 +53,9 @@ def test_resolve_rent_partial_week(db):
     db.commit()
     info = resolve_rent(db, pid, CS, CE)
     assert info.has_ev
-    assert info.weekly_rate == 1260
+    assert info.weekly_rate == 126000  # paise
     assert info.days == 4
-    assert info.rent == pytest.approx(720.0)
+    assert info.rent == pytest.approx(72000.0)  # paise
 
 
 def test_resolve_rent_no_ev(db):

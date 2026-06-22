@@ -23,6 +23,7 @@ from io import BytesIO
 import pandas as pd
 
 from payout.domain.models import CodHoldLine, ParseResult, RiderRecord
+from payout.money import to_paise
 from payout.parsers.base import match_column, read_table, select_sheet, to_float
 
 _RIDER_ALIASES = ("rider_id", "rider id", "riderid", "worker code")
@@ -109,8 +110,8 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
             return s if s and s.lower() != "nan" else None
         records.append(
             RiderRecord(
-                rider_id=rider_id, payout=payout,
-                cod_pending=cod or 0.0, orders=orders_val,
+                rider_id=rider_id, payout=to_paise(payout),
+                cod_pending=to_paise(cod or 0), orders=orders_val,
                 name=_cell(name_col), hub=_cell(hub_col),
             )
         )
@@ -216,7 +217,7 @@ def _extract_cod_lines(
         lines.append(
             CodHoldLine(
                 worker_code=worker_code,
-                amount=amount,
+                amount=to_paise(amount),
                 order_number=str(row.get(order_col, "")).strip() if order_col else None,
                 payment_mode=str(row.get(mode_col, "")).strip() if mode_col else None,
                 txn_status=str(row.get(status_col, "")).strip() if status_col else None,

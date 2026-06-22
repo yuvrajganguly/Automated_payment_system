@@ -75,6 +75,7 @@ def export_cod(_: dict = Depends(get_current_user)):
         filename_stem="cod_pending", sheet_name="COD",
         headers=headers, rows=rows,
         numeric_cols=(5, 9), totals_cols=(5,),
+        money_cols=(5, 9),
         left_align_cols=(2, 3, 4),
     )
 

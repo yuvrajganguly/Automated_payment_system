@@ -38,11 +38,11 @@ def prorate(weekly_paise: int, days: int, cycle_days: int = 7) -> int:
     """
     if days <= 0:
         return 0
-    if days >= cycle_days:
-        return int(weekly_paise)
+    if days == cycle_days:
+        return int(weekly_paise)        # exact full-cycle
     q = (Decimal(int(weekly_paise)) * days / cycle_days).quantize(
         Decimal("1"), rounding=ROUND_HALF_UP)
-    return int(q)
+    return int(q)                        # partial OR catch-up (>cycle_days)
 
 
 def split_evenly(total_paise: int, n: int) -> list[int]:
@@ -56,3 +56,44 @@ def split_evenly(total_paise: int, n: int) -> list[int]:
     total = int(total_paise)
     base, rem = divmod(total, n)
     return [base + (1 if i < rem else 0) for i in range(n)]
+
+
+# ── API boundary: paise (internal) -> rupees (JSON) ─────────────────────────
+# Money keys that appear in API/JSON responses. Counts, days, percentages and
+# ids are deliberately excluded. A missed key shows as a 100x value (loud); a
+# wrong inclusion shows as /100 (also loud) — both caught by the value-for-value
+# regression check.
+MONEY_KEYS = frozenset({
+    "amount", "balance", "balance_after", "current_balance", "pending_xc_rent",
+    "weekly_rate", "daily_rate", "daily_cost", "provider_cost",
+    "outstanding", "arrears_outstanding", "total_missed", "total_recovered",
+    "cod_missed", "cod_recovered", "cod_outstanding",
+    "expected", "collected", "missed", "recovered", "pending",
+    "rider_expected", "rider_collected", "rider_missed", "rider_recovered",
+    "rider_pending", "provider_owed", "shortfall",
+    "rent_expected", "rent_collected", "rent_missed", "rent_pending",
+    "arrears_recovered", "manual_rent", "cod", "hold", "payout", "total_arrears",
+    "total_payout", "total_release", "total_rent_charged",
+    "total_rent_collected", "total_rent_missed",
+    "bill_total", "their_amount", "our_amount", "discrepancy",
+    "gross", "gross_payout", "rent", "release", "released", "net_release",
+    "net_pay", "opening_dues", "opening_ev_arrears",
+    "rent_charged", "rent_collected_this_cycle", "rent_missed_this_cycle",
+    "applied_to_arrears", "applied_to_rent", "new_balance", "value",
+})
+
+
+def rupeeize(obj):
+    """Recursively convert MONEY_KEYS values in a JSON-able structure from
+    integer paise to rupee floats, for the API boundary."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in MONEY_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = to_rupees(v)
+            else:
+                out[k] = rupeeize(v)
+        return out
+    if isinstance(obj, list):
+        return [rupeeize(x) for x in obj]
+    return obj

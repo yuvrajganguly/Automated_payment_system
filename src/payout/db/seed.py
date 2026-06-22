@@ -10,9 +10,9 @@ import sqlite3
 
 # (provider, model_name, weekly_rate). Daily rate is derived as weekly / 7.
 EV_MODELS: list[tuple[str, str, float]] = [
-    ("Raft", "Regular", 1250.0),
-    ("Raft", "Blue", 1295.0),
-    ("Blive", "Standard", 1260.0),
+    ("Raft", "Regular", 125000),   # paise
+    ("Raft", "Blue", 129500),       # paise
+    ("Blive", "Standard", 126000),  # paise
 ]
 
 # Company parser configs. See companies table in schema.py for column meanings.

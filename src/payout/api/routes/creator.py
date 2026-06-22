@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from payout.api.auth import require_creator
 from payout.db import get_connection
+from payout.money import to_paise
 from payout.config import DB_PATH as _DB_PATH
 
 router = APIRouter()
@@ -208,8 +209,8 @@ def edit_transaction(txn_id: int, body: TxnEditIn,
             raise HTTPException(404, "Transaction not found")
         sets, params = [], []
         if body.amount is not None:
-            delta = float(body.amount) - float(row["amount"])
-            sets.append("amount = ?"); params.append(float(body.amount))
+            delta = to_paise(body.amount) - float(row["amount"])
+            sets.append("amount = ?"); params.append(to_paise(body.amount))
             sets.append("balance_after = balance_after + ?"); params.append(delta)
         if body.remarks is not None:
             sets.append("remarks = ?"); params.append(body.remarks)
@@ -356,7 +357,7 @@ def create_ev_model(body: EvModelIn, _: dict = Depends(require_creator)) -> dict
     with get_connection() as conn:
         cur = conn.execute(
             "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES (?,?,?)",
-            (body.provider, body.model_name, body.weekly_rate),
+            (body.provider, body.model_name, to_paise(body.weekly_rate)),
         )
         conn.commit()
         mid = cur.lastrowid
@@ -374,7 +375,7 @@ def edit_ev_model(model_id: int, body: EvModelIn,
         conn.execute(
             "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=? "
             "WHERE model_id=?",
-            (body.provider, body.model_name, body.weekly_rate, model_id),
+            (body.provider, body.model_name, to_paise(body.weekly_rate), model_id),
         )
         conn.commit()
     return {"updated": True, "model_id": model_id}

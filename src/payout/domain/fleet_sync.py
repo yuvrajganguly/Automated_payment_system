@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 # Default weekly rate when we have nothing to copy from. Flagged for review
 # in the response so operators don't silently bill at the wrong amount.
-_FALLBACK_WEEKLY_RATE = 1250.0
+_FALLBACK_WEEKLY_RATE = 125000   # paise
 
 
 def normalize_model_name(name: str | None) -> str | None:
