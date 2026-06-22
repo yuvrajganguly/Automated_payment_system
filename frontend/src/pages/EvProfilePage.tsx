@@ -302,11 +302,11 @@ function MaintenanceCloseCard({ openRow, onClosed }:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white rounded-xl shadow-card overflow-x-auto">{children}</div>
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">{children}</div>
   </section>
 }
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl shadow-card p-4">
+  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4">
     <h3 className="font-semibold text-sm mb-2">{title}</h3>{children}
   </div>
 }

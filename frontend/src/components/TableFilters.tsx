@@ -67,7 +67,7 @@ export function ColumnFilters<T>({
   const anyActive = Object.values(filters).some((v) => v !== '')
 
   return (
-    <div className="bg-white rounded-xl shadow-card p-4 mb-4">
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mb-4">
       <div className="flex flex-wrap gap-3 items-end">
         {columns.map((c) => (
           <div key={c.key} className="flex-1 min-w-[140px]">

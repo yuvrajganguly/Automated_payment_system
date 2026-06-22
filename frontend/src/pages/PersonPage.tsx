@@ -75,7 +75,7 @@ export function PersonPage() {
       </div>
 
       {person.ev && (
-        <div className="bg-white rounded-xl shadow-card p-4 mb-6">
+        <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mb-6">
           <h3 className="font-semibold mb-2">EV Assignment</h3>
           <dl className="grid grid-cols-2 md:grid-cols-4 text-sm gap-y-1">
             <dt className="text-slate-500">EV ID</dt>
@@ -249,7 +249,7 @@ function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: (
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-card p-4 mt-6 border-l-4 border-emerald-400">
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mt-6 border-l-4 border-emerald-400">
       <h3 className="font-semibold mb-1">Log Manual Rent Payment</h3>
       <p className="text-xs text-slate-500 mb-3">
         Use when a rider pays rent in cash / UPI outside the bank reconciliation.
@@ -320,7 +320,7 @@ function AdjustmentForm({ personId, onPosted }: { personId: number; onPosted: ()
     finally { setBusy(false) }
   }
   return (
-    <div className="bg-white rounded-xl shadow-card p-4 mt-6">
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mt-6">
       <h3 className="font-semibold mb-2">Post Manual Adjustment</h3>
       <p className="text-xs text-slate-500 mb-3">Positive = credit (reduces dues). Negative = debit (adds dues / penalty).</p>
       <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
@@ -350,7 +350,7 @@ function Stat({ label, value, bad, linkTo }:
       {value}
     </p>
   )
-  return <div className="bg-white rounded-xl shadow-card p-3">
+  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3">
     <p className="text-xs text-slate-500">{label}</p>
     {linkTo ? <Link to={linkTo}>{inner}</Link> : inner}
   </div>
@@ -358,7 +358,7 @@ function Stat({ label, value, bad, linkTo }:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="mb-6">
     <h3 className="font-semibold mb-2">{title}</h3>
-    <div className="bg-white rounded-xl shadow-card overflow-x-auto">{children}</div>
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">{children}</div>
   </div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
@@ -549,7 +549,7 @@ function AddAtAnotherCompanyCard({
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-card p-4 mb-6">
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mb-6">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold">Add to another company</h3>
         <button onClick={() => setOpen(!open)}
@@ -658,7 +658,7 @@ function SplitPersonModal({ person, onClose, onSplit }:
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
             <h3 className="font-semibold">Split {person.display_name} into two people</h3>

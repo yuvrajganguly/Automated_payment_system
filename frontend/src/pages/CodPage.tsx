@@ -100,7 +100,7 @@ export function CodPage() {
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} riders.</p>
 
-      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
+      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -199,7 +199,7 @@ function ClearModal({ row, onClose, onCleared }:
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
             <h3 className="font-semibold">Mark COD cleared — {row.display_name}</h3>
@@ -294,7 +294,7 @@ function ClearModal({ row, onClose, onCleared }:
 }
 
 function Stat({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  return <div className="bg-white rounded-xl shadow-card p-3">
+  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3">
     <p className="text-xs text-slate-500">{label}</p>
     <p className={'text-lg ' + (bold ? 'font-bold' : 'font-semibold')}>{value}</p>
   </div>

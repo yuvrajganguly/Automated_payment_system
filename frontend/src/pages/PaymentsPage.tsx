@@ -91,7 +91,7 @@ export function PaymentsPage() {
       {isAdmin && <UploadCard onUploaded={(id) => { reloadList(); setPicked(id) }} />}
 
       <h2 className="font-semibold mt-6 mb-2">Recent uploads</h2>
-      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
+      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -179,7 +179,7 @@ function UploadCard({ onUploaded }: { onUploaded: (id: number) => void }) {
     } finally { setBusy(false) }
   }
   return (
-    <div className="bg-white rounded-xl shadow-card p-4 flex flex-wrap gap-3 items-end">
+    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 flex flex-wrap gap-3 items-end">
       <label className="block flex-1 min-w-[260px]">
         <span className="block text-xs text-slate-600">Bank MIS PDF</span>
         <input type="file" accept=".pdf"
@@ -284,7 +284,7 @@ function UploadDetail({ detail, isAdmin, onChanged }:
           </button>
         ))}
       </div>
-      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
+      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
