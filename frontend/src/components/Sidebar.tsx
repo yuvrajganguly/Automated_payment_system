@@ -56,8 +56,11 @@ export function Sidebar() {
   const { user, logout } = useAuth()
   const isCreator = user?.role === 'creator'
   return (
-    <aside className="w-60 bg-brand text-white p-6 flex flex-col">
-      <h1 className="text-xl font-bold mb-6">Payout</h1>
+    <aside className="w-60 bg-gradient-to-b from-brand-700 to-brand-900 text-white p-6 flex flex-col border-r border-black/10">
+      <div className="flex items-center gap-2.5 mb-7">
+        <div className="h-8 w-8 rounded-lg bg-white/15 grid place-items-center text-sm font-bold">P</div>
+        <span className="text-lg font-semibold tracking-tight">Payout</span>
+      </div>
       <nav className="flex flex-col gap-0.5 flex-1">
         {SECTIONS.map((section, i) => (
           <div key={section.heading ?? i} className="flex flex-col gap-0.5">
