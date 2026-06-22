@@ -51,7 +51,7 @@ export function ForgotPasswordPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="bg-white rounded-lg shadow p-8 w-full max-w-sm">
+      <div className="bg-white rounded-xl shadow-card p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold mb-1">Payout System</h1>
         <p className="text-slate-500 text-sm mb-6">
           {stage === 'request' ? 'Enter your email and we\'ll send a 6-digit code.'

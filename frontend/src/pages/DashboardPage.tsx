@@ -408,7 +408,7 @@ function Card({ metric, label, value, tone, tip, big, onClick }: {
       onKeyDown={interactive ? (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(metric) }
       } : undefined}
-      className={`bg-white rounded-lg shadow p-3 ${borderClass} ${interactive ? 'cursor-pointer hover:shadow-md transition' : ''}`}
+      className={`bg-white rounded-xl shadow-card p-3 ${borderClass} ${interactive ? 'cursor-pointer hover:shadow-md transition' : ''}`}
     >
       <p className="text-xs text-slate-500 flex items-center gap-1">
         {label}
@@ -427,7 +427,7 @@ function Panel({ title, subtitle, children, wide, className = '' }: {
   className?: string
 }) {
   return (
-    <div className={`bg-white rounded-lg shadow p-4 ${wide ? 'lg:col-span-2' : ''} ${className}`}>
+    <div className={`bg-white rounded-xl shadow-card p-4 ${wide ? 'lg:col-span-2' : ''} ${className}`}>
       <div className="flex items-baseline justify-between mb-2">
         <h3 className="font-semibold">{title}</h3>
         {subtitle && <span className="text-xs text-slate-400">{subtitle}</span>}

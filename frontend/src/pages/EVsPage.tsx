@@ -323,11 +323,11 @@ function MaintenanceCard({ onLogged }: { onLogged: () => void }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white rounded-lg shadow overflow-x-auto">{children}</div>
+    <div className="bg-white rounded-xl shadow-card overflow-x-auto">{children}</div>
   </section>
 }
 function FormCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white rounded-lg shadow p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
+  return <div className="bg-white rounded-xl shadow-card p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return <th className={'px-3 py-2 font-medium text-xs ' + (right ? 'text-right' : '')}>{children}</th>

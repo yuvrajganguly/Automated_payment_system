@@ -50,7 +50,7 @@ export function TransactionsPage() {
         Append-only ledger across all riders. Click a Person ID to open the full per-rider history.
       </p>
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-4 items-end">
+      <div className="bg-white rounded-xl shadow-card p-4 mb-4 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-[140px]">
           <label className="block text-xs font-medium mb-1">Event type</label>
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}
@@ -82,7 +82,7 @@ export function TransactionsPage() {
 
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>

@@ -106,7 +106,7 @@ export function ArrearsPage() {
       </div>
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} riders.</p>
 
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -159,7 +159,7 @@ function Stat({ label, value, tone }:
   const ring = tone === 'ev'    ? 'border-l-4 border-amber-400'
              : tone === 'total' ? 'border-l-4 border-emerald-500'
              :                    'border-l-4 border-blue-400'
-  return <div className={'bg-white rounded-lg shadow p-3 ' + ring}>
+  return <div className={'bg-white rounded-xl shadow-card p-3 ' + ring}>
     <p className="text-xs text-slate-500">{label}</p>
     <p className="text-lg font-bold">{value}</p>
   </div>

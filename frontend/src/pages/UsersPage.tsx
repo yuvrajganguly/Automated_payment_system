@@ -40,7 +40,7 @@ export function UsersPage() {
       {busy && <Spinner />}
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -158,7 +158,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 mb-4">
+    <div className="bg-white rounded-xl shadow-card p-4 mb-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm">Add user</h3>
         <button onClick={() => setOpen(!open)} className="text-xs text-brand underline">

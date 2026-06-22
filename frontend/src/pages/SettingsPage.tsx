@@ -29,7 +29,7 @@ export function SettingsPage() {
       <h1 className="text-2xl font-bold mb-1">Settings</h1>
       <p className="text-slate-500 text-sm mb-6">Your account and password.</p>
 
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
+      <div className="bg-white rounded-xl shadow-card p-4 mb-6">
         <h3 className="font-semibold mb-2">Profile</h3>
         <dl className="text-sm grid grid-cols-2 gap-y-1">
           <dt className="text-slate-500">Email</dt><dd>{user?.email}</dd>
@@ -37,7 +37,7 @@ export function SettingsPage() {
         </dl>
       </div>
 
-      <form onSubmit={submit} className="bg-white rounded-lg shadow p-4">
+      <form onSubmit={submit} className="bg-white rounded-xl shadow-card p-4">
         <h3 className="font-semibold mb-3">Change Password</h3>
         <div className="grid gap-3">
           <Field label="Current password" type="password" v={current} on={setCurrent} />
