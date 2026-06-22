@@ -88,15 +88,26 @@ export function DashboardPage() {
   const [data, setData] = useState<Summary | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Default to last 7 days ending today.
-  const today = new Date().toISOString().slice(0, 10)
-  const sevenAgo = (() => {
-    const d = new Date(); d.setDate(d.getDate() - 6)
-    return d.toISOString().slice(0, 10)
+  // Local-date formatter (avoids the UTC off-by-one near midnight).
+  const isoLocal = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  // Default window: the previous complete Mon-Sun week.
+  // (Placeholder until this is pivoted onto the Raft bill period.)
+  const prevWeek = (() => {
+    const t = new Date()
+    const sinceMon = (t.getDay() + 6) % 7          // Mon=0 ... Sun=6
+    const thisMon = new Date(t); thisMon.setDate(t.getDate() - sinceMon)
+    const prevMon = new Date(thisMon); prevMon.setDate(thisMon.getDate() - 7)
+    const prevSun = new Date(prevMon); prevSun.setDate(prevMon.getDate() + 6)
+    return { from: isoLocal(prevMon), to: isoLocal(prevSun) }
   })()
   const [companies, setCompanies] = useState<string[]>([])
-  const [dateFrom, setDateFrom] = useState<string>(sevenAgo)
-  const [dateTo, setDateTo]     = useState<string>(today)
+  const [dateFrom, setDateFrom] = useState<string>(prevWeek.from)
+  const [dateTo, setDateTo]     = useState<string>(prevWeek.to)
   const [drawerMetric, setDrawerMetric] = useState<string | null>(null)
 
   const reload = () => {
@@ -116,8 +127,12 @@ export function DashboardPage() {
   function setRangeDays(n: number) {
     const t = new Date()
     const f = new Date(); f.setDate(f.getDate() - (n - 1))
-    setDateFrom(f.toISOString().slice(0, 10))
-    setDateTo(t.toISOString().slice(0, 10))
+    setDateFrom(isoLocal(f))
+    setDateTo(isoLocal(t))
+  }
+  function setPrevWeek() {
+    setDateFrom(prevWeek.from)
+    setDateTo(prevWeek.to)
   }
 
   function toggleCompany(c: string) {
@@ -175,6 +190,10 @@ export function DashboardPage() {
                      className="border rounded px-2 py-1 text-sm" />
             </label>
             <div className="flex gap-1 mb-0.5">
+              <button onClick={setPrevWeek}
+                      className="text-xs px-2 py-1 rounded bg-slate-200 hover:bg-slate-300">
+                Last wk
+              </button>
               {[
                 ['7d', 7], ['30d', 30], ['90d', 90],
               ].map(([label, n]) => (
