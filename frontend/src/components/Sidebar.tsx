@@ -1,52 +1,77 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
-const NAV = [
-  { to: '/', label: 'Process Payout', end: true },
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/riders', label: 'Riders' },
-  { to: '/evs', label: 'EVs' },
-  { to: '/arrears', label: 'Arrears' },
-  { to: '/cod', label: 'COD' },
-  { to: '/inactive', label: 'Inactive' },
-  { to: '/payments', label: 'Payments' },
-  { to: '/users', label: 'Users' },
-  { to: '/ev-rent', label: 'EV Rent Details' },
-  { to: '/raft',  label: 'Raft' },
-  { to: '/blive', label: 'Blive' },
-  { to: '/transactions', label: 'Transactions' },
-  { to: '/settings', label: 'Settings' },
+// Grouped for hierarchy. The first section has no heading (primary actions);
+// the rest are labelled. Creator-only items live in their own gated section.
+const SECTIONS: { heading?: string; items: { to: string; label: string; end?: boolean }[] }[] = [
+  {
+    items: [
+      { to: '/', label: 'Process Payout', end: true },
+      { to: '/dashboard', label: 'Dashboard' },
+    ],
+  },
+  {
+    heading: 'Riders & Fleet',
+    items: [
+      { to: '/riders', label: 'Riders' },
+      { to: '/evs', label: 'EVs' },
+      { to: '/ev-rent', label: 'EV Rent Details' },
+      { to: '/inactive', label: 'Inactive' },
+    ],
+  },
+  {
+    heading: 'Collections',
+    items: [
+      { to: '/arrears', label: 'Arrears' },
+      { to: '/cod', label: 'COD' },
+      { to: '/payments', label: 'Payments' },
+      { to: '/transactions', label: 'Transactions' },
+    ],
+  },
+  {
+    heading: 'Providers',
+    items: [
+      { to: '/raft', label: 'Raft' },
+      { to: '/blive', label: 'Blive' },
+    ],
+  },
+  {
+    heading: 'Admin',
+    items: [
+      { to: '/users', label: 'Users' },
+      { to: '/settings', label: 'Settings' },
+    ],
+  },
 ]
 
-const CREATOR_NAV = [
-  { to: '/system', label: 'System', icon: '⚡' },
-]
+const CREATOR_NAV = [{ to: '/system', label: 'System', icon: '⚡' }]
+
+const heading = 'mt-4 mb-1 text-[10px] uppercase tracking-wider text-white/40 px-3'
+const linkClass =
+  ({ isActive }: { isActive: boolean }) =>
+    'px-3 py-2 rounded text-sm ' +
+    (isActive ? 'bg-white/20 font-semibold' : 'hover:bg-white/10')
 
 export function Sidebar() {
   const { user, logout } = useAuth()
   const isCreator = user?.role === 'creator'
   return (
     <aside className="w-60 bg-brand text-white p-6 flex flex-col">
-      <h1 className="text-xl font-bold mb-8">Payout</h1>
-      <nav className="flex flex-col gap-1 flex-1">
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) =>
-              'px-3 py-2 rounded text-sm ' +
-              (isActive ? 'bg-white/20 font-semibold' : 'hover:bg-white/10')
-            }
-          >
-            {item.label}
-          </NavLink>
+      <h1 className="text-xl font-bold mb-6">Payout</h1>
+      <nav className="flex flex-col gap-0.5 flex-1">
+        {SECTIONS.map((section, i) => (
+          <div key={section.heading ?? i} className="flex flex-col gap-0.5">
+            {section.heading && <div className={heading}>{section.heading}</div>}
+            {section.items.map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
         {isCreator && (
           <>
-            <div className="mt-4 mb-1 text-[10px] uppercase tracking-wider text-white/40 px-3">
-              Creator
-            </div>
+            <div className={heading}>Creator</div>
             {CREATOR_NAV.map((item) => (
               <NavLink
                 key={item.to}
