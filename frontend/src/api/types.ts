@@ -133,6 +133,7 @@ export interface EvUnitOut {
   current_rider_id: string | null
   current_person_id: number | null
   current_rider_name: string | null
+  hub: string | null
   handover_date: string | null
   rent_charged_through: string | null
 }

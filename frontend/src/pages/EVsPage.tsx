@@ -18,12 +18,20 @@ export function EVsPage() {
   const [maint, setMaint] = useState<MaintenanceOut[]>([])
   const [unitFilters, setUnitFilters] = useState<Record<string, string>>({})
   const [unitSearch, setUnitSearch] = useState('')
+  const [hubFilter, setHubFilter] = useState<string[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const filteredUnits = applyFilters(units, unitFilters)
+  const hubOptions = Array.from(new Set(
+    units.flatMap((u) => (u.hub ?? '').split(',').map((h) => h.trim()).filter(Boolean)),
+  )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  const toggleHub = (h: string) =>
+    setHubFilter((s) => (s.includes(h) ? s.filter((x) => x !== h) : [...s, h]))
+  const hubFiltered = hubFilter.length === 0 ? units : units.filter((u) =>
+    (u.hub ?? '').split(',').map((h) => h.trim()).some((h) => hubFilter.includes(h)))
+  const filteredUnits = applyFilters(hubFiltered, unitFilters)
   const q = unitSearch.trim().toLowerCase()
   const searchedUnits = q ? filteredUnits.filter((u) =>
-    [u.ev_id, u.current_rider_name, u.current_rider_id, u.provider, u.model, u.status]
+    [u.ev_id, u.current_rider_name, u.current_rider_id, u.provider, u.model, u.status, u.hub]
       .some((v) => (v ?? '').toString().toLowerCase().includes(q))
   ) : filteredUnits
   const { sorted: visibleUnits, sortKey, sortDir, toggleSort } = useSort(searchedUnits)
@@ -82,6 +90,26 @@ export function EVsPage() {
         filters={unitFilters}
         onChange={setUnitFilters}
       />
+      {hubOptions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          <span className="text-xs font-medium text-slate-500 mr-1">Hubs:</span>
+          <button
+            onClick={() => setHubFilter([])}
+            className={'text-xs px-2 py-1 rounded ' +
+              (hubFilter.length === 0 ? 'bg-brand text-white' : 'bg-slate-200 hover:bg-slate-300')}>
+            All
+          </button>
+          {hubOptions.map((h) => (
+            <button key={h} onClick={() => toggleHub(h)}
+              className={'text-xs px-2 py-1 rounded ' +
+                (hubFilter.includes(h) ? 'bg-brand text-white' : 'bg-slate-200 hover:bg-slate-300')}>
+              {h}
+            </button>
+          ))}
+          {hubFilter.length > 0 &&
+            <span className="text-xs text-slate-400 ml-1">({hubFilter.length} selected)</span>}
+        </div>
+      )}
       <Section title={`EV Units (${visibleUnits.length} of ${units.filter((u) => u.status !== 'returned').length} active)`}>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
@@ -92,6 +120,7 @@ export function EVsPage() {
               <SortableTh tag="weekly_rate"  sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Weekly</SortableTh>
               <SortableTh tag="status"       sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Status</SortableTh>
               <SortableTh tag="current_rider_id" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Current Rider</SortableTh>
+              <SortableTh tag="hub" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Hub</SortableTh>
               <SortableTh tag="handover_date" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Handover</SortableTh>
               <SortableTh tag="rent_charged_through" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Rent Through</SortableTh>
               <Th>Person</Th>
@@ -121,6 +150,7 @@ export function EVsPage() {
                     <span className="block text-xs text-slate-500">{u.current_rider_id}</span>
                   )}
                 </Td>
+                <Td>{u.hub || '-'}</Td>
                 <Td>{u.handover_date ?? '-'}</Td>
                 <Td>{u.rent_charged_through ?? '-'}</Td>
                 <Td>{u.current_person_id

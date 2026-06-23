@@ -39,7 +39,9 @@ def export_ev_units(status: Optional[str] = None,
             "SELECT u.ev_id, u.status, u.notes, m.provider, m.model_name, m.weekly_rate, "
             "       a.handover_date, a.rent_charged_through, a.person_id, "
             "       p.display_name AS current_rider_name, "
-            "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id "
+            "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id, "
+            "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "
+            "          WHERE rm.person_id=a.person_id AND rm.hub IS NOT NULL AND rm.hub<>'') AS hub "
             "FROM ev_units u "
             "JOIN ev_models m ON m.model_id = u.model_id "
             "LEFT JOIN ev_assignments a ON a.ev_id = u.ev_id AND a.returned_date IS NULL "
@@ -47,11 +49,11 @@ def export_ev_units(status: Optional[str] = None,
             "ORDER BY u.ev_id"
         ).fetchall()
     headers = ["EV ID", "Provider", "Model", "Weekly Rate", "Status",
-               "Current Rider", "Person ID", "Rider ID", "Handover Date",
+               "Current Rider", "Hub", "Person ID", "Rider ID", "Handover Date",
                "Rent Through", "Notes"]
     out = [
         (r["ev_id"], r["provider"], r["model_name"], float(r["weekly_rate"]),
-         r["status"], r["current_rider_name"] or "", r["person_id"] or "",
+         r["status"], r["current_rider_name"] or "", r["hub"] or "", r["person_id"] or "",
          r["rider_id"] or "", r["handover_date"] or "",
          r["rent_charged_through"] or "", r["notes"] or "")
         for r in rows if not status or r["status"] == status
@@ -73,7 +75,9 @@ def list_ev_units(status: Optional[str] = None,
             "SELECT u.ev_id, u.status, u.notes, m.provider, m.model_name, m.weekly_rate, "
             "       a.handover_date, a.rent_charged_through, a.person_id, "
             "       p.display_name AS current_rider_name, "
-            "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id "
+            "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id, "
+            "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "
+            "          WHERE rm.person_id=a.person_id AND rm.hub IS NOT NULL AND rm.hub<>'') AS hub "
             "FROM ev_units u "
             "JOIN ev_models m ON m.model_id = u.model_id "
             "LEFT JOIN ev_assignments a ON a.ev_id = u.ev_id AND a.returned_date IS NULL "
@@ -88,7 +92,7 @@ def list_ev_units(status: Optional[str] = None,
             ev_id=r["ev_id"], provider=r["provider"], model=r["model_name"],
             weekly_rate=float(r["weekly_rate"]), status=r["status"], notes=r["notes"],
             current_rider_id=r["rider_id"], current_person_id=r["person_id"],
-            current_rider_name=r["current_rider_name"],
+            current_rider_name=r["current_rider_name"], hub=r["hub"],
             handover_date=r["handover_date"], rent_charged_through=r["rent_charged_through"],
         ))
     return out

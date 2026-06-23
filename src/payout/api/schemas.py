@@ -161,6 +161,7 @@ class EvUnitOut(BaseModel):
     current_rider_id: Optional[str] = None
     current_person_id: Optional[int] = None
     current_rider_name: Optional[str] = None
+    hub: Optional[str] = None
     handover_date: Optional[str] = None
     rent_charged_through: Optional[str] = None
 
