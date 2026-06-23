@@ -17,19 +17,24 @@ interface Props {
   name: string
   /** Optional query string (e.g. "active=true"); leading "?" optional. */
   query?: string
+  /** When set, only these row ids are exported (POSTed as the filtered scope). */
+  ids?: (string | number)[]
   className?: string
 }
 
-export function ExportButton({ path, name, query, className = '' }: Props) {
+export function ExportButton({ path, name, query, ids, className = '' }: Props) {
   const [busy, setBusy] = useState(false)
 
   async function go() {
     setBusy(true)
     try {
       const q = query ? (query.startsWith('?') ? query : '?' + query) : ''
-      const r = await fetch('/api' + path + q, {
-        credentials: 'include',
-      })
+      const init: RequestInit = ids !== undefined
+        ? { method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }) }
+        : { credentials: 'include' }
+      const r = await fetch('/api' + path + q, init)
       if (!r.ok) {
         alert('Export failed: ' + r.status + ' ' + r.statusText)
         return

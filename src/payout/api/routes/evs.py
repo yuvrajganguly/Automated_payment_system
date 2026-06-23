@@ -5,12 +5,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Body, APIRouter, Depends, HTTPException
 
 from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import (
     EvAssignIn, EvModelOut, EvReturnIn, EvUnitIn, EvUnitOut,
     MaintenanceClose, MaintenanceIn, MaintenanceOut,
+    ExportSelection,
 )
 from payout.db import get_connection
 from payout.domain.adjustments import log_maintenance
@@ -30,8 +31,9 @@ def list_ev_models(_: dict = Depends(get_current_user)) -> list[EvModelOut]:
             for r in rows]
 
 
-@router.get("/export")
+@router.post("/export")
 def export_ev_units(status: Optional[str] = None,
+                    body: ExportSelection = Body(default=ExportSelection()),
                     _: dict = Depends(get_current_user)):
     """EV units as a styled .xlsx download."""
     with get_connection() as conn:
@@ -56,7 +58,9 @@ def export_ev_units(status: Optional[str] = None,
          r["status"], r["current_rider_name"] or "", r["hub"] or "", r["person_id"] or "",
          r["rider_id"] or "", r["handover_date"] or "",
          r["rent_charged_through"] or "", r["notes"] or "")
-        for r in rows if not status or r["status"] == status
+        for r in rows
+        if (not status or r["status"] == status)
+        and (body.ids is None or str(r["ev_id"]) in {str(x) for x in body.ids})
     ]
     return xlsx_response(
         filename_stem="ev_units", sheet_name="EVS",

@@ -12,9 +12,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Body, APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from payout.api.schemas import ExportSelection
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
@@ -57,10 +58,14 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-@router.get("/export")
-def export_cod(_: dict = Depends(get_current_user)):
+@router.post("/export")
+def export_cod(body: ExportSelection = Body(default=ExportSelection()),
+              _: dict = Depends(get_current_user)):
     """COD page as a styled .xlsx download."""
     data = list_cod(_)
+    if body.ids is not None:
+        idset = {str(x) for x in body.ids}
+        data = [r for r in data if str(r["person_id"]) in idset]
     headers = ["Person ID", "Name", "Companies", "Hub", "Pending Total",
                "Entries", "Earliest Cycle", "Latest Cycle",
                "Recent Payout", "Recent Cycle"]

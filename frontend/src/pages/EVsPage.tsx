@@ -52,7 +52,7 @@ export function EVsPage() {
     <div className="max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">EVs</h1>
-        <ExportButton path="/evs/export" name="ev_units.xlsx" />
+        <ExportButton path="/evs/export" name="ev_units.xlsx" ids={visibleUnits.map((u) => u.ev_id)} />
       </div>
       <p className="text-slate-500 text-sm mb-6">Rate card, current units, assignments, and maintenance history.</p>
       {busy && <Spinner />}

@@ -44,7 +44,8 @@ export function TransactionsPage() {
     <div className="max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">Transactions</h1>
-        <ExportButton path="/ledger/export" name="transactions.xlsx" />
+        <ExportButton path="/ledger/export" name="transactions.xlsx"
+          query={[eventType && `event_type=${encodeURIComponent(eventType)}`, company && `company=${encodeURIComponent(company)}`, `limit=${limit}`].filter(Boolean).join('&')} />
       </div>
       <p className="text-slate-500 text-sm mb-6">
         Append-only ledger across all riders. Click a Person ID to open the full per-rider history.

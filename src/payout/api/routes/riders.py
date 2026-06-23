@@ -6,10 +6,10 @@ from io import BytesIO
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import Body, APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from payout.api.auth import get_current_user, require_admin
-from payout.api.schemas import RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
+from payout.api.schemas import RenameRiderIdIn, RiderIn, RiderOut, RiderPatch, ExportSelection
 from payout.db import get_connection
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
@@ -234,11 +234,12 @@ def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> 
     }
 
 
-@router.get("/export")
+@router.post("/export")
 def export_riders(
     company: Optional[str] = None,
     hub: Optional[str] = None,
     active: Optional[bool] = None,
+    body: ExportSelection = Body(default=ExportSelection()),
     _: dict = Depends(get_current_user),
 ):
     """Riders as a styled .xlsx download. Honours the same filters as the
@@ -265,6 +266,7 @@ def export_riders(
          r["hub"] or "", r["vehicle"], r["account_no"] or "", r["ifsc"] or "",
          "yes" if r["is_active"] else "no")
         for r in rows
+        if body.ids is None or f'{r["rider_id"]}|{r["company"]}' in {str(x) for x in body.ids}
     ]
     return xlsx_response(
         filename_stem="riders", sheet_name="RIDERS",

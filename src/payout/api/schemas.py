@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Union, List, Optional
 
 from pydantic import BaseModel, Field
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
+class ExportSelection(BaseModel):
+    """Optional filtered scope for an export: only these row ids."""
+    ids: Optional[List[Union[str, int]]] = None
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

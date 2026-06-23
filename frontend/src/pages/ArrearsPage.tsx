@@ -64,7 +64,7 @@ export function ArrearsPage() {
     <div className="max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">Arrears</h1>
-        <ExportButton path="/arrears/export" name="arrears.xlsx" />
+        <ExportButton path="/arrears/export" name="arrears.xlsx" ids={visible.map((r) => r.person_id)} />
       </div>
       <p className="text-slate-500 text-sm mb-6">
         Two buckets: EV-rent missed while a rider was absent, and general dues

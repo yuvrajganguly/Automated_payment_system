@@ -71,7 +71,7 @@ export function CodPage() {
     <div className="max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">COD Pending</h1>
-        <ExportButton path="/cod/export" name="cod_pending.xlsx" />
+        <ExportButton path="/cod/export" name="cod_pending.xlsx" ids={visible.map((r) => r.person_id)} />
       </div>
       <p className="text-slate-500 text-sm mb-6">
         COD amounts that companies couldn't clear from a payout. These do not

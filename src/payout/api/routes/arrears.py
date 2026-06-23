@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import Body, APIRouter, Depends
 
+from payout.api.schemas import ExportSelection
 from payout.api.auth import get_current_user
 from payout.db import get_connection
 from payout.exports import xlsx_response
@@ -54,14 +55,18 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-@router.get("/export")
-def export_arrears(_: dict = Depends(get_current_user)):
+@router.post("/export")
+def export_arrears(body: ExportSelection = Body(default=ExportSelection()),
+                  _: dict = Depends(get_current_user)):
     """Same payload as GET /arrears but as a styled .xlsx download.
 
     Adds a derived Total Dues column (EV outstanding + Dues carry-forward) so
     the operator can ladder by overall debt at a glance.
     """
     data = list_arrears(_)
+    if body.ids is not None:
+        idset = {str(x) for x in body.ids}
+        data = [r for r in data if str(r["person_id"]) in idset]
     headers = [
         "Person ID", "Name", "Companies", "Hub", "EV ID", "Model",
         "EV Outstanding", "Dues (Carryfwd)", "Total Dues", "Last Updated",
