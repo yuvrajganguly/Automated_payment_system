@@ -1,4 +1,4 @@
-from payout.money import prorate, split_evenly, to_paise, to_rupees
+from payout.money import prorate, rupeeize, split_evenly, to_paise, to_rupees
 
 
 def test_to_paise_half_up():
@@ -34,3 +34,41 @@ def test_split_evenly_sums_to_total():
         assert len(parts) == n
         assert sum(parts) == total                       # exact reconciliation
         assert max(parts) - min(parts) <= 1              # spread by at most 1p
+
+
+def test_rupeeize_converts_arrears_and_dues_fields_without_touching_counts():
+    payload = {
+        "charts": {
+            "top_arrears": [
+                {
+                    "person_id": 1,
+                    "ev_arrears": 126000,
+                    "dues": 50000,
+                    "arrears_total": 176000,
+                }
+            ],
+        },
+        "arrears_page": {
+            "outstanding": 126000,
+            "dues_outstanding": 50000,
+        },
+        "total": 3,
+    }
+
+    assert rupeeize(payload) == {
+        "charts": {
+            "top_arrears": [
+                {
+                    "person_id": 1,
+                    "ev_arrears": 1260.0,
+                    "dues": 500.0,
+                    "arrears_total": 1760.0,
+                }
+            ],
+        },
+        "arrears_page": {
+            "outstanding": 1260.0,
+            "dues_outstanding": 500.0,
+        },
+        "total": 3,
+    }

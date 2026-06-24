@@ -52,7 +52,7 @@ interface Summary {
   stats: Stats
   lifetime: { total_riders: number; total_evs: number; total_payout: number }
   charts: {
-    top_arrears: { person_id: number; name: string; ev_arrears: number; dues: number; total: number }[]
+    top_arrears: { person_id: number; name: string; ev_arrears: number; dues: number; arrears_total: number }[]
     ev_status: { status: string; count: number }[]
     releases_by_cycle: { label: string; value: number }[]
     rent_collected_by_cycle: { label: string; value: number }[]
@@ -331,7 +331,7 @@ export function DashboardPage() {
                   <td className="px-3 py-2">{r.name}</td>
                   <td className="px-3 py-2 text-right text-amber-700">{fmtFull(r.ev_arrears)}</td>
                   <td className="px-3 py-2 text-right text-blue-700">{fmtFull(r.dues)}</td>
-                  <td className="px-3 py-2 text-right font-bold text-red-700">{fmtFull(r.total)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-red-700">{fmtFull(r.arrears_total)}</td>
                 </tr>
               ))}
             </tbody>

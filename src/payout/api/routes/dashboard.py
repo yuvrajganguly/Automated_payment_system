@@ -363,7 +363,7 @@ def dashboard_summary(
             {"person_id": r["person_id"], "name": r["display_name"],
              "ev_arrears": round(float(r["ev_arrears"] or 0), 2),
              "dues": round(float(r["dues"] or 0), 2),
-             "total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2)}
+             "arrears_total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2)}
             for r in top_arrears_rows
         ]
         ev_status = [
@@ -846,7 +846,7 @@ def dashboard_breakdown(
 
         elif metric == "total_arrears":
             title = "All riders carrying arrears or dues (live)"
-            columns = ["person_id", "name", "ev_arrears", "dues", "total"]
+            columns = ["person_id", "name", "ev_arrears", "dues", "arrears_total"]
             sql = (
                 "SELECT pr.person_id, pr.display_name AS name, "
                 "       COALESCE(ar.outstanding, 0) AS ev_arrears, "
@@ -864,7 +864,7 @@ def dashboard_breakdown(
             )
             for r in conn.execute(sql, [limit]):
                 d = dict(r)
-                d["total"] = round((d["ev_arrears"] or 0) + (d["dues"] or 0), 2)
+                d["arrears_total"] = round((d["ev_arrears"] or 0) + (d["dues"] or 0), 2)
                 rows.append(d)
 
         else:
