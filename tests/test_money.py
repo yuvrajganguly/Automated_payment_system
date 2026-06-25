@@ -72,3 +72,50 @@ def test_rupeeize_converts_arrears_and_dues_fields_without_touching_counts():
         },
         "total": 3,
     }
+
+
+def test_rupeeize_converts_dashboard_evrent_cod_payment_fields():
+    """Keys added so dashboard / EV-rent / COD / payments stop leaking raw
+    paise. Each money key -> rupees; counts, ids and strings untouched."""
+    payload = {
+        "rows": [
+            {
+                "person_id": 24,
+                "name": "Rahul Das",
+                "days_missed": 7,
+                "missed_amount": 142857,
+                "rent_charged": 125000,
+                "rent_collected": 89300,
+                "shortfall": 35700,
+            }
+        ],
+        "evrent": {
+            "expected_rent": 125000,
+            "collected_rent": 89300,
+            "arrears_rent": 0,
+            "arrears_net": 95200,
+            "arrears_recovered_later": 0,
+            "future_arrears_recovered": 0,
+            "future_xc_recovered": 0,
+            "prior_recovered": 0,
+            "rolled_forward": 0,
+        },
+        "cod": {"total_pending": 50000, "recent_payout": 300000},
+        "payments": {"expected_amount": 250000},
+        "stats": {"rent_partial": 35700},
+    }
+    out = rupeeize(payload)
+    row = out["rows"][0]
+    assert row["missed_amount"] == 1428.57
+    assert row["rent_charged"] == 1250.0
+    assert row["rent_collected"] == 893.0
+    assert row["shortfall"] == 357.0
+    assert row["days_missed"] == 7          # count untouched
+    assert row["person_id"] == 24           # id untouched
+    assert row["name"] == "Rahul Das"       # string untouched
+    assert out["evrent"]["expected_rent"] == 1250.0
+    assert out["evrent"]["arrears_net"] == 952.0
+    assert out["cod"]["total_pending"] == 500.0
+    assert out["cod"]["recent_payout"] == 3000.0
+    assert out["payments"]["expected_amount"] == 2500.0
+    assert out["stats"]["rent_partial"] == 357.0
