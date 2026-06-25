@@ -27,6 +27,7 @@ interface Stats {
   rent_collected: number
   rent_missed: number
   rent_pending: number
+  rent_partial: number
   arrears_recovered: number
   total_arrears: number
   manual_rent: number
@@ -222,6 +223,9 @@ export function DashboardPage() {
               onClick={setDrawerMetric} />
         <Card metric="rent_pending" label="Rent Pending" value={fmtFull(data.stats.rent_pending)}
               tone="amber" tip="Billable EV-days no cycle has processed yet — not lost, just not collected. Shrinks as cycles run."
+              onClick={setDrawerMetric} />
+        <Card metric="rent_partial" label="Partial Rent" value={fmtFull(data.stats.rent_partial)}
+              tone="amber" tip="Rent charged this window minus rent collected in cash, per rider - the shortfall that rolled to dues. Click to see who underpaid."
               onClick={setDrawerMetric} />
         <Card metric="arrears_recovered" label="Arrears Recovered" value={fmtFull(data.stats.arrears_recovered)}
               tone="emerald" tip="Old missed rent clawed back in this window (RENT_RECOVERED + XC_RENT_RECOVERED)."

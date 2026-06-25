@@ -270,6 +270,22 @@ def dashboard_summary(
         manual_rent     = float(sums["manual_rent"]     or 0)
         hold = max(0.0, gross_payout - payout)
 
+        # Partial rent collection: per rider this window, rent CHARGED (RENT)
+        # minus rent COLLECTED in cash (RENT_COLLECTED). Sum only positive
+        # shortfalls -- the part that rolled to dues. Riders who paid nothing
+        # toward this cycle's rent are included.
+        rent_partial = float(conn.execute(
+            f"SELECT COALESCE(SUM(shortfall), 0) AS s FROM ("
+            f"  SELECT t.person_id, "
+            f"    SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) "
+            f"    - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS shortfall "
+            f"  FROM transactions t WHERE 1=1 {scope} "
+            f"  GROUP BY t.person_id"
+            f") WHERE shortfall > 0",
+            scope_params,
+        ).fetchone()["s"]
+        )
+
         # COD: scope by the cod_holds row's created_at — same semantic as
         # transactions (when the row was written), so "last 7 days" means
         # COD holds that landed in the last 7 days.
@@ -303,6 +319,7 @@ def dashboard_summary(
             "rent_collected":    round(rent_collected, 2),
             "rent_missed":       round(rent_missed, 2),
             "rent_pending":      round(rent_pending, 2),
+            "rent_partial":      round(rent_partial, 2),
             "arrears_recovered": round(arrears_recov, 2),
             "total_arrears":     round(total_arrears, 2),
             "manual_rent":       round(manual_rent, 2),
@@ -759,6 +776,26 @@ def dashboard_breakdown(
             )
             rows = [dict(r) for r in conn.execute(
                 sql, [df_iso, dt_iso] + led_co_params + [limit])]
+
+        elif metric == "rent_partial":
+            title = "Partial rent collection - charged vs collected (cash) this window"
+            columns = ["person_id", "name", "rent_charged", "rent_collected", "shortfall"]
+            sql = (
+                f"SELECT t.person_id, pr.display_name AS name, "
+                f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
+                f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected "
+                f"FROM transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"WHERE t.event_type IN ('RENT','RENT_COLLECTED') {scope} "
+                f"GROUP BY t.person_id, pr.display_name "
+                f"HAVING rent_charged > rent_collected "
+                f"ORDER BY (rent_charged - rent_collected) DESC LIMIT ?"
+            )
+            rows = []
+            for r in conn.execute(sql, scope_params + [limit]):
+                d = dict(r)
+                d["shortfall"] = round((d["rent_charged"] or 0) - (d["rent_collected"] or 0), 2)
+                rows.append(d)
 
         elif metric == "arrears_recovered":
             title = "Old arrears clawed back this cycle"

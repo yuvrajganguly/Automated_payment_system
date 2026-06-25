@@ -46,3 +46,12 @@ Checkout-Experiment-And-Growth-Analytics/
 
 # PowerShell setup script
 setup_repos.ps1
+
+# DB migration / rollback backups (contain real rider data)
+*.pre_paise_backup
+*codex_before_paise*
+
+# Personal / generated docs (not part of the application)
+Yuvraj_Ganguly_CV*.docx
+Payout_System_Operations_Guide.docx
+PAYOUT_SYSTEM_STUDY_GUIDE.*

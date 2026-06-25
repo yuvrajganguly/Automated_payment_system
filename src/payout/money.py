@@ -82,6 +82,16 @@ MONEY_KEYS = frozenset({
     "net_pay", "opening_dues", "opening_ev_arrears",
     "rent_charged", "rent_collected_this_cycle", "rent_missed_this_cycle",
     "applied_to_arrears", "applied_to_rent", "new_balance", "value",
+    # EV Rent page (per-rider + cycle totals): paise sums of t.amount
+    "expected_rent", "collected_rent", "prior_recovered", "rolled_forward",
+    "arrears_rent", "arrears_net", "arrears_recovered_later",
+    "future_arrears_recovered", "future_xc_recovered",
+    # Dashboard inactive-EVs list (ledger daily_cost sum)
+    "missed_amount",
+    # COD page + Payments reconciliation
+    "total_pending", "recent_payout", "expected_amount",
+    # Dashboard: partial rent collection (charged minus collected, this window)
+    "rent_partial",
 })
 
 
