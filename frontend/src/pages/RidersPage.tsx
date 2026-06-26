@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord, useUrlString } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { Company, RiderOut } from '../api/types'
@@ -13,8 +14,8 @@ export function RidersPage() {
   const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [riders, setRiders] = useState<RiderOut[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
-  const [filters, setFilters] = useState<Record<string, string>>({})
-  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useUrlRecord('f')
+  const [search, setSearch] = useUrlString('q')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,7 +42,7 @@ export function RidersPage() {
     [r.rider_id, r.name, r.hub, r.account_no, r.ifsc, String(r.person_id)]
       .some((v) => (v ?? '').toString().toLowerCase().includes(q))
   ) : filtered
-  const { sorted: visibleRiders, sortKey, sortDir, toggleSort } = useSort(searched)
+  const { sorted: visibleRiders, sortKey, sortDir, toggleSort } = useSort(searched, { urlKey: 'sort' })
 
   return (
     <div className="max-w-7xl mx-auto">

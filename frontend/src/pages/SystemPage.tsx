@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useUrlString } from '../state/useUrlState'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
@@ -32,7 +33,7 @@ type Tab = 'stats' | 'audit' | 'evmodels' | 'merge' | 'delete'
 
 export function SystemPage() {
   const { user } = useAuth()
-  const [tab, setTab] = useState<Tab>('stats')
+  const [tab, setTab] = useUrlString('tab', 'stats') as [Tab, (v: Tab) => void]
 
   if (user?.role !== 'creator') {
     return (

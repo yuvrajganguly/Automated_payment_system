@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 
@@ -42,7 +43,7 @@ export function CodPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [rows, setRows] = useState<CodRow[]>([])
-  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [filters, setFilters] = useUrlRecord('f')
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [openClearFor, setOpenClearFor] = useState<CodRow | null>(null)
@@ -57,7 +58,7 @@ export function CodPage() {
   useEffect(reload, [])
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
-  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered)
+  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered, { urlKey: 'sort' })
 
   const totals = visible.reduce(
     (a, r) => ({

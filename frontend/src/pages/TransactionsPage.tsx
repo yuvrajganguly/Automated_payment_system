@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useUrlString, useUrlNumber } from '../state/useUrlState'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { ExportButton } from '../components/ExportButton'
@@ -18,9 +19,9 @@ const EVENT_TYPES = Object.keys(EVENT_COLOR)
 export function TransactionsPage() {
   const [txns, setTxns] = useState<TransactionOut[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
-  const [eventType, setEventType] = useState('')
-  const [company, setCompany] = useState('')
-  const [limit, setLimit] = useState(200)
+  const [eventType, setEventType] = useUrlString('event')
+  const [company, setCompany] = useUrlString('company')
+  const [limit, setLimit] = useUrlNumber('limit', 200)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

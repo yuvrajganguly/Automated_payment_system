@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord, useUrlString, useUrlList } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { EvModelOut, EvUnitOut, MaintenanceOut } from '../api/types'
@@ -16,9 +17,9 @@ export function EVsPage() {
   const [models, setModels] = useState<EvModelOut[]>([])
   const [units, setUnits] = useState<EvUnitOut[]>([])
   const [maint, setMaint] = useState<MaintenanceOut[]>([])
-  const [unitFilters, setUnitFilters] = useState<Record<string, string>>({})
-  const [unitSearch, setUnitSearch] = useState('')
-  const [hubFilter, setHubFilter] = useState<string[]>([])
+  const [unitFilters, setUnitFilters] = useUrlRecord('f')
+  const [unitSearch, setUnitSearch] = useUrlString('q')
+  const [hubFilter, setHubFilter] = useUrlList('hub')
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const hubOptions = Array.from(new Set(
@@ -34,7 +35,7 @@ export function EVsPage() {
     [u.ev_id, u.current_rider_name, u.current_rider_id, u.provider, u.model, u.status, u.hub]
       .some((v) => (v ?? '').toString().toLowerCase().includes(q))
   ) : filteredUnits
-  const { sorted: visibleUnits, sortKey, sortDir, toggleSort } = useSort(searchedUnits)
+  const { sorted: visibleUnits, sortKey, sortDir, toggleSort } = useSort(searchedUnits, { urlKey: 'sort' })
 
   const reload = () => {
     setBusy(true); setError(null)

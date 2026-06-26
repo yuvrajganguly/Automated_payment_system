@@ -6,6 +6,7 @@
  * card to open a side drawer showing the underlying rows.
  */
 import { useEffect, useState } from 'react'
+import { useUrlList, useUrlString } from '../state/useUrlState'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
@@ -106,9 +107,9 @@ export function DashboardPage() {
     const prevSun = new Date(prevMon); prevSun.setDate(prevMon.getDate() + 6)
     return { from: isoLocal(prevMon), to: isoLocal(prevSun) }
   })()
-  const [companies, setCompanies] = useState<string[]>([])
-  const [dateFrom, setDateFrom] = useState<string>(prevWeek.from)
-  const [dateTo, setDateTo]     = useState<string>(prevWeek.to)
+  const [companies, setCompanies] = useUrlList('companies')
+  const [dateFrom, setDateFrom] = useUrlString('from', prevWeek.from)
+  const [dateTo, setDateTo]     = useUrlString('to', prevWeek.to)
   const [drawerMetric, setDrawerMetric] = useState<string | null>(null)
 
   const reload = () => {

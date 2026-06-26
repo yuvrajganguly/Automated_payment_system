@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord, useUrlString } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 
@@ -30,8 +31,8 @@ type Bucket = 'all' | 'ev' | 'dues'
 
 export function ArrearsPage() {
   const [rows, setRows] = useState<ArrearsRow[]>([])
-  const [filters, setFilters] = useState<Record<string, string>>({})
-  const [bucket, setBucket] = useState<Bucket>('all')
+  const [filters, setFilters] = useUrlRecord('f')
+  const [bucket, setBucket] = useUrlString('bucket', 'all') as [Bucket, (v: Bucket) => void]
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,7 +51,7 @@ export function ArrearsPage() {
     }
   }, [rows, bucket])
   const filtered = useMemo(() => applyFilters(scoped, filters), [scoped, filters])
-  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered)
+  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered, { urlKey: 'sort' })
 
   const totals = visible.reduce(
     (a, r) => ({

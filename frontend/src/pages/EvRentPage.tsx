@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord, useUrlBool } from '../state/useUrlState'
+import { usePersistedState } from '../state/usePersistedState'
 import { SortableTh, useSort } from '../components/Sortable'
 
 const fmt = (n: number) =>
@@ -46,9 +48,9 @@ export function EvRentPage() {
   const [rows, setRows] = useState<CycleRow[]>([])
   const [companies, setCompanies] = useState<string[]>([])
   const [availableCompanies, setAvailableCompanies] = useState<string[]>([])
-  const [filters, setFilters] = useState<Record<string, string>>({})
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const [latestOnly, setLatestOnly] = useState(true)
+  const [filters, setFilters] = useUrlRecord('f')
+  const [expanded, setExpanded] = usePersistedState<Record<string, boolean>>('evrent:expanded', {})
+  const [latestOnly, setLatestOnly] = useUrlBool('latest', true)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,7 +76,7 @@ export function EvRentPage() {
   }
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
-  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered)
+  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered, { urlKey: 'sort' })
 
   // Use NET arrears / rolled — so the totals heal when cross-company
   // recoveries are detected. arrears_net = arrears − arrears_recovered_later

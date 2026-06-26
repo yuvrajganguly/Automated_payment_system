@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useUrlString } from '../state/useUrlState'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -202,7 +203,10 @@ function UploadDetail({ detail, isAdmin, onChanged }:
     isAdmin: boolean
     onChanged: () => void }) {
   const absent = detail.absent ?? []
-  const [tab, setTab] = useState<'pending' | 'success' | 'resolved'>('pending')
+  const [tab, setTab] = useUrlString('tab', 'pending') as [
+    'pending' | 'success' | 'resolved',
+    (v: 'pending' | 'success' | 'resolved') => void,
+  ]
   const lines = detail.lines
   const pending = lines.filter((l) => !l.resolution_method)
   const success = lines.filter((l) => l.resolution_method === 'bank_ok')

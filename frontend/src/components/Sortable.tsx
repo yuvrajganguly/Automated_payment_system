@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 /**
  * Spreadsheet-style sorting helpers.
@@ -15,9 +16,44 @@ import { useMemo, useState } from 'react'
  */
 export type SortDir = 'asc' | 'desc' | null
 
-export function useSort<T>(rows: T[], initialKey: keyof T & string = '' as keyof T & string) {
-  const [sortKey, setSortKey] = useState<string>(initialKey || '')
-  const [sortDir, setSortDir] = useState<SortDir>(null)
+export function useSort<T>(
+  rows: T[],
+  opts: { initialKey?: string; urlKey?: string } = {},
+) {
+  const { initialKey = '', urlKey } = opts
+  const [params, setSearchParams] = useSearchParams()
+  const [localKey, setLocalKey] = useState<string>(initialKey)
+  const [localDir, setLocalDir] = useState<SortDir>(initialKey ? 'asc' : null)
+
+  // When urlKey is given, sort lives in the URL (shareable, survives refresh);
+  // otherwise it is component-local (back-compatible default).
+  const dirKey = urlKey ? urlKey + 'Dir' : ''
+  const urlDirRaw = urlKey ? params.get(dirKey) : null
+  const sortKey = urlKey ? (params.get(urlKey) ?? '') : localKey
+  const sortDir: SortDir =
+    urlDirRaw === 'asc' || urlDirRaw === 'desc' ? urlDirRaw : urlKey ? null : localDir
+
+  const setSort = (key: string, dir: SortDir) => {
+    if (urlKey) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (!key || !dir) {
+            next.delete(urlKey)
+            next.delete(dirKey)
+          } else {
+            next.set(urlKey, key)
+            next.set(dirKey, dir)
+          }
+          return next
+        },
+        { replace: true },
+      )
+    } else {
+      setLocalKey(key)
+      setLocalDir(dir)
+    }
+  }
 
   const sorted = useMemo(() => {
     if (!sortKey || !sortDir) return rows
@@ -37,10 +73,10 @@ export function useSort<T>(rows: T[], initialKey: keyof T & string = '' as keyof
   }, [rows, sortKey, sortDir])
 
   const toggleSort = (key: string) => {
-    if (sortKey !== key) { setSortKey(key); setSortDir('asc'); return }
-    if (sortDir === 'asc')  { setSortDir('desc'); return }
-    if (sortDir === 'desc') { setSortKey(''); setSortDir(null); return }
-    setSortDir('asc')
+    if (sortKey !== key) { setSort(key, 'asc'); return }
+    if (sortDir === 'asc')  { setSort(key, 'desc'); return }
+    if (sortDir === 'desc') { setSort('', null); return }
+    setSort(key, 'asc')
   }
 
   return { sorted, sortKey, sortDir, toggleSort }

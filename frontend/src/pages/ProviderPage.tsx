@@ -16,6 +16,7 @@
  *      discrepancy.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useUrlString } from '../state/useUrlState'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { useAuth } from '../auth/AuthContext'
@@ -166,8 +167,8 @@ export function ProviderPage({ provider, cadence }: Props) {
     }
   }, [cadence])
 
-  const [from, setFrom] = useState(initialRange.from)
-  const [to,   setTo]   = useState(initialRange.to)
+  const [from, setFrom] = useUrlString('from', initialRange.from)
+  const [to,   setTo]   = useUrlString('to', initialRange.to)
   const [period, setPeriod] = useState<PeriodResp | null>(null)
   const [recon, setRecon] = useState<ReconResp | null>(null)
   const [loadingRecon, setLoadingRecon] = useState(true)

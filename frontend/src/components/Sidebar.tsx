@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { rememberedPath } from '../state/useRouteMemory'
 
 const SECTIONS: { heading?: string; items: { to: string; label: string; end?: boolean }[] }[] = [
   { items: [
@@ -54,7 +55,7 @@ export function Sidebar() {
           <div key={section.heading ?? i} className="flex flex-col gap-0.5">
             {section.heading && <div className={heading}>{section.heading}</div>}
             {section.items.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
+              <NavLink key={item.to} to={rememberedPath(item.to)} end={item.end} className={linkClass}>
                 {item.label}
               </NavLink>
             ))}

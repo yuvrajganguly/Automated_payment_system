@@ -1,7 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
+import { useScrollRestoration } from '../state/useScrollRestoration'
+import { useRouteMemory } from '../state/useRouteMemory'
 
 export function Layout() {
+  useScrollRestoration()
+  useRouteMemory()
   return (
     <div className="flex min-h-screen">
       <Sidebar />

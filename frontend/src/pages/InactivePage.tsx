@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
+import { useUrlRecord, useUrlNumber } from '../state/useUrlState'
 import { SortableTh, useSort } from '../components/Sortable'
 
 const fmt = (n: number) =>
@@ -25,8 +26,8 @@ interface InactiveRow {
 
 export function InactivePage() {
   const [rows, setRows] = useState<InactiveRow[]>([])
-  const [days, setDays] = useState(14)
-  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [days, setDays] = useUrlNumber('days', 14)
+  const [filters, setFilters] = useUrlRecord('f')
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -39,7 +40,7 @@ export function InactivePage() {
   }, [days])
 
   const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters])
-  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered)
+  const { sorted: visible, sortKey, sortDir, toggleSort } = useSort(filtered, { urlKey: 'sort' })
 
   const totals = visible.reduce(
     (a, r) => ({
