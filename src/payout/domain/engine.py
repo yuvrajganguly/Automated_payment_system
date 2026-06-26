@@ -593,12 +593,13 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                     billing_event_id=(missed_id["id"] if missed_id else None),
                     billing_status="missed",
                 )
-                # NOTE: deliberately NOT advancing rent_charged_through here.
-                # Under the catch-up rent model, RENT_MISSED leaves the meter
-                # where it is so a later company's cycle (whose window covers
-                # the same days) can pick them up and flip 'missed' → 'recovered'
-                # in the daily ledger. Advancing the meter on RENT_MISSED would
-                # hide those days from any subsequent cycle.
+                # Advance the meter past the missed window. The missed days
+                # now live solely in EV arrears (clawed back later as cash).
+                # Leaving the meter behind made the next overlapping cycle
+                # re-bill those same days via a catch-up RENT *while* the
+                # arrears were also recovered -- double-charging the rider.
+                # Advancing here keeps every EV day billed exactly once.
+                advance_rent_charged_through(conn, pid, cycle_end)
                 total_missed += rinfo.rent
             ridx_rows = conn.execute(
                 "SELECT rider_id, hub FROM rider_master WHERE person_id=? AND company=?",
