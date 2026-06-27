@@ -47,9 +47,9 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
             "LEFT JOIN ev_assignments a ON a.person_id = pr.person_id AND a.returned_date IS NULL "
             "LEFT JOIN ev_units  u ON u.ev_id    = a.ev_id "
             "LEFT JOIN ev_models m ON m.model_id = u.model_id "
-            "WHERE COALESCE(ea.outstanding, 0) > 0 "
+            # Show only riders who still owe on net: EV arrears net of any
+            "WHERE (COALESCE(ea.outstanding, 0) - COALESCE(b.current_balance, 0)) > 0 "
             "   OR COALESCE(ea.cod_outstanding, 0) > 0 "
-            "   OR COALESCE(b.current_balance, 0) < 0 "
             "ORDER BY (COALESCE(ea.outstanding,0) + COALESCE(ea.cod_outstanding,0) "
             "        + CASE WHEN COALESCE(b.current_balance,0)<0 "
             "               THEN -b.current_balance ELSE 0 END) DESC"
