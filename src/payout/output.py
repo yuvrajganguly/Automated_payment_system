@@ -85,8 +85,10 @@ def _pay_sheet(wb, rows):
         # (arrears outstanding coming into the cycle = new_arrears + what
         # was recovered this cycle).
         prev_arrears = (r.new_arrears or 0.0) + (r.arrears_recovered or 0.0)
-        prev_dues = round(max(0.0, -r.prev_balance) + prev_arrears, 2)
-        carry = round(max(0.0, -r.new_balance), 2)
+        prev_dues = round(prev_arrears - r.prev_balance, 2)
+        # Carry Forward = Total Dues after this cycle (EV arrears net of
+        # any credit balance); positive = still owed, negative = net credit.
+        carry = round((r.new_arrears or 0.0) - r.new_balance, 2)
         # Dues Cleared = whatever portion of the payout retired carried-forward
         # dues this cycle. The engine surfaces this in dues_cleared so the row
         # breakdown is rent + arrears_recovered + dues_cleared = total deduction.
@@ -135,8 +137,10 @@ def _dues_sheet(wb, rows):
         # (arrears outstanding coming into the cycle = new_arrears + what
         # was recovered this cycle).
         prev_arrears = (r.new_arrears or 0.0) + (r.arrears_recovered or 0.0)
-        prev_dues = round(max(0.0, -r.prev_balance) + prev_arrears, 2)
-        carry = round(max(0.0, -r.new_balance), 2)
+        prev_dues = round(prev_arrears - r.prev_balance, 2)
+        # Carry Forward = Total Dues after this cycle (EV arrears net of
+        # any credit balance); positive = still owed, negative = net credit.
+        carry = round((r.new_arrears or 0.0) - r.new_balance, 2)
         dues_cleared = round(getattr(r, "dues_cleared", 0.0) or 0.0, 2)
         orders_val = getattr(r, "orders", None)
         vals = [r.person_id, r.rider_id, r.name, r.hub or "", r.vehicle or "",

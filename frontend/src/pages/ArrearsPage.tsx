@@ -22,6 +22,7 @@ interface ArrearsRow {
   cod_recovered: number
   cod_outstanding: number
   dues_outstanding: number     // general carryforward (positive number)
+  total_dues: number           // EV arrears net of any credit balance (>0 owes)
   companies: string | null
   hubs: string | null
   last_updated: string | null
@@ -119,7 +120,7 @@ export function ArrearsPage() {
               <SortableTh tag="model" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Model</SortableTh>
               <SortableTh tag="outstanding" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>EV Outstanding</SortableTh>
               <SortableTh tag="dues_outstanding" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Dues (Carryfwd)</SortableTh>
-              <th className="px-3 py-2 font-medium text-xs text-right">Total Dues</th>
+              <SortableTh tag="total_dues" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Total Dues</SortableTh>
               <SortableTh tag="last_updated" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Last Updated</SortableTh>
             </tr>
           </thead>
@@ -140,8 +141,8 @@ export function ArrearsPage() {
                 <Td right className={r.dues_outstanding > 0 ? 'font-semibold text-blue-700' : 'text-slate-400'}>
                   {fmt(r.dues_outstanding)}
                 </Td>
-                <Td right className={(r.outstanding + r.dues_outstanding) > 0 ? 'font-bold text-emerald-700' : 'text-slate-400'}>
-                  {fmt(r.outstanding + r.dues_outstanding)}
+                <Td right className={r.total_dues > 0 ? 'font-bold text-rose-700' : r.total_dues < 0 ? 'font-semibold text-emerald-700' : 'text-slate-400'}>
+                  {fmt(r.total_dues)}
                 </Td>
                 <Td className="text-xs">{r.last_updated ?? ''}</Td>
               </tr>

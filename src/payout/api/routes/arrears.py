@@ -33,6 +33,8 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
             "       COALESCE(ea.cod_outstanding, 0) AS cod_outstanding, "
             "       CASE WHEN COALESCE(b.current_balance, 0) < 0 "
             "            THEN -b.current_balance ELSE 0 END AS dues_outstanding, "
+            "       (COALESCE(ea.outstanding,0) - COALESCE(b.current_balance,0)) "
+            "            AS total_dues, "
             "       (SELECT GROUP_CONCAT(DISTINCT rm.company) FROM rider_master rm "
             "        WHERE rm.person_id = pr.person_id AND rm.is_active = 1) AS companies, "
             "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "

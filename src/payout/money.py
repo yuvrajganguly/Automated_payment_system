@@ -69,6 +69,7 @@ MONEY_KEYS = frozenset({
     "outstanding", "arrears_outstanding", "total_missed", "total_recovered",
     "cod_missed", "cod_recovered", "cod_outstanding",
     "dues_outstanding", "ev_arrears", "dues",
+    "total_dues",
     "expected", "collected", "missed", "recovered", "pending",
     "rider_expected", "rider_collected", "rider_missed", "rider_recovered",
     "rider_pending", "provider_owed", "shortfall",
