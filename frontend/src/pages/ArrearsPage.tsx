@@ -22,7 +22,7 @@ interface ArrearsRow {
   cod_recovered: number
   cod_outstanding: number
   dues_outstanding: number     // general carryforward (positive number)
-  total_dues: number           // EV arrears net of any credit balance (>0 owes)
+  total_dues?: number          // EV arrears net of any credit balance (>0 owes)
   companies: string | null
   hubs: string | null
   last_updated: string | null
@@ -141,8 +141,8 @@ export function ArrearsPage() {
                 <Td right className={r.dues_outstanding > 0 ? 'font-semibold text-blue-700' : 'text-slate-400'}>
                   {fmt(r.dues_outstanding)}
                 </Td>
-                <Td right className={r.total_dues > 0 ? 'font-bold text-rose-700' : r.total_dues < 0 ? 'font-semibold text-emerald-700' : 'text-slate-400'}>
-                  {fmt(r.total_dues)}
+                <Td right className={(r.total_dues ?? (r.outstanding + r.dues_outstanding)) > 0 ? 'font-bold text-rose-700' : (r.total_dues ?? (r.outstanding + r.dues_outstanding)) < 0 ? 'font-semibold text-emerald-700' : 'text-slate-400'}>
+                  {fmt(r.total_dues ?? (r.outstanding + r.dues_outstanding))}
                 </Td>
                 <Td className="text-xs">{r.last_updated ?? ''}</Td>
               </tr>
