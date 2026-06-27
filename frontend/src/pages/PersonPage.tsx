@@ -65,9 +65,10 @@ export function PersonPage() {
         Deduction anchor: {person.deduction_company ?? '-'} / {person.deduction_rider_id ?? '-'}
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <Stat label="Current Balance" value={fmt(person.current_balance)} bad={person.current_balance < 0} />
         <Stat label="Arrears Outstanding" value={fmt(person.arrears_outstanding)} bad={person.arrears_outstanding > 0} />
+        <Stat label="Total Dues" value={fmt(person.arrears_outstanding - person.current_balance)} bad={(person.arrears_outstanding - person.current_balance) > 0} />
         <Stat label="Rider IDs" value={person.riders.length.toString()} />
         <Stat label="Open EV"
               value={person.ev?.ev_id ?? '-'}
