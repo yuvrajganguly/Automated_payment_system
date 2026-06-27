@@ -81,7 +81,11 @@ def _pay_sheet(wb, rows):
     ws = wb.create_sheet("PAY")
     _write_header(ws, PAY_HEADERS)
     for i, r in enumerate(rows, 2):
-        prev_dues = round(max(0.0, -r.prev_balance), 2)
+        # Previous Dues = prior general dues + prior EV-rent arrears
+        # (arrears outstanding coming into the cycle = new_arrears + what
+        # was recovered this cycle).
+        prev_arrears = (r.new_arrears or 0.0) + (r.arrears_recovered or 0.0)
+        prev_dues = round(max(0.0, -r.prev_balance) + prev_arrears, 2)
         carry = round(max(0.0, -r.new_balance), 2)
         # Dues Cleared = whatever portion of the payout retired carried-forward
         # dues this cycle. The engine surfaces this in dues_cleared so the row
@@ -127,7 +131,11 @@ def _dues_sheet(wb, rows):
     ws = wb.create_sheet("DUES")
     _write_header(ws, DUES_HEADERS)
     for i, r in enumerate(rows, 2):
-        prev_dues = round(max(0.0, -r.prev_balance), 2)
+        # Previous Dues = prior general dues + prior EV-rent arrears
+        # (arrears outstanding coming into the cycle = new_arrears + what
+        # was recovered this cycle).
+        prev_arrears = (r.new_arrears or 0.0) + (r.arrears_recovered or 0.0)
+        prev_dues = round(max(0.0, -r.prev_balance) + prev_arrears, 2)
         carry = round(max(0.0, -r.new_balance), 2)
         dues_cleared = round(getattr(r, "dues_cleared", 0.0) or 0.0, 2)
         orders_val = getattr(r, "orders", None)
