@@ -97,7 +97,7 @@ export function EvProfilePage() {
           <ReturnCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
           <MaintenanceOpenCard evId={u.ev_id} disabled={!!openMaint} onLogged={load} />
           <MaintenanceCloseCard openRow={openMaint} onClosed={load} />
-          <CloseCard evId={u.ev_id} status={u.status} onChanged={load} />
+          <CloseCard evId={u.ev_id} status={u.status} hasHolder={!!cur} onChanged={load} />
         </div>
       )}
 
@@ -300,11 +300,11 @@ function MaintenanceCloseCard({ openRow, onClosed }:
   </Card>
 }
 
-function CloseCard({ evId, status, onChanged }:
-  { evId: string; status: string; onChanged: () => void }) {
+function CloseCard({ evId, status, hasHolder, onChanged }:
+  { evId: string; status: string; hasHolder: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
-  const canClose = status === 'spare'
+  const canClose = !hasHolder && status !== 'returned'
   async function doClose() {
     setBusy(true); setMsg(null)
     try {
@@ -315,11 +315,11 @@ function CloseCard({ evId, status, onChanged }:
   }
   return <Card title="Close EV">
     <p className="text-xs text-slate-500 mb-2">
-      {canClose
-        ? 'Retire this spare EV (no rider attached). Its status becomes returned.'
-        : status === 'returned'
-          ? 'This EV is already closed (returned).'
-          : 'Only a spare (unassigned) EV can be closed here - return it from its rider first.'}
+      {status === 'returned'
+        ? 'This EV is already closed (returned).'
+        : hasHolder
+          ? 'This EV is with a rider - return it first, then close.'
+          : 'Retire this spare EV (no rider attached). Its status becomes returned.'}
     </p>
     <button type="button" onClick={doClose} disabled={!canClose || busy}
             className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
