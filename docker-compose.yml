@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    container_name: payout
+    ports:
+      - "8000:8000"
+    volumes:
+      - payout_data:/data          # DB persists here, on Docker's own filesystem
+    environment:
+      - PAYOUT_DB=/data/payout.db
+      - PAYOUT_CORS_ORIGINS=*
+      # Change this to a long random string. Keep it stable, or everyone
+      # gets logged out on each restart (it signs the login tokens).
+      - PAYOUT_JWT_SECRET=CHANGE_ME_to_a_long_random_secret_string
+    restart: unless-stopped
+
+volumes:
+  payout_data:
+    name: payout_data              # fixed name so importing the DB is easy

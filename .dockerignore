@@ -1,0 +1,19 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+node_modules
+frontend/node_modules
+frontend/dist
+# never bake rider data or DBs into the image
+*.db
+*.db-wal
+*.db-shm
+*.pre_paise_backup
+*codex_before_paise*
+payout.db*
+# local helper artifacts
+*.recovered
+*.recovered2
+*.bak_rate_fix*
