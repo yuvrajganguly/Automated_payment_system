@@ -6,12 +6,17 @@ services:
       - "8000:8000"
     volumes:
       - payout_data:/data          # DB persists here, on Docker's own filesystem
+    env_file:
+      - .env                       # PAYOUT_JWT_SECRET lives here (git-ignored)
     environment:
       - PAYOUT_DB=/data/payout.db
       - PAYOUT_CORS_ORIGINS=*
-      # Change this to a long random string. Keep it stable, or everyone
-      # gets logged out on each restart (it signs the login tokens).
-      - PAYOUT_JWT_SECRET=CHANGE_ME_to_a_long_random_secret_string
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

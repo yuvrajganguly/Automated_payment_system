@@ -55,3 +55,8 @@ setup_repos.ps1
 Yuvraj_Ganguly_CV*.docx
 Payout_System_Operations_Guide.docx
 PAYOUT_SYSTEM_STUDY_GUIDE.*
+
+# Docker / local secrets and artifacts
+.env
+*.recovered*
+*.bak_rate_fix*
