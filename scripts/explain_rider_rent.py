@@ -1,4 +1,4 @@
-"""Explain a rider's recent rent activity — why a payout showed a given rent.
+r"""Explain a rider's recent rent activity — why a payout showed a given rent.
 
 Prints every rent-related ledger row (RENT charge, RENT_COLLECTED,
 RENT_RECOVERED, RENT_MISSED) for a rider over the last few cycles, with the

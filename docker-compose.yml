@@ -21,4 +21,5 @@ services:
 
 volumes:
   payout_data:
-    name: payout_data              # fixed name so importing the DB is easy
+    external: true                 # pre-created & seeded with the real DB (see DOCKER.md)
+    name: payout_data
