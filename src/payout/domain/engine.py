@@ -19,6 +19,7 @@ from payout.domain.ev_daily import (
 from payout.domain.holds import compute_holds, persist_holds
 from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from payout.parsers import parse_file
+from payout.money import to_rupees
 
 
 @dataclass
@@ -315,7 +316,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                     result.warnings.append(
                         f"Catch-up window for person_id={pid} "
                         f"({rec.rider_id}@{company}) is {rent_days} days "
-                        f"(~{rent:.0f}). Likely a missed prior cycle or "
+                        f"(~{to_rupees(rent):,.0f}). Likely a missed prior cycle or "
                         f"late-onboarded rider — review before commit."
                     )
             else:
@@ -380,7 +381,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                 ]
                 if len(billed_legs) > 1:
                     rent_remarks = " + ".join(
-                        f"{L.ev_id} {L.days}d ({L.rent:.2f})"
+                        f"{L.ev_id} {L.days}d ({to_rupees(L.rent):,.2f})"
                         for L in billed_legs
                     )
                 rent_txn_id = conn.execute(
@@ -411,7 +412,7 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                          days=rent_days, created_by=created_by,
                          remarks=("Rent fully collected from payout"
                                   if rent_collected_this_cycle >= rent
-                                  else f"Partial rent collected; {rent - rent_collected_this_cycle:.2f} rolls to dues"))
+                                  else f"Partial rent collected; {to_rupees(rent - rent_collected_this_cycle):,.2f} rolls to dues"))
             if s.arrears_recovered > 0:
                 record_recovery(conn, pid, s.arrears_recovered, cycle_start, cycle_end,
                                 rider_id=rec.rider_id, company=company, created_by=created_by)
@@ -609,9 +610,9 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             cur = _balance(conn, pid); arr = _arrears_out(conn, pid)
             veh = _vehicle_for(conn, pid, company)
             reasons = []
-            if rinfo.rent > 0: reasons.append(f"Missed rent {rinfo.rent:.0f}")
-            if cur < 0:       reasons.append(f"Dues {-cur:.0f}")
-            if arr > 0:       reasons.append(f"Arrears {arr:.0f}")
+            if rinfo.rent > 0: reasons.append(f"Missed rent {to_rupees(rinfo.rent):,.0f}")
+            if cur < 0:       reasons.append(f"Dues {to_rupees(-cur):,.0f}")
+            if arr > 0:       reasons.append(f"Arrears {to_rupees(arr):,.0f}")
             result.inactive_rows.append(InactiveRider(
                 person_id=pid, name=a["display_name"], rider_ids=ridx, vehicle=veh,
                 hub=hub, ev_id=rinfo.ev_id, model=rinfo.model, current_balance=cur,

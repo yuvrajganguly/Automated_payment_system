@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query
 
 from payout.api.auth import get_current_user
 from payout.db import get_connection
+from payout.money import to_rupees
 
 router = APIRouter()
 
@@ -64,17 +65,17 @@ def list_inactive_riders(
         bal = float(r["current_balance"] or 0)
         reasons: list[str] = []
         if arr > 0:
-            reasons.append(f"EV arrears {arr:.0f}")
+            reasons.append(f"EV arrears {to_rupees(arr):,.0f}")
         if missed_total > arr:
             recovered = missed_total - arr
-            reasons.append(f"Previously recovered {recovered:.0f}")
+            reasons.append(f"Previously recovered {to_rupees(recovered):,.0f}")
         if absent:
             reasons.append(
                 f"Not processed since {last_seen}" if last_seen
                 else "Never processed"
             )
         if bal < 0:
-            reasons.append(f"Dues {-bal:.0f}")
+            reasons.append(f"Dues {to_rupees(-bal):,.0f}")
         out.append({
             "person_id": r["person_id"],
             "display_name": r["display_name"],
