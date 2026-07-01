@@ -297,11 +297,12 @@ def post_rent_payment(body: RentPaymentIn,
                 )
 
         # If the caller specified a coverage window and the payment actually
-        # paid down some rent, advance the EV's rent_charged_through so the
-        # automated engine won't re-charge for the same days on next cycle.
-        # We only advance forward — never backward — to keep the meter monotonic.
+        # paid down rent — whether it landed on the current cycle (RENT_COLLECTED)
+        # OR on arrears (RENT_RECOVERED, e.g. the days were previously missed) —
+        # advance the EV's rent_charged_through so the automated engine won't
+        # re-charge for the same days next cycle. Forward-only (monotonic).
         advanced_to = None
-        if body.period_end and applied_to_rent > 0:
+        if body.period_end and (applied_to_rent > 0 or applied_to_arrears > 0):
             row = conn.execute(
                 "SELECT assignment_id, rent_charged_through FROM ev_assignments "
                 "WHERE person_id=? AND returned_date IS NULL", (pid,)).fetchone()
