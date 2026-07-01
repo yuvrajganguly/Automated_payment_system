@@ -217,6 +217,35 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
             "returned_date": today}
 
 
+@router.post("/close")
+def close_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+    """Close (retire) an EV that has no open assignment - e.g. a spare unit.
+
+    Sets the unit status to 'returned' and clears any open maintenance window.
+    For an EV currently held by a rider, use /return instead (that also closes
+    the assignment)."""
+    if not body.ev_id:
+        raise HTTPException(400, "Provide ev_id")
+    today = (body.returned_date or date.today()).isoformat()
+    with get_connection() as conn:
+        u = conn.execute("SELECT status FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone()
+        if not u:
+            raise HTTPException(404, f"EV {body.ev_id!r} not found")
+        if conn.execute(
+            "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL",
+            (body.ev_id,),
+        ).fetchone():
+            raise HTTPException(409, f"EV {body.ev_id} is assigned to a rider - return it first")
+        conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (body.ev_id,))
+        conn.execute(
+            "UPDATE ev_maintenance SET to_date=? "
+            "WHERE ev_id=? AND to_date IS NULL AND from_date <= ?",
+            (today, body.ev_id, today),
+        )
+        conn.commit()
+    return {"closed": True, "ev_id": body.ev_id, "status": "returned"}
+
+
 @router.get("/maintenance", response_model=list[MaintenanceOut])
 def list_maintenance(ev_id: Optional[str] = None,
                      _: dict = Depends(get_current_user)) -> list[MaintenanceOut]:

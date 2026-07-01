@@ -97,6 +97,7 @@ export function EvProfilePage() {
           <ReturnCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
           <MaintenanceOpenCard evId={u.ev_id} disabled={!!openMaint} onLogged={load} />
           <MaintenanceCloseCard openRow={openMaint} onClosed={load} />
+          <CloseCard evId={u.ev_id} status={u.status} onChanged={load} />
         </div>
       )}
 
@@ -296,6 +297,35 @@ function MaintenanceCloseCard({ openRow, onClosed }:
         </>
       ) : <p className="text-xs text-slate-500">No open maintenance window.</p>}
     </form>
+  </Card>
+}
+
+function CloseCard({ evId, status, onChanged }:
+  { evId: string; status: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const canClose = status === 'spare'
+  async function doClose() {
+    setBusy(true); setMsg(null)
+    try {
+      await api.post('/evs/close', { ev_id: evId })
+      setMsg('Closed'); onChanged()
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  return <Card title="Close EV">
+    <p className="text-xs text-slate-500 mb-2">
+      {canClose
+        ? 'Retire this spare EV (no rider attached). Its status becomes returned.'
+        : status === 'returned'
+          ? 'This EV is already closed (returned).'
+          : 'Only a spare (unassigned) EV can be closed here - return it from its rider first.'}
+    </p>
+    <button type="button" onClick={doClose} disabled={!canClose || busy}
+            className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
+      {busy ? '…' : 'Close EV'}
+    </button>
+    {msg && <span className="ml-2 text-xs">{msg}</span>}
   </Card>
 }
 
