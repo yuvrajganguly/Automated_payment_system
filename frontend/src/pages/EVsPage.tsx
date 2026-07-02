@@ -188,6 +188,7 @@ export function EVsPage() {
           <AddEvCard models={models} onAdded={reload} />
           <AssignEvCard onChanged={reload} />
           <ReturnEvCard onChanged={reload} />
+          <CloseEvCard onChanged={reload} />
           <MaintenanceCard onLogged={reload} />
         </div>
       )}
@@ -313,6 +314,33 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
       </div>
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
         disabled={!validEv && !validRid} label="Return" />{msg && <span className="text-xs">{msg}</span>}</div>
+    </form>
+  </FormCard>
+}
+
+function CloseEvCard({ onChanged }: { onChanged: () => void }) {
+  const empty = { ev_id: '', returned_date: '' }
+  const [form, setForm] = useState(empty)
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const body: Record<string, string> = { ev_id: form.ev_id }
+      if (form.returned_date) body.returned_date = form.returned_date
+      await api.post('/evs/close', body); setMsg('Closed'); setForm(empty); onChanged()
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  return <FormCard title="Close / Retire Spare EV">
+    <form onSubmit={submit} className="grid grid-cols-2 gap-2 text-sm">
+      <Input label="EV ID *" v={form.ev_id} on={(v) => setForm({ ...form, ev_id: v })} />
+      <Input label="Closed date" type="date" v={form.returned_date}
+             on={(v) => setForm({ ...form, returned_date: v })} />
+      <div className="col-span-2 text-xs text-slate-500 -mt-1">
+        Retires a spare EV that has no rider. If it's still with a rider, return it first.
+      </div>
+      <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
+        disabled={!form.ev_id} label="Close EV" />{msg && <span className="text-xs">{msg}</span>}</div>
     </form>
   </FormCard>
 }
