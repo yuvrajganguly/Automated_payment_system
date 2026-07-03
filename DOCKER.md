@@ -1,30 +1,52 @@
-# Running the Payout System with Docker
+# Running the Payout System with Docker (PostgreSQL)
 
-One production container serves both the API and the built frontend on
-**http://localhost:8000**. It runs as a **non-root** user, has a **healthcheck**,
-and stores the database in a Docker volume (`payout_data`) on Docker's own
-Linux filesystem — **not** in this OneDrive folder — so it can't be corrupted
-by sync.
+Two containers, started together by Docker Compose:
 
-Prerequisite: **Docker Desktop** (Windows, WSL2 backend).
+- **`db`** — PostgreSQL 16, data stored in the `payout_pg` Docker volume (on
+  Docker's own Linux filesystem, **not** in this OneDrive folder).
+- **`app`** — the API + built React frontend on **http://localhost:8000**, running
+  as a non-root user with a healthcheck.
+
+The app talks to Postgres via `PAYOUT_DB_URL`. (SQLite is still fully supported —
+just unset `PAYOUT_DB_URL` — but the Docker setup uses Postgres.)
+
+Prerequisite: **Docker Desktop** (Windows, WSL2 backend), running.
 
 ## One-time setup
 
-**1. Create the secrets file** (`.env`, git-ignored) with a strong random key:
+**1. Secrets file** (`.env`, git-ignored):
 
 ```powershell
 "PAYOUT_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_hex(32))')" |
   Out-File -Encoding ascii .env
+Add-Content .env "POSTGRES_PASSWORD=payout"
 ```
 
-**2. Import your existing DB** into the volume, so the app starts with real data
-instead of a demo seed:
+**2. Start just the database:**
 
 ```powershell
-docker volume create payout_data
-docker run --rm -v payout_data:/data -v C:/payout_data:/src alpine `
-  sh -c "cp /src/payout.db /data/payout.db; rm -f /data/payout.db-wal /data/payout.db-shm"
+docker compose up -d db
 ```
+
+**3. Migrate your existing SQLite data into Postgres.** First get a copy of your
+real DB out of the old SQLite container (if it's still around) — otherwise use
+your latest backup:
+
+```powershell
+docker cp payout:/data/payout.db "C:\payout_data\payout_pre_pg.db"   # if the old container exists
+```
+
+Install the Postgres driver into your venv and run the migrator (it creates the
+schema, copies every table, and resets the id sequences):
+
+```powershell
+C:\payout_venv\Scripts\pip install "psycopg[binary]"
+C:\payout_venv\Scripts\python scripts\migrate_sqlite_to_pg.py `
+  "C:\payout_data\payout_pre_pg.db" `
+  "postgresql://payout:payout@localhost:5432/payout"
+```
+
+It prints a row count per table — check they look right.
 
 ## Build & run
 
@@ -32,24 +54,5 @@ docker run --rm -v payout_data:/data -v C:/payout_data:/src alpine `
 docker compose up -d --build
 ```
 
-Open **http://localhost:8000** and log in (`yuvrajganguly29@gmail.com`).
-Check health / status with `docker compose ps` (shows `healthy`).
-
-## Everyday commands
-
-```powershell
-docker compose logs -f app      # watch backend logs
-docker compose ps               # status + health
-docker compose restart app      # restart
-docker compose down             # stop (the volume/data persists)
-docker compose up -d --build    # rebuild after a code change
-```
-
-## Back up the database
-
-```powershell
-docker cp payout:/data/payout.db "C:\payout_data\payout_backup_$(Get-Date -Format yyyyMMdd_HHmm).db"
-```
-
-A static copy like this is safe to keep in OneDrive; only the live, being-written
-DB must stay out of synced folders — and here it does, inside the volume.
+Open **http://localhost:8000** and log in. Check health with `docker compose ps`
+(b

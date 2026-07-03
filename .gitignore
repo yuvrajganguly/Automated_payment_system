@@ -63,3 +63,7 @@ PAYOUT_SYSTEM_STUDY_GUIDE.*
 
 # TS incremental build cache
 frontend/tsconfig.tsbuildinfo
+
+# Local-only helpers (not part of the app)
+start.ps1
+scripts/oneoff/
