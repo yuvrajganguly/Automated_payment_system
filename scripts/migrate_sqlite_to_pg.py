@@ -45,10 +45,19 @@ tables = [r[0] for r in src.execute(
 
 raw = psycopg.connect(PG_URL, autocommit=False)
 cur = raw.cursor()
+# Only copy tables that exist in the canonical target schema. A source DB may
+# carry stray tables from other tooling (e.g. _schema_migrations) that we don't
+# model in Postgres — skip those rather than fail.
+cur.execute(
+    "SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+pg_tables = {r[0] for r in cur.fetchall()}
 cur.execute("SET session_replication_role = replica")  # defer FK checks
 
 total = 0
 for t in tables:
+    if t not in pg_tables:
+        print(f"[migrate] {t:24} SKIP (not in target schema)")
+        continue
     cols = [c[1] for c in src.execute(f"PRAGMA table_info({t})")]
     if not cols:
         continue
