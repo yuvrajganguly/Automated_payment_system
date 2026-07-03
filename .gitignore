@@ -60,3 +60,6 @@ PAYOUT_SYSTEM_STUDY_GUIDE.*
 .env
 *.recovered*
 *.bak_rate_fix*
+
+# TS incremental build cache
+frontend/tsconfig.tsbuildinfo

@@ -67,9 +67,13 @@ async def lifespan(app: FastAPI):
     from payout.db.demo_seed import seed_demo
     from payout.db import get_connection
     initialize_database()
-    _seed_demo_users()
-    with get_connection() as conn:
-        seed_demo(conn)
+    # Demo accounts + synthetic fleet are for the public demo only. Set
+    # PAYOUT_SEED_DEMO=0 on a real deployment so no demo login or demo data is
+    # created (seed_demo is already a no-op once real data exists).
+    if os.environ.get("PAYOUT_SEED_DEMO", "1") != "0":
+        _seed_demo_users()
+        with get_connection() as conn:
+            seed_demo(conn)
     yield
 
 

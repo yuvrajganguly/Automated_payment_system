@@ -1,16 +1,36 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: payout-db
+    environment:
+      POSTGRES_USER: payout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payout}
+      POSTGRES_DB: payout
+    volumes:
+      - payout_pg:/var/lib/postgresql/data   # DB lives here, on Docker's own filesystem
+    ports:
+      - "5432:5432"                          # exposed so the host migration script can reach it
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payout -d payout"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   app:
     build: .
     container_name: payout
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
-    volumes:
-      - payout_data:/data          # DB persists here, on Docker's own filesystem
     env_file:
-      - .env                       # PAYOUT_JWT_SECRET lives here (git-ignored)
+      - .env                                 # PAYOUT_JWT_SECRET (git-ignored)
     environment:
-      - PAYOUT_DB=/data/payout.db
+      - PAYOUT_DB_URL=postgresql://payout:${POSTGRES_PASSWORD:-payout}@db:5432/payout
       - PAYOUT_CORS_ORIGINS=*
+      - PAYOUT_SEED_DEMO=0                    # real deployment: no demo login/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
       interval: 30s
@@ -20,6 +40,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  payout_data:
-    external: true                 # pre-created & seeded with the real DB (see DOCKER.md)
-    name: payout_data
+  payout_pg:
+    name: payout_pg
