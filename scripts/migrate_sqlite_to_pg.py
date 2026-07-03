@@ -59,7 +59,13 @@ for t in tables:
     # All numeric columns in the PG schema are BIGINT (money = integer paise);
     # coerce any stray float to int so assignment is exact.
     def clean(v):
-        return int(round(v)) if isinstance(v, float) else v
+        # Money columns are BIGINT (integer paise) -> coerce any stray float.
+        if isinstance(v, float):
+            return int(round(v))
+        # Postgres text can't hold NUL bytes; SQLite text can. Strip them.
+        if isinstance(v, str) and "\x00" in v:
+            return v.replace("\x00", "")
+        return v
     data = [tuple(clean(v) for v in r) for r in rows]
     ph = ",".join(["%s"] * len(cols))
     cur.executemany(
