@@ -1,21 +1,283 @@
-"""SQLite connection helper."""
+"""Database connection layer — SQLite by default, PostgreSQL when configured.
+
+The entire codebase is written in **SQLite dialect** (``?`` placeholders,
+``datetime('now')``, ``INSERT OR IGNORE`` …). That SQL is proven and is exercised
+by the test suite, so instead of rewriting ~450 queries we translate them to
+PostgreSQL *at execution time* here. Set ``PAYOUT_DB_URL`` to a Postgres URL to
+use Postgres; otherwise the classic SQLite file path (``PAYOUT_DB``) is used.
+
+Nothing else in the app needs to know which backend is live.
+"""
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
-from payout.config import DB_PATH
+from payout.config import DB_PATH, DB_URL
 
 
-def get_connection() -> sqlite3.Connection:
-    """Open a SQLite connection with sane defaults.
-
-    - ``Row`` factory so columns are accessible by name.
-    - Foreign keys enforced (off by default in SQLite).
-    - WAL journal mode for better concurrent reads.
-    """
-    conn = sqlite3.connect(DB_PATH)
+# ─────────────────────────── SQLite backend ────────────────────────────────
+def _sqlite_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+
+# ─────────────────────── SQLite → PostgreSQL translation ────────────────────
+_RE_LAST_ROWID = re.compile(r"last_insert_rowid\s*\(\s*\)", re.I)
+_RE_DATETIME_NOW = re.compile(r"datetime\(\s*'now'\s*\)", re.I)
+_RE_DATE_NOW = re.compile(r"date\(\s*'now'\s*\)", re.I)
+_RE_DATE_SHIFT = re.compile(
+    r"date\(\s*([^,()]+?)\s*,\s*'([+-]?\d+)\s+days?'\s*\)", re.I)
+_RE_DATE_CAST = re.compile(r"\bdate\(\s*([^()]+?)\s*\)", re.I)
+_RE_INSERT_OR_IGNORE = re.compile(r"INSERT\s+OR\s+IGNORE\s+INTO", re.I)
+_RE_GROUP_CONCAT = re.compile(
+    r"group_concat\(\s*(DISTINCT\s+)?([^,()]+?)\s*(?:,\s*('[^']*'))?\s*\)", re.I)
+
+
+def _func_translations(sql: str) -> str:
+    """Rewrite SQLite-only functions/keywords to their Postgres equivalents.
+
+    Results stay TEXT where SQLite produced TEXT, so downstream comparisons
+    against our TEXT date/datetime columns keep working unchanged.
+    """
+    sql = _RE_LAST_ROWID.sub("lastval()", sql)
+    sql = _RE_DATETIME_NOW.sub("to_char(now(), 'YYYY-MM-DD HH24:MI:SS')", sql)
+    sql = _RE_DATE_NOW.sub("to_char(now(), 'YYYY-MM-DD')", sql)
+    sql = _RE_DATE_SHIFT.sub(
+        r"to_char((\1)::date + INTERVAL '\2 day', 'YYYY-MM-DD')", sql)
+    sql = _RE_DATE_CAST.sub(r"substr(\1, 1, 10)", sql)
+    sql = _RE_GROUP_CONCAT.sub(
+        lambda m: "string_agg(%s(%s)::text, %s)" % (
+            m.group(1) or "", m.group(2), m.group(3) or "','"), sql)
+    if _RE_INSERT_OR_IGNORE.search(sql):
+        sql = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", sql)
+        sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+    return sql
+
+
+def _params_subst(sql: str) -> str:
+    """Placeholder + percent handling for the parameterised path.
+
+    Converts sqlite placeholders to psycopg ones — positional ``?`` -> ``%s`` and
+    named ``:name`` -> ``%(name)s`` — while:
+      * doubling every literal ``%`` (psycopg needs %% when params are present),
+      * leaving placeholders inside quoted string literals untouched,
+      * preserving ``::`` type casts we emit during translation.
+    """
+    out: list[str] = []
+    in_q = False
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "%":
+            out.append("%%")
+            i += 1
+            continue
+        if ch == "'":
+            out.append(ch)
+            if in_q and i + 1 < n and sql[i + 1] == "'":  # '' escape
+                out.append("'")
+                i += 2
+                continue
+            in_q = not in_q
+            i += 1
+            continue
+        if in_q:
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "?":
+            out.append("%s")
+            i += 1
+            continue
+        if ch == ":":
+            if i + 1 < n and sql[i + 1] == ":":       # ::type cast
+                out.append("::")
+                i += 2
+                continue
+            j = i + 1
+            if j < n and (sql[j].isalpha() or sql[j] == "_"):
+                k = j
+                while k < n and (sql[k].isalnum() or sql[k] == "_"):
+                    k += 1
+                out.append("%(" + sql[j:k] + ")s")
+                i = k
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _translate(sql: str, has_params: bool) -> str:
+    sql = _func_translations(sql)
+    if has_params:
+        sql = _params_subst(sql)
+    return sql
+
+
+def translate_ddl(sql: str) -> str:
+    """Translate the CREATE TABLE/INDEX schema script to Postgres."""
+    sql = re.sub(r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT",
+                 "BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY",
+                 sql, flags=re.I)
+    sql = re.sub(r"\bINTEGER\b", "BIGINT", sql, flags=re.I)
+    return _func_translations(sql)
+
+
+# ────────────────────────── Postgres wrappers ──────────────────────────────
+class _Row:
+    """A row usable as row["col"] AND row[0], like sqlite3.Row; dict(row) works."""
+
+    __slots__ = ("_idx", "_vals")
+
+    def __init__(self, idx, vals):
+        self._idx = idx
+        self._vals = vals
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return self._vals[self._idx[key]]
+        return self._vals[key]
+
+    def __iter__(self):
+        return iter(self._vals)
+
+    def __len__(self):
+        return len(self._vals)
+
+    def keys(self):
+        return list(self._idx.keys())
+
+    def get(self, key, default=None):
+        i = self._idx.get(key)
+        return default if i is None else self._vals[i]
+
+    def __contains__(self, key):
+        return key in self._idx
+
+
+def _row_factory(cursor):
+    desc = cursor.description
+    idx = {c.name: i for i, c in enumerate(desc)} if desc else {}
+
+    def make(values):
+        return _Row(idx, tuple(values))
+
+    return make
+
+
+class _CursorWrapper:
+    """Wraps a psycopg cursor to speak the sqlite3 cursor API the app expects."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._cur = conn._raw.cursor(row_factory=_row_factory)
+
+    def execute(self, sql, params=None):
+        has = params is not None and len(params) > 0
+        self._cur.execute(_translate(sql, has), params if has else None)
+        return self
+
+    def executemany(self, sql, seq):
+        seq = list(seq)
+        has = bool(seq) and len(seq[0]) > 0
+        self._cur.executemany(_translate(sql, has), seq)
+        return self
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    def fetchmany(self, size=None):
+        return self._cur.fetchmany(size) if size is not None else self._cur.fetchmany()
+
+    def __iter__(self):
+        return iter(self._cur)
+
+    @property
+    def lastrowid(self):
+        c = self._conn._raw.cursor()
+        c.execute("SELECT lastval()")
+        return c.fetchone()[0]
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def description(self):
+        return self._cur.description
+
+    def close(self):
+        self._cur.close()
+
+
+class _ConnectionWrapper:
+    """Wraps a psycopg connection to speak the sqlite3 connection API."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def execute(self, sql, params=None):
+        return _CursorWrapper(self).execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return _CursorWrapper(self).executemany(sql, seq)
+
+    def executescript(self, script):
+        self._raw.execute(script)
+        return self
+
+    def cursor(self):
+        return _CursorWrapper(self)
+
+    def commit(self):
+        self._raw.commit()
+
+    def rollback(self):
+        self._raw.rollback()
+
+    def close(self):
+        try:
+            self._raw.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self._raw.commit()
+        else:
+            self._raw.rollback()
+        self.close()
+        return False
+
+    def __del__(self):
+        self.close()
+
+
+def _postgres_connection():
+    import psycopg
+    raw = psycopg.connect(DB_URL, autocommit=False)
+    return _ConnectionWrapper(raw)
+
+
+# ────────────────────────────── entry point ────────────────────────────────
+def get_connection():
+    """Open a database connection for the configured backend.
+
+    Postgres when ``PAYOUT_DB_URL`` is set, else a SQLite file. Both expose the
+    same execute/executemany/commit/context-manager surface, with rows
+    accessible by name and by position.
+    """
+    if DB_URL:
+        return _postgres_connection()
+    return _sqlite_connection()

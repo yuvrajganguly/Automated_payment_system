@@ -404,6 +404,15 @@ CREATE INDEX IF NOT EXISTS idx_maint_ev ON ev_maintenance (ev_id);
 """
 
 
-def apply_schema(conn: sqlite3.Connection) -> None:
-    """Create all tables and indexes if they do not already exist."""
-    conn.executescript(SCHEMA)
+def apply_schema(conn) -> None:
+    """Create all tables and indexes if they do not already exist.
+
+    On Postgres the SQLite DDL is translated first (identity columns, BIGINT,
+    datetime defaults); on SQLite it runs verbatim.
+    """
+    from payout.config import DB_URL
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+        conn.executescript(translate_ddl(SCHEMA))
+    else:
+        conn.executescript(SCHEMA)

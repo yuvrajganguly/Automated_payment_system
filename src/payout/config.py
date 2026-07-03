@@ -19,5 +19,10 @@ PROJECT_ROOT: Path = SRC_DIR.parent
 # Database location. Override with `PAYOUT_DB=/some/path.db` for tests/deploys.
 DB_PATH: Path = Path(os.environ.get("PAYOUT_DB", PROJECT_ROOT / "payout.db"))
 
+# Optional PostgreSQL backend. When ``PAYOUT_DB_URL`` is set (e.g.
+# ``postgresql://user:pass@host:5432/payout``), the app uses Postgres and the
+# SQLite ``DB_PATH`` above is ignored. Unset => SQLite file (default).
+DB_URL: str | None = os.environ.get("PAYOUT_DB_URL") or None
+
 # A standard pay cycle is one week. Used to decide weekly-vs-daily EV rent.
 STANDARD_CYCLE_DAYS: int = 7

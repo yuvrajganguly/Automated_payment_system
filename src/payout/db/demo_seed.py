@@ -161,9 +161,14 @@ def seed_demo(conn: sqlite3.Connection) -> None:
         parts = split_evenly(rate, len(days))      # rider cost sums to the week's rate
         for i, dd in enumerate(days):
             conn.execute(
-                "INSERT OR REPLACE INTO ev_daily_ledger (ev_id, day, state, "
+                "INSERT INTO ev_daily_ledger (ev_id, day, state, "
                 "assigned_person_id, daily_cost, provider_cost, billing_status, "
-                "cycle_event_id) VALUES (?,?, 'billable',?,?,?,?,?)",
+                "cycle_event_id) VALUES (?,?, 'billable',?,?,?,?,?) "
+                "ON CONFLICT(ev_id, day) DO UPDATE SET state=excluded.state, "
+                "assigned_person_id=excluded.assigned_person_id, "
+                "daily_cost=excluded.daily_cost, provider_cost=excluded.provider_cost, "
+                "billing_status=excluded.billing_status, "
+                "cycle_event_id=excluded.cycle_event_id",
                 (ev_id, ds(dd), pid, parts[i], prov, status, event_id))
 
     for wi, w in enumerate(weeks):
@@ -239,8 +244,11 @@ def seed_demo(conn: sqlite3.Connection) -> None:
     for pid, ar in arrears.items():
         out = ar["missed"] - ar["recovered"]
         conn.execute(
-            "INSERT OR REPLACE INTO ev_arrears (person_id, total_missed, "
-            "total_recovered, outstanding, last_updated) VALUES (?,?,?,?, date('now'))",
+            "INSERT INTO ev_arrears (person_id, total_missed, "
+            "total_recovered, outstanding, last_updated) VALUES (?,?,?,?, date('now')) "
+            "ON CONFLICT(person_id) DO UPDATE SET total_missed=excluded.total_missed, "
+            "total_recovered=excluded.total_recovered, outstanding=excluded.outstanding, "
+            "last_updated=excluded.last_updated",
             (pid, ar["missed"], ar["recovered"], out))
 
     # ── COD holds (newest week) ─────────────────────────────────────────────
@@ -277,12 +285,17 @@ def seed_demo(conn: sqlite3.Connection) -> None:
         bal = -round(out.get("missed", 0.0) - out.get("recovered", 0.0), 2) \
             if p["pid"] in arrears else 0.0
         conn.execute(
-            "INSERT OR REPLACE INTO balances (person_id, current_balance, last_updated) "
-            "VALUES (?,?, datetime('now'))", (p["pid"], 0.0))
+            "INSERT INTO balances (person_id, current_balance, last_updated) "
+            "VALUES (?,?, datetime('now')) "
+            "ON CONFLICT(person_id) DO UPDATE SET "
+            "current_balance=excluded.current_balance, last_updated=excluded.last_updated",
+            (p["pid"], 0.0))
         active = p["pid"] in present_newest
         conn.execute(
-            "INSERT OR REPLACE INTO status_tracking (person_id, status, last_seen) "
-            "VALUES (?,?,?)",
+            "INSERT INTO status_tracking (person_id, status, last_seen) "
+            "VALUES (?,?,?) "
+            "ON CONFLICT(person_id) DO UPDATE SET status=excluded.status, "
+            "last_seen=excluded.last_seen",
             (p["pid"], "active" if active else "inactive", ds(newest[1])))
         _ = bal
 

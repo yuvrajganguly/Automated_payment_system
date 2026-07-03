@@ -8,7 +8,15 @@ from payout.db.seed import seed_all
 
 
 def _migrate(conn) -> None:
-    """Apply small forward-only schema migrations to existing DBs."""
+    """Apply small forward-only schema migrations to existing DBs.
+
+    These use SQLite-only introspection (PRAGMA table_info) and table rebuilds.
+    A fresh Postgres database is already created at the latest schema, so this is
+    a no-op there.
+    """
+    from payout.config import DB_URL
+    if DB_URL:
+        return
     # ev_arrears: add COD columns (v0.1 → v0.2)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(ev_arrears)")}
     for col in ("cod_missed", "cod_recovered", "cod_outstanding"):
