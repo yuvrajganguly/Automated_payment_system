@@ -71,8 +71,9 @@ def seed_demo(conn: sqlite3.Connection) -> None:
     # ── Companies, rate card, EV units ──────────────────────────────────────
     for c in COMPANIES:
         conn.execute(
-            "INSERT OR IGNORE INTO companies (company_name, parser_type, is_active) "
-            "VALUES (?,?,1)", (c, c.lower()))
+            "INSERT OR IGNORE INTO companies (company_name, parser_type, "
+            "rider_id_column, payout_column, is_active) VALUES (?,?,?,?,1)",
+            (c, c.lower(), "rider_id", "payout"))
     model_id = {}
     for prov, name, rate in MODELS:
         conn.execute(
