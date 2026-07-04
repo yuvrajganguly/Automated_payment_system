@@ -158,92 +158,112 @@ def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
     return {"assigned": True, "person_id": pid, "ev_id": body.ev_id, "handover_date": hod}
 
 
-@router.post("/return")
-def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
-    """Return an EV.
+def _find_open_assignment(conn, body: "EvReturnIn"):
+    """Locate the open assignment for body.ev_id or (rider_id, company).
 
-    Accept either an explicit ``ev_id`` (preferred — unambiguous) or a
-    (rider_id, company) pair. If both are given they must point at the same
-    open assignment.
+    Returns the assignment row, or None when an ``ev_id`` was given but the unit
+    has no open assignment (i.e. it is a spare). Raises for bad input: no
+    selector, unknown rider, a rider with no open assignment, or an ev_id that
+    doesn't match the named rider.
     """
-    today = (body.returned_date or date.today()).isoformat()
     if not body.ev_id and not (body.rider_id and body.company):
         raise HTTPException(400, "Provide ev_id, or (rider_id + company)")
-    with get_connection() as conn:
-        if body.ev_id:
-            a = conn.execute(
-                "SELECT assignment_id, ev_id, person_id FROM ev_assignments "
-                "WHERE ev_id=? AND returned_date IS NULL", (body.ev_id,)).fetchone()
-            if not a:
-                raise HTTPException(404, f"No open assignment for EV {body.ev_id!r}")
-            # If rider_id+company also given, sanity-check the match.
-            if body.rider_id and body.company:
-                rm = conn.execute(
-                    "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
-                    (body.rider_id, body.company)).fetchone()
-                if not rm or rm["person_id"] != a["person_id"]:
-                    raise HTTPException(
-                        409, f"EV {body.ev_id} is not currently with rider "
-                             f"{body.rider_id}@{body.company}")
-        else:
+    if body.ev_id:
+        a = conn.execute(
+            "SELECT assignment_id, ev_id, person_id FROM ev_assignments "
+            "WHERE ev_id=? AND returned_date IS NULL", (body.ev_id,)).fetchone()
+        if a and body.rider_id and body.company:
             rm = conn.execute(
                 "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
                 (body.rider_id, body.company)).fetchone()
-            if not rm:
-                raise HTTPException(404, "Rider not found")
-            a = conn.execute(
-                "SELECT assignment_id, ev_id, person_id FROM ev_assignments "
-                "WHERE person_id=? AND returned_date IS NULL",
-                (rm["person_id"],)).fetchone()
-            if not a:
-                raise HTTPException(404, "No open EV assignment for this person")
+            if not rm or rm["person_id"] != a["person_id"]:
+                raise HTTPException(
+                    409, f"EV {body.ev_id} is not currently with rider "
+                         f"{body.rider_id}@{body.company}")
+        return a
+    rm = conn.execute(
+        "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
+        (body.rider_id, body.company)).fetchone()
+    if not rm:
+        raise HTTPException(404, "Rider not found")
+    a = conn.execute(
+        "SELECT assignment_id, ev_id, person_id FROM ev_assignments "
+        "WHERE person_id=? AND returned_date IS NULL", (rm["person_id"],)).fetchone()
+    if not a:
+        raise HTTPException(404, "No open EV assignment for this person")
+    return a
+
+
+def _close_open_maintenance(conn, ev_id: str, today: str) -> None:
+    """Close any open maintenance window on an EV (a returned/spared unit isn't
+    in maintenance; a stale open window would zero the next rider's rent)."""
+    conn.execute(
+        "UPDATE ev_maintenance SET to_date=? "
+        "WHERE ev_id=? AND to_date IS NULL AND from_date <= ?",
+        (today, ev_id, today))
+
+
+@router.post("/return")
+def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+    """Return an EV to the provider (retire it) - whether it is currently with a
+    rider OR sitting as a spare.
+
+      * With a rider: closes the open assignment (rent stops) and marks the unit
+        'returned'.
+      * Spare (no open assignment): just marks the unit 'returned'.
+
+    Accepts an explicit ``ev_id`` (preferred, unambiguous) or a
+    (rider_id, company) pair.
+    """
+    today = (body.returned_date or date.today()).isoformat()
+    with get_connection() as conn:
+        a = _find_open_assignment(conn, body)
+        if a:
+            ev_id, person_id = a["ev_id"], a["person_id"]
+            conn.execute("UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
+                         (today, a["assignment_id"]))
+        else:
+            # Spare: no open assignment. The unit itself must exist.
+            ev_id, person_id = body.ev_id, None
+            if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (ev_id,)).fetchone():
+                raise HTTPException(404, f"EV {ev_id!r} not found")
+        conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (ev_id,))
+        _close_open_maintenance(conn, ev_id, today)
+        conn.commit()
+    return {"returned": True, "ev_id": ev_id, "person_id": person_id,
+            "returned_date": today}
+
+
+@router.post("/to-spare")
+def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+    """Take an EV back from its rider and keep it as a SPARE (available for
+    reassignment) instead of retiring it.
+
+    Ends the current assignment so rent stops, and sets the unit status to
+    'spare'. The EV must currently be with a rider. Accepts an explicit ``ev_id``
+    or a (rider_id, company) pair.
+    """
+    today = (body.returned_date or date.today()).isoformat()
+    with get_connection() as conn:
+        a = _find_open_assignment(conn, body)
+        if not a:
+            raise HTTPException(
+                409, f"EV {body.ev_id!r} has no rider to take it back from "
+                     "(it is already spare or returned).")
         conn.execute("UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
                      (today, a["assignment_id"]))
-        conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (a["ev_id"],))
-        # Auto-close any open maintenance window on this EV. An EV being
-        # returned to the depot means it isn't in maintenance anymore — and
-        # if it really is, the operator can reopen a fresh window. Leaving
-        # a stale to_date=NULL row around would zero the next rider's rent
-        # entirely (resolve_rent treats open maintenance as blocking through
-        # cycle_end).
-        conn.execute(
-            "UPDATE ev_maintenance SET to_date=? "
-            "WHERE ev_id=? AND to_date IS NULL "
-            "  AND from_date <= ?",
-            (today, a["ev_id"], today),
-        )
+        conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (a["ev_id"],))
+        _close_open_maintenance(conn, a["ev_id"], today)
         conn.commit()
-    return {"returned": True, "ev_id": a["ev_id"], "person_id": a["person_id"],
-            "returned_date": today}
+    return {"spare": True, "ev_id": a["ev_id"], "person_id": a["person_id"],
+            "as_of": today}
 
 
 @router.post("/close")
 def close_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
-    """Close (retire) an EV that has no open assignment - e.g. a spare unit.
-
-    Sets the unit status to 'returned' and clears any open maintenance window.
-    For an EV currently held by a rider, use /return instead (that also closes
-    the assignment)."""
-    if not body.ev_id:
-        raise HTTPException(400, "Provide ev_id")
-    today = (body.returned_date or date.today()).isoformat()
-    with get_connection() as conn:
-        u = conn.execute("SELECT status FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone()
-        if not u:
-            raise HTTPException(404, f"EV {body.ev_id!r} not found")
-        if conn.execute(
-            "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL",
-            (body.ev_id,),
-        ).fetchone():
-            raise HTTPException(409, f"EV {body.ev_id} is assigned to a rider - return it first")
-        conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (body.ev_id,))
-        conn.execute(
-            "UPDATE ev_maintenance SET to_date=? "
-            "WHERE ev_id=? AND to_date IS NULL AND from_date <= ?",
-            (today, body.ev_id, today),
-        )
-        conn.commit()
-    return {"closed": True, "ev_id": body.ev_id, "status": "returned"}
+    """Deprecated alias for /return, which now retires spares as well. Kept so
+    older clients / the existing 'Close' button keep working."""
+    return return_ev(body, _)
 
 
 @router.get("/maintenance", response_model=list[MaintenanceOut])

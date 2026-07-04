@@ -94,10 +94,10 @@ export function EvProfilePage() {
       {isAdmin && (
         <div className="grid md:grid-cols-2 gap-4 mb-6">
           <AssignCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
-          <ReturnCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
+          <ReturnCard evId={u.ev_id} status={u.status} hasHolder={!!cur} onChanged={load} />
           <MaintenanceOpenCard evId={u.ev_id} disabled={!!openMaint} onLogged={load} />
           <MaintenanceCloseCard openRow={openMaint} onClosed={load} />
-          <CloseCard evId={u.ev_id} status={u.status} hasHolder={!!cur} onChanged={load} />
+          <MarkSpareCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
         </div>
       )}
 
@@ -199,10 +199,11 @@ function AssignCard({ evId, hasHolder, onChanged }:
   </Card>
 }
 
-function ReturnCard({ evId, hasHolder, onChanged }:
-  { evId: string; hasHolder: boolean; onChanged: () => void }) {
+function ReturnCard({ evId, status, hasHolder, onChanged }:
+  { evId: string; status: string; hasHolder: boolean; onChanged: () => void }) {
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
+  const canReturn = status !== 'returned'
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
@@ -213,9 +214,16 @@ function ReturnCard({ evId, hasHolder, onChanged }:
     finally { setBusy(false) }
   }
   return <Card title="Return EV">
+    <p className="text-xs text-slate-500 mb-2">
+      {status === 'returned'
+        ? 'This EV is already returned.'
+        : hasHolder
+          ? 'Retire this EV to the provider — closes the rider’s assignment (rent stops).'
+          : 'Retire this spare EV to the provider.'}
+    </p>
     <form onSubmit={submit} className="text-sm">
       <In v={date} on={setDate} label="Returned date (blank = today)" type="date" />
-      <button type="submit" disabled={busy || !hasHolder}
+      <button type="submit" disabled={busy || !canReturn}
               className="mt-2 bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
         {busy ? '…' : 'Return'}
       </button>
@@ -300,32 +308,34 @@ function MaintenanceCloseCard({ openRow, onClosed }:
   </Card>
 }
 
-function CloseCard({ evId, status, hasHolder, onChanged }:
-  { evId: string; status: string; hasHolder: boolean; onChanged: () => void }) {
+function MarkSpareCard({ evId, hasHolder, onChanged }:
+  { evId: string; hasHolder: boolean; onChanged: () => void }) {
+  const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
-  const canClose = !hasHolder && status !== 'returned'
-  async function doClose() {
-    setBusy(true); setMsg(null)
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      await api.post('/evs/close', { ev_id: evId })
-      setMsg('Closed'); onChanged()
+      const body: Record<string, string> = { ev_id: evId }
+      if (date) body.returned_date = date
+      await api.post('/evs/to-spare', body); setMsg('Marked spare'); setDate(''); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
-  return <Card title="Close EV">
+  return <Card title="Mark as Spare">
     <p className="text-xs text-slate-500 mb-2">
-      {status === 'returned'
-        ? 'This EV is already closed (returned).'
-        : hasHolder
-          ? 'This EV is with a rider - return it first, then close.'
-          : 'Retire this spare EV (no rider attached). Its status becomes returned.'}
+      {hasHolder
+        ? 'Take this EV back from its rider into the spare pool — rent stops, but the EV stays available for reassignment (not retired).'
+        : 'Only an EV currently with a rider can be marked spare.'}
     </p>
-    <button type="button" onClick={doClose} disabled={!canClose || busy}
-            className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
-      {busy ? '…' : 'Close EV'}
-    </button>
-    {msg && <span className="ml-2 text-xs">{msg}</span>}
+    <form onSubmit={submit} className="text-sm">
+      <In v={date} on={setDate} label="Effective date (blank = today)" type="date" />
+      <button type="submit" disabled={busy || !hasHolder}
+              className="mt-2 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded disabled:opacity-50">
+        {busy ? '…' : 'Mark as Spare'}
+      </button>
+      {msg && <span className="ml-2 text-xs">{msg}</span>}
+    </form>
   </Card>
 }
 

@@ -188,7 +188,7 @@ export function EVsPage() {
           <AddEvCard models={models} onAdded={reload} />
           <AssignEvCard onChanged={reload} />
           <ReturnEvCard onChanged={reload} />
-          <CloseEvCard onChanged={reload} />
+          <MarkSpareEvCard onChanged={reload} />
           <MaintenanceCard onLogged={reload} />
         </div>
       )}
@@ -310,7 +310,7 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
       <Input label="Returned date" type="date" v={form.returned_date}
              on={(v) => setForm({ ...form, returned_date: v })} />
       <div className="col-span-2 text-xs text-slate-500 -mt-1">
-        Give either the EV ID or (Rider ID + Company). If both, they must match.
+        Retires the EV to the provider — works for an assigned EV or a spare. Give the EV ID or (Rider ID + Company).
       </div>
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
         disabled={!validEv && !validRid} label="Return" />{msg && <span className="text-xs">{msg}</span>}</div>
@@ -318,29 +318,37 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
   </FormCard>
 }
 
-function CloseEvCard({ onChanged }: { onChanged: () => void }) {
-  const empty = { ev_id: '', returned_date: '' }
+function MarkSpareEvCard({ onChanged }: { onChanged: () => void }) {
+  const empty = { ev_id: '', rider_id: '', company: '', returned_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const body: Record<string, string> = { ev_id: form.ev_id }
+      const body: Record<string, string> = {}
+      if (form.ev_id) body.ev_id = form.ev_id
+      if (form.rider_id) body.rider_id = form.rider_id
+      if (form.company) body.company = form.company
       if (form.returned_date) body.returned_date = form.returned_date
-      await api.post('/evs/close', body); setMsg('Closed'); setForm(empty); onChanged()
+      await api.post('/evs/to-spare', body); setMsg('Marked spare'); setForm(empty); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
-  return <FormCard title="Close / Retire Spare EV">
+  const validEv  = !!form.ev_id
+  const validRid = !!form.rider_id && !!form.company
+  return <FormCard title="Mark EV as Spare">
     <form onSubmit={submit} className="grid grid-cols-2 gap-2 text-sm">
-      <Input label="EV ID *" v={form.ev_id} on={(v) => setForm({ ...form, ev_id: v })} />
-      <Input label="Closed date" type="date" v={form.returned_date}
+      <Input label="EV ID" v={form.ev_id} on={(v) => setForm({ ...form, ev_id: v })} />
+      <div />
+      <Input label="Rider ID" v={form.rider_id} on={(v) => setForm({ ...form, rider_id: v })} />
+      <Input label="Company" v={form.company} on={(v) => setForm({ ...form, company: v })} />
+      <Input label="Effective date" type="date" v={form.returned_date}
              on={(v) => setForm({ ...form, returned_date: v })} />
       <div className="col-span-2 text-xs text-slate-500 -mt-1">
-        Retires a spare EV that has no rider. If it's still with a rider, return it first.
+        Takes an EV back from its rider into the spare pool — rent stops, EV stays available for reassignment. Give the EV ID or (Rider ID + Company).
       </div>
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
-        disabled={!form.ev_id} label="Close EV" />{msg && <span className="text-xs">{msg}</span>}</div>
+        disabled={!validEv && !validRid} label="Mark as Spare" />{msg && <span className="text-xs">{msg}</span>}</div>
     </form>
   </FormCard>
 }
