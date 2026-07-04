@@ -266,7 +266,26 @@ class _ConnectionWrapper:
 
 def _postgres_connection():
     import psycopg
+    from psycopg.adapt import Loader
+
+    class _NumericAsNumber(Loader):
+        """Return numeric/decimal as int (fractional -> float), matching SQLite.
+
+        Postgres SUM(bigint) yields numeric, which psycopg would hand back as a
+        Decimal. Our money is integer paise, and the paise->rupee converters only
+        recognise int/float — a Decimal would slip through unconverted and render
+        100x too large. Loading numeric as int keeps summed money flowing through
+        rupeeize()/to_rupees() exactly like it does on SQLite.
+        """
+
+        def load(self, data):
+            if data is None:
+                return None
+            b = bytes(data)
+            return float(b) if (b"." in b or b"e" in b or b"E" in b) else int(b)
+
     raw = psycopg.connect(DB_URL, autocommit=False)
+    raw.adapters.register_loader("numeric", _NumericAsNumber)
     return _ConnectionWrapper(raw)
 
 
