@@ -788,8 +788,8 @@ def dashboard_breakdown(
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('RENT','RENT_COLLECTED') {scope} "
                 f"GROUP BY t.person_id, pr.display_name "
-                f"HAVING rent_charged > rent_collected "
-                f"ORDER BY (rent_charged - rent_collected) DESC LIMIT ?"
+                f"HAVING SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
+                f"ORDER BY (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END)) DESC LIMIT ?"
             )
             rows = []
             for r in conn.execute(sql, scope_params + [limit]):
@@ -835,10 +835,8 @@ def dashboard_breakdown(
             if cos:
                 ph = ",".join("?" for _ in cos)
                 cod_filter += f" AND ch.company IN ({ph})"; cod_params.extend(cos)
-            if cycle_ends:
-                ph = ",".join("?" for _ in cycle_ends)
-                cod_filter += f" AND ch.cycle_end IN ({ph})"
-                cod_params.extend(cycle_ends)
+            cod_filter += " AND date(ch.created_at) BETWEEN ? AND ?"
+            cod_params.extend([df_iso, dt_iso])
             sql = (
                 f"SELECT ch.rider_id, ch.person_id, ch.company, ch.amount, "
                 f"       ch.order_number, ch.txn_status "
@@ -858,8 +856,8 @@ def dashboard_breakdown(
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
-                f"HAVING payout > released "
-                f"ORDER BY (payout - released) DESC LIMIT ?"
+                f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) "
+                f"ORDER BY (SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END)) DESC LIMIT ?"
             )
             rows = []
             for r in conn.execute(sql, scope_params + [limit]):
@@ -1177,7 +1175,10 @@ def dashboard_export(
             f"WHERE t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_RECOVERED', "
             f"                       'XC_RENT_RECOVERED','RENT_COLLECTED') {scope} "
             f"GROUP BY t.person_id, pr.display_name, t.company "
-            f"HAVING gross > 0 OR rent > 0 OR recovered > 0 OR manual_rent > 0 "
+            f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > 0 "
+            f"    OR SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > 0 "
+            f"    OR SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') THEN t.amount ELSE 0 END) > 0 "
+            f"    OR SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) THEN t.amount ELSE 0 END) > 0 "
             f"ORDER BY gross DESC",
             scope_params,
         ))

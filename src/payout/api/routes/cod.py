@@ -51,7 +51,7 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
             JOIN person_registry pr ON pr.person_id = ch.person_id
             WHERE ch.cleared_at IS NULL
             GROUP BY pr.person_id, pr.display_name
-            HAVING total_pending > 0
+            HAVING COALESCE(SUM(ch.amount), 0) > 0
             ORDER BY total_pending DESC
             """
         ).fetchall()

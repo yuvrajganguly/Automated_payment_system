@@ -151,16 +151,16 @@ def ev_rent_details(
                 "                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "
                 "       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "
                 "       MAX(CASE WHEN t.event_type='RENT'           THEN t.days END) AS days_billed, "
-                "       (SELECT rm.hub FROM rider_master rm "
+                "       MAX((SELECT rm.hub FROM rider_master rm "
                 "          WHERE rm.person_id = t.person_id AND rm.company = t.company "
-                "          LIMIT 1) AS hub "
+                "          LIMIT 1)) AS hub "
                 "FROM transactions t "
                 "LEFT JOIN person_registry pr ON pr.person_id = t.person_id "
                 "WHERE t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
                 "                       'XC_RENT_RECOVERED', 'RENT_RECOVERED') "
                 "  AND t.company = ? AND t.cycle_start = ? AND t.cycle_end = ? "
                 "GROUP BY t.person_id, t.rider_id, pr.display_name "
-                "ORDER BY arrears_rent DESC, (expected_present - collected_rent) DESC, pr.display_name",
+                "ORDER BY arrears_rent DESC, (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') THEN t.amount ELSE 0 END)) DESC, pr.display_name",
                 (cyc["company"], cyc["cycle_start"], cyc["cycle_end"]),
             ).fetchall()
             by_rider = []
