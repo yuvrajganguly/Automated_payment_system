@@ -362,6 +362,22 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                  cycle_start=cycle_start, cycle_end=cycle_end, event_type="PAYOUT",
                  amount=rec.payout, balance_after=prev_bal + rec.payout, created_by=created_by)
             if rent > 0:
+                # Guardrail: with a correctly-advanced meter, RENT never covers
+                # more days than the cycle spans. rent_days > span means the
+                # meter was behind at cycle start (a stuck-meter catch-up); if
+                # arrears are ALSO recovered this run, the catch-up may re-bill
+                # the very days being clawed back -> a double-charge. Flag it so
+                # the operator reviews before committing.
+                _span = (date.fromisoformat(_iso(cycle_end))
+                         - date.fromisoformat(_iso(cycle_start))).days + 1
+                if rent_days and rent_days > _span and s.arrears_recovered > 0:
+                    result.warnings.append(
+                        f"person_id={pid} ({rec.rider_id}@{company}): RENT bills "
+                        f"{rent_days} days for a {_span}-day cycle while arrears "
+                        f"were recovered this run - possible double-charge from a "
+                        f"stuck meter. Review before commit "
+                        f"(scripts/find_spencers_double_charge.py)."
+                    )
                 # RENT records ONLY this cycle's rent (not any folded-in pending
                 # from a prior cycle). RENT_COLLECTED records the portion of the
                 # rider's payout that went toward THIS cycle's rent. Any
