@@ -7,8 +7,22 @@ on:
 
 jobs:
   python:
-    name: Python · lint + types + tests
+    name: Python · lint + types + tests (SQLite & PostgreSQL)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: payout
+          POSTGRES_PASSWORD: payout
+          POSTGRES_DB: payout
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payout -d payout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +38,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,api]"
 
+      # Advisory for now (581 findings to burn down) — does NOT gate the build.
+      # TODO: fix findings, then remove continue-on-error so lint really gates.
       - name: Lint (ruff)
         run: ruff check src tests
         continue-on-error: true
@@ -32,7 +48,14 @@ jobs:
         run: mypy src
         continue-on-error: true
 
-      - name: Tests (pytest with coverage)
+      - name: Tests (SQLite)
+        run: pytest -q
+
+      # Same suite against the production backend — catches dialect-translation
+      # regressions the SQLite run can't see.
+      - name: Tests (PostgreSQL)
+        env:
+          PAYOUT_DB_URL: postgresql://payout:payout@localhost:5432/payout
         run: pytest -q
 
   frontend:

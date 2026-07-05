@@ -55,4 +55,44 @@ docker compose up -d --build
 ```
 
 Open **http://localhost:8000** and log in. Check health with `docker compose ps`
-(b
+(both `db` and `app` should be `healthy`/`running`).
+
+Because `PAYOUT_SEED_DEMO=0` is set for the app, no demo login or demo data is
+created — you'll see only your real, migrated data.
+
+## Everyday commands
+
+```powershell
+docker compose up -d              # start both (after a reboot etc.)
+docker compose ps                 # status + health
+docker compose logs -f app        # watch backend logs
+docker compose logs -f db         # watch Postgres logs
+docker compose down               # stop (the payout_pg volume/data persists)
+docker compose up -d --build      # rebuild after a code change
+```
+
+With `restart: unless-stopped`, both containers come back automatically when
+Docker Desktop starts, so day-to-day you just open the browser.
+
+## Back up the database
+
+`pg_dump` into a file (safe to keep in OneDrive — it's a static snapshot):
+
+```powershell
+docker exec payout-db pg_dump -U payout -d payout `
+  > "C:\payout_data\payout_pg_backup_$(Get-Date -Format yyyyMMdd_HHmm).sql"
+```
+
+Restore into a fresh db with `psql`:
+
+```powershell
+Get-Content backup.sql | docker exec -i payout-db psql -U payout -d payout
+```
+
+## Notes
+
+- The app's SQL is written in SQLite dialect and translated to PostgreSQL at the
+  connection layer (`src/payout/db/connection.py`) when `PAYOUT_DB_URL` is set.
+  The full test suite passes on **both** backends.
+- Want to go back to SQLite temporarily? Unset `PAYOUT_DB_URL` and set
+  `PAYOUT_DB=/data/payout.db`. Nothing else changes.

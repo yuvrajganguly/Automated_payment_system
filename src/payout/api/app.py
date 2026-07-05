@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,8 +40,8 @@ def _seed_demo_users() -> None:
     """Create demo accounts if they don't already exist.
 
     Credentials (printed to stdout for Render logs):
-      admin@demo.com  /  Demo@1234  (role: admin)
-      viewer@demo.com /  Demo@1234  (role: user)
+      admin@demo.com  /  Demo-1234  (role: admin)
+      viewer@demo.com /  Demo-1234  (role: user)
     """
     from payout.auth import hash_password
     from payout.db import get_connection
@@ -130,6 +130,12 @@ if _FRONTEND_DIR.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str):
-        """Catch-all: return index.html so React Router handles client-side routes."""
+        """Catch-all: return index.html so React Router handles client-side routes.
+
+        Unknown /api/* paths must NOT fall through to the SPA — a typo'd API call
+        should be a 404 JSON, not a 200 with an HTML body.
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
         index = _FRONTEND_DIR / "index.html"
         return FileResponse(str(index))

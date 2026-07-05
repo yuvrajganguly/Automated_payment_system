@@ -13,13 +13,30 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from functools import lru_cache
 
 from payout.config import DB_PATH, DB_URL
 
 
 # ─────────────────────────── SQLite backend ────────────────────────────────
+class _SQLiteConnection(sqlite3.Connection):
+    """sqlite3.Connection whose ``with`` block also CLOSES the connection.
+
+    The stock sqlite3 context manager only commits/rolls back on exit and
+    leaves the connection open. Our Postgres wrapper closes on exit, and the
+    app treats ``with get_connection() as conn`` as a full connection scope —
+    so both backends must behave identically here.
+    """
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def _sqlite_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), factory=_SQLiteConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -112,7 +129,13 @@ def _params_subst(sql: str) -> str:
     return "".join(out)
 
 
+@lru_cache(maxsize=1024)
 def _translate(sql: str, has_params: bool) -> str:
+    """Translate one SQLite statement to Postgres (pure function, so cached).
+
+    The app issues a small, fixed set of distinct SQL strings; caching means
+    each one pays the regex pipeline once per process instead of per execute.
+    """
     sql = _func_translations(sql)
     if has_params:
         sql = _params_subst(sql)

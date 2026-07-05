@@ -28,8 +28,9 @@ COPY --from=frontend /app/frontend/dist ./frontend/dist
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# No PAYOUT_CORS_ORIGINS here: FastAPI serves the SPA same-origin, so CORS is
+# only needed for the Vite dev server (localhost defaults in api/config.py).
 ENV PAYOUT_DB=/data/payout.db \
-    PAYOUT_CORS_ORIGINS=* \
     PYTHONUNBUFFERED=1
 VOLUME ["/data"]
 EXPOSE 8000
