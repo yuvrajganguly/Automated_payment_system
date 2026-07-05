@@ -70,3 +70,6 @@ scripts/oneoff/
 
 # Local encrypted DB backup (never commit)
 payout_db_backup_encrypted.zip
+
+# Contains real rider data - never commit
+scripts/build_seed.py
