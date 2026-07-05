@@ -79,7 +79,7 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Type check
-        run: npx tsc -b --noEmit
+        run: npx tsc -b   # -b applies --noEmit to composite tsconfig.node.json -> TS6310; app tsconfig already has noEmit
 
       - name: Production build
         run: npm run build
