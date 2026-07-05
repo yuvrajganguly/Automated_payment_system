@@ -67,3 +67,6 @@ frontend/tsconfig.tsbuildinfo
 # Local-only helpers (not part of the app)
 start.ps1
 scripts/oneoff/
+
+# Local encrypted DB backup (never commit)
+payout_db_backup_encrypted.zip
