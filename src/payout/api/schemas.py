@@ -60,6 +60,7 @@ class RiderOut(BaseModel):
     vehicle: Optional[str] = None
     account_no: Optional[str] = None
     ifsc: Optional[str] = None
+    mob_no: Optional[str] = None
     is_active: bool = True
 
 
@@ -73,6 +74,7 @@ class RiderPatch(BaseModel):
     vehicle: Optional[str] = None
     account_no: Optional[str] = None
     ifsc: Optional[str] = None
+    mob_no: Optional[str] = None
     is_active: Optional[bool] = None
     new_rider_id: Optional[str] = None
     new_company: Optional[str] = None
