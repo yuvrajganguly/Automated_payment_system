@@ -39,7 +39,7 @@ export function RidersPage() {
   const filtered = applyFilters(scoped, restFilters)
   const q = search.trim().toLowerCase()
   const searched = q ? filtered.filter((r) =>
-    [r.rider_id, r.name, r.hub, r.account_no, r.ifsc, String(r.person_id)]
+    [r.rider_id, r.name, r.hub, r.account_no, r.ifsc, r.mob_no, String(r.person_id)]
       .some((v) => (v ?? '').toString().toLowerCase().includes(q))
   ) : filtered
   const { sorted: visibleRiders, sortKey, sortDir, toggleSort } = useSort(searched, { urlKey: 'sort' })
@@ -83,7 +83,7 @@ export function RidersPage() {
               <SortableTh tag="company"   sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Company</SortableTh>
               <SortableTh tag="hub"       sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Hub</SortableTh>
               <SortableTh tag="vehicle"   sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Vehicle</SortableTh>
-              <Th>Account</Th><Th>IFSC</Th>
+              <Th>Account</Th><Th>IFSC</Th><Th>Phone</Th>
               <SortableTh tag="is_active" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Active</SortableTh>
             </tr>
           </thead>
@@ -98,6 +98,7 @@ export function RidersPage() {
                 <Td>{r.vehicle ?? '-'}</Td>
                 <Td>{r.account_no ?? '-'}</Td>
                 <Td>{r.ifsc ?? '-'}</Td>
+                <Td>{r.mob_no ?? '-'}</Td>
                 <Td>{r.is_active ? 'yes' : 'no'}</Td>
               </tr>
             ))}
@@ -122,7 +123,7 @@ export function RidersPage() {
 
 function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: () => void }) {
   const [open, setOpen] = useState(false)
-  const empty = { rider_id: '', company: '', name: '', hub: '', vehicle: '', account_no: '', ifsc: '' }
+  const empty = { rider_id: '', company: '', name: '', hub: '', vehicle: '', account_no: '', ifsc: '', mob_no: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -155,6 +156,7 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
                  options={['', 'EV', 'BIKE', 'OTHER']} />
         <Input label="Account #" v={form.account_no} on={(v) => setForm({ ...form, account_no: v })} />
         <Input label="IFSC" v={form.ifsc} on={(v) => setForm({ ...form, ifsc: v.toUpperCase() })} />
+        <Input label="Phone" v={form.mob_no} on={(v) => setForm({ ...form, mob_no: v })} />
         <div className="col-span-2 text-xs text-slate-500 -mt-1">
           Leave Rider ID blank to auto-assign a placeholder (QSPEND…).
           Duplicate by name or account at the same company will be refused.

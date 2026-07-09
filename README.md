@@ -1,6 +1,6 @@
 # Payout Management System
 
-![CI](https://github.com/yourusername/payout-system/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/yuvrajganguly/Automated_payment_system/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -79,15 +79,23 @@ new offsetting rows, never edits.
 └─────────────────┘             │             └────────┬──────────┘
                                 ▼                      ▼
                        ┌─────────────────┐    ┌─────────────────┐
-                       │ openpyxl xlsx   │    │ SQLite database │
-                       │ output builder  │    │ (payout.db)     │
+                       │ openpyxl xlsx   │    │ PostgreSQL 16   │
+                       │ output builder  │    │ (SQLite in dev) │
                        └─────────────────┘    └─────────────────┘
 ```
 
 The domain layer is **pure** — `chargeable_days`, `rent_for_days`,
 `apply_settlement`, `compute_holds` take primitives and return primitives.
-They don't know about HTTP, files, or SQLite. That's what makes them
+They don't know about HTTP, files, or the database. That's what makes them
 exhaustively testable and keeps the system reasonable to evolve.
+
+**Dual database backends.** Production runs **Dockerized PostgreSQL 16**
+(`docker compose up`, see [DOCKER.md](./DOCKER.md)); development and tests
+default to a zero-setup SQLite file. All application SQL is written once in
+SQLite dialect and translated to Postgres at execution time by a single
+translation layer (`src/payout/db/connection.py`) — set `PAYOUT_DB_URL` to a
+Postgres URL and nothing else in the app needs to change. A one-shot migrator
+(`scripts/migrate_sqlite_to_pg.py`) moves existing SQLite data over.
 
 ## Output workbook
 
@@ -111,19 +119,29 @@ production.
 | Layer       | Stack |
 |-------------|-------|
 | Frontend    | React 18 · TypeScript 5 · Vite 5 · Tailwind 3 · React Router 6 |
-| Backend     | Python 3.10+ · FastAPI 0.110 · Pydantic 2 · python-jose (JWT) · bcrypt |
-| Persistence | SQLite with WAL + foreign keys + idempotent schema |
+| Backend     | Python 3.10+ · FastAPI 0.110 · Pydantic 2 · python-jose (JWT) · bcrypt · psycopg 3 |
+| Persistence | PostgreSQL 16 (Dockerized) in production · SQLite (WAL) for dev/tests · idempotent schema, FKs |
 | Files       | pandas + openpyxl (Excel I/O) |
 | CLIs        | `payout-manage` (DB + import) · `payout-admin` (users/companies) · `payout-api` (uvicorn) |
 | Quality     | pytest + pytest-cov · ruff · black · mypy |
-| CI          | GitHub Actions: lint + typecheck + tests + frontend build |
+| CI          | GitHub Actions: lint + typecheck + tests on SQLite **and** PostgreSQL + frontend build |
 
 ## Quick start
 
+**Docker (production-style, PostgreSQL):**
+
+```bash
+cp .env.example .env      # set a strong PAYOUT_JWT_SECRET
+docker compose up -d --build
+# app on http://localhost:8000 — see DOCKER.md for migration + daily commands
+```
+
+**Local development (SQLite, hot reload):**
+
 ```bash
 # Python 3.10+, Node 20+, pip + npm
-git clone https://github.com/yourusername/payout-system.git
-cd payout-system
+git clone https://github.com/yuvrajganguly/Automated_payment_system.git
+cd Automated_payment_system
 
 # install the backend with the API extras
 pip install -e ".[api]"
@@ -155,15 +173,16 @@ Interactive API docs live at <http://127.0.0.1:8000/docs>.
 ```
 .
 ├── DESIGN.md                     ← full design specification
+├── DOCKER.md                     ← Dockerized PostgreSQL: setup + migration
 ├── README.md                     ← (you are here)
 ├── pyproject.toml                ← project metadata, deps, tooling config
 ├── data/sample/                  ← anonymised sample workbooks
 ├── tests/                        ← pytest suite (rent/holds/arrears/overrides)
 ├── .github/workflows/ci.yml      ← GitHub Actions: lint + types + tests + build
 ├── src/payout/                   ← Python package
-│   ├── api/                      ← FastAPI app + 8 route modules
+│   ├── api/                      ← FastAPI app + 16 route modules
 │   ├── cli/                      ← payout-manage / payout-admin / payout-api
-│   ├── db/                       ← SQLite schema + seeds + connection
+│   ├── db/                       ← schema + seeds + dual-backend connection
 │   ├── domain/                   ← pure-Python engine
 │   │   ├── engine.py             ← process_cycle orchestrator
 │   │   ├── rent.py               ← handover proration + continuity meter
@@ -194,8 +213,9 @@ The pure-functional domain layer has thorough parametrised tests covering
 boundary cases (handover on cycle start vs. mid vs. end, partial weeks,
 maintenance overlap with chargeable window, arrears priority over general
 dues, the rent meter catching gaps and rejecting overlaps). A disposable-DB
-fixture in `tests/conftest.py` re-initialises a fresh SQLite per test for the
-DB-backed cases.
+fixture in `tests/conftest.py` re-initialises a fresh database per test for
+the DB-backed cases — SQLite by default, or PostgreSQL when `PAYOUT_DB_URL`
+is set, so the exact same suite exercises both backends (CI runs both).
 
 ## Design documentation
 

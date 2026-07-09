@@ -252,7 +252,7 @@ def export_riders(
         rows = conn.execute(
             f"SELECT rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.is_active "
+            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -292,7 +292,7 @@ def list_riders(
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.is_active "
+            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -318,6 +318,7 @@ def update_rider(rider_id: str, body: RiderPatch,
     if body.vehicle     is not None: fields["vehicle"]    = (body.vehicle.strip().upper() or None)
     if body.account_no  is not None: fields["account_no"] = body.account_no.strip() or None
     if body.ifsc        is not None: fields["ifsc"]       = (body.ifsc.strip().upper() or None)
+    if body.mob_no      is not None: fields["mob_no"]     = body.mob_no.strip() or None
     if body.is_active   is not None: fields["is_active"]  = 1 if body.is_active else 0
 
     new_rid = (body.new_rider_id or "").strip() or None

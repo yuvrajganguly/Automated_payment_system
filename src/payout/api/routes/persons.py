@@ -34,7 +34,7 @@ def get_person(person_id: int, _: dict = Depends(get_current_user)) -> PersonOut
         riders = [RiderOut(**_rider_dict(r)) for r in conn.execute(
             "SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             "       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            "       rm.account_no, rm.ifsc, rm.is_active "
+            "       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
             "FROM rider_master rm "
             "LEFT JOIN ev_assignments ea "
             "  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "

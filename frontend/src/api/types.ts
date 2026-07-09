@@ -38,6 +38,7 @@ export interface RiderResultRow {
   remarks: string
   account_no: string | null
   ifsc: string | null
+  mob_no: string | null
 }
 
 export interface InactiveRow {
@@ -81,6 +82,7 @@ export interface RiderOut {
   vehicle: string | null
   account_no: string | null
   ifsc: string | null
+  mob_no: string | null
   is_active: boolean
 }
 

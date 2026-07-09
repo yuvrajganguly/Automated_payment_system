@@ -14,6 +14,7 @@ interface RiderRow {
   vehicle?: string | null
   account_no?: string | null
   ifsc?: string | null
+  mob_no?: string | null
   is_active: boolean
 }
 
@@ -143,7 +144,7 @@ export function PersonPage() {
           <thead className="bg-slate-100 text-left">
             <tr>
               <Th>Rider ID</Th><Th>Company</Th><Th>Name</Th><Th>Hub</Th>
-              <Th>Vehicle</Th><Th>Account</Th><Th>IFSC</Th><Th>Active</Th>
+              <Th>Vehicle</Th><Th>Account</Th><Th>IFSC</Th><Th>Phone</Th><Th>Active</Th>
               {isAdmin && <Th>{''}</Th>}
             </tr>
           </thead>
@@ -381,7 +382,7 @@ function RiderRow({
     name: rider.name ?? '',
     hub: rider.hub ?? '',
     vehicle: rider.vehicle ?? '',
-    account_no: rider.account_no ?? '',
+    account_no: rider.account_no ?? '', mob_no: rider.mob_no ?? '',
     ifsc: rider.ifsc ?? '',
   })
   const [form, setForm] = useState(initial)
@@ -422,7 +423,7 @@ function RiderRow({
                   '?company=' + encodeURIComponent(rider.company)
       const body: Record<string, string | undefined> = {
         name: form.name, hub: form.hub, vehicle: form.vehicle,
-        account_no: form.account_no, ifsc: form.ifsc,
+        account_no: form.account_no, ifsc: form.ifsc, mob_no: form.mob_no,
       }
       if (form.new_rider_id && form.new_rider_id !== currentRid)
         body.new_rider_id = form.new_rider_id
@@ -456,6 +457,7 @@ function RiderRow({
         <Td>{rider.vehicle ?? '-'}</Td>
         <Td>{rider.account_no ?? '-'}</Td>
         <Td>{rider.ifsc ?? '-'}</Td>
+        <Td>{rider.mob_no ?? '-'}</Td>
         <Td>{rider.is_active ? 'yes' : 'no'}</Td>
         {isAdmin && (
           <Td>
@@ -494,6 +496,7 @@ function RiderRow({
       <Td><Cell v={form.ifsc}
                 on={(v) => setForm({ ...form, ifsc: v.toUpperCase() })}
                 placeholder="auto-CAPS" /></Td>
+      <Td><Cell v={form.mob_no} on={(v) => setForm({ ...form, mob_no: v })} /></Td>
       <Td>{rider.is_active ? 'yes' : 'no'}</Td>
       <Td>
         <div className="flex flex-col gap-1">

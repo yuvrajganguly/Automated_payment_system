@@ -60,6 +60,7 @@ class RiderOut(BaseModel):
     vehicle: Optional[str] = None
     account_no: Optional[str] = None
     ifsc: Optional[str] = None
+    mob_no: Optional[str] = None
     is_active: bool = True
 
 
@@ -73,6 +74,7 @@ class RiderPatch(BaseModel):
     vehicle: Optional[str] = None
     account_no: Optional[str] = None
     ifsc: Optional[str] = None
+    mob_no: Optional[str] = None
     is_active: Optional[bool] = None
     new_rider_id: Optional[str] = None
     new_company: Optional[str] = None
@@ -251,6 +253,12 @@ class RentPaymentIn(BaseModel):
     period_end: Optional[str] = Field(
         None, description="ISO date — end (inclusive) of the rent window this payment covers.")
     remarks: Optional[str] = None
+    # Guardrail (01-Jul-2026 incident): the meter may only advance as far as
+    # the money reaches. Advancing past that requires this explicit override —
+    # e.g. a documented waiver — and should be rare.
+    force_advance: bool = Field(
+        False, description="Allow rent_charged_through to advance beyond what "
+        "the paid amount covers. Requires a clear reason in remarks.")
 
 
 # ── Arrears ─────────────────────────────────────────────────────────────────

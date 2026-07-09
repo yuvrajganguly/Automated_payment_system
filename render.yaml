@@ -11,10 +11,11 @@ services:
     envVars:
       - key: PAYOUT_JWT_SECRET
         generateValue: true
+      # Public DEMO deployment: ephemeral SQLite in /tmp, re-seeded with demo
+      # data on every deploy/restart. The real deployment runs Dockerized
+      # PostgreSQL via docker-compose (see DOCKER.md).
       - key: PAYOUT_DB
         value: /tmp/payout.db
-      - key: PAYOUT_CORS_ORIGINS
-        value: "*"
       - key: PAYOUT_COOKIE_SECURE
         value: "true"
       - key: PYTHONPATH

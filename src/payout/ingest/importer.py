@@ -104,6 +104,7 @@ def _import_roster(conn, xl, report):
         "veh": match_column(df.columns, "vehicle", "vehicle type"),
         "acc": match_column(df.columns, "account_no", "account no", "acc_no", "account number"),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
+        "mob": match_column(df.columns, "mob_no", "mob no", "mobile", "phone", "phone no", "phone number"),
     }
     missing = [k for k in ("rid", "co", "name") if not c[k]]
     if missing:
@@ -130,8 +131,13 @@ def _import_roster(conn, xl, report):
         # Default any blank vehicle to BIKE so the inactive sheet and any
         # downstream raw exports have a consistent fallback.
         veh = (_cell(row, c["veh"]) or "BIKE").upper()
-        conn.execute("INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
-            (rid, co, person_id, name, _cell(row, c["hub"]), veh, _cell(row, c["acc"]), _cell(row, c["ifsc"])))
+        # Phone: from the file if present; for Spencer's the rider_id IS the
+        # phone number, so fall back to that.
+        mob = _cell(row, c["mob"]) if c["mob"] else None
+        if not mob and co and co.strip().lower().startswith("spencer"):
+            mob = rid
+        conn.execute("INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",
+            (rid, co, person_id, name, _cell(row, c["hub"]), veh, _cell(row, c["acc"]), _cell(row, c["ifsc"]), mob))
         new_riders += 1
         if not _cell(row, c["acc"]) or not _cell(row, c["ifsc"]):
             report.warnings.append(f"Roster: {rid} ({name}) missing bank details")

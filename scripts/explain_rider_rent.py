@@ -13,12 +13,12 @@ Usage:
 """
 from __future__ import annotations
 
-import sqlite3
+import os
 import sys
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 if not args:
-    print('Usage: python scripts/explain_rider_rent.py "<name>" [db_path] [--limit N]')
+    print('Usage: python scripts/explain_rider_rent.py "<name>" [db_path_or_pg_url] [--limit N]')
     sys.exit(1)
 name = args[0]
 db_path = args[1] if len(args) > 1 else "payout.db"
@@ -26,8 +26,15 @@ limit = 30
 if "--limit" in sys.argv:
     limit = int(sys.argv[sys.argv.index("--limit") + 1])
 
-conn = sqlite3.connect(db_path)
-conn.row_factory = sqlite3.Row
+# Point the app's backend-agnostic connection at the given target: a Postgres
+# URL (postgresql://...) or a SQLite file path. Queries below use ? placeholders
+# and are translated to Postgres automatically by payout.db.connection.
+if db_path.startswith("postgres://") or db_path.startswith("postgresql://"):
+    os.environ["PAYOUT_DB_URL"] = db_path
+else:
+    os.environ["PAYOUT_DB"] = db_path
+from payout.db import get_connection  # noqa: E402
+conn = get_connection()
 
 
 def rupees(paise):

@@ -253,3 +253,44 @@ def attribute_pending(conn, *, person_id, event_id, amount,
         remaining -= cost
         applied += cost
     return round(applied, 2)
+
+
+def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
+    """Create 'billable/billed' day-rows for days in ``[day_from, day_to]``
+    that have NO ledger row at all, on the person's open assignment's EV.
+
+    Manual rent payments used to advance ``rent_charged_through`` without
+    writing day-rows when no cycle had materialized the window yet — leaving
+    holes that every day-grain report undercounted (the KOL089 08–14 Jun
+    incident). ``attribute_pending`` / ``attribute_recovery`` only update rows
+    that exist; this creates the missing ones, attributed to the manual
+    payment's transaction. Days that already have a row are left untouched.
+
+    Returns the number of rows created.
+    """
+    if not day_from or not day_to:
+        return 0
+    row = conn.execute(
+        "SELECT a.ev_id, m.weekly_rate FROM ev_assignments a "
+        "JOIN ev_units u ON u.ev_id = a.ev_id "
+        "JOIN ev_models m ON m.model_id = u.model_id "
+        "WHERE a.person_id=? AND a.returned_date IS NULL",
+        (person_id,),
+    ).fetchone()
+    if not row:
+        return 0
+    daily = round(int(row["weekly_rate"]) / 7)   # paise
+    created = 0
+    for day in _iter_days(_parse(str(day_from)), _parse(str(day_to))):
+        if conn.execute(
+            "SELECT 1 FROM ev_daily_ledger WHERE ev_id=? AND day=?",
+            (row["ev_id"], day.isoformat()),
+        ).fetchone():
+            continue
+        _upsert_row(
+            conn, ev_id=row["ev_id"], day=day, state="billable",
+            person_id=person_id, daily_cost=daily, provider_cost=daily,
+            billing_status="billed", cycle_event_id=event_id,
+        )
+        created += 1
+    return created

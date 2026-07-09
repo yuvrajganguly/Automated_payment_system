@@ -10,14 +10,13 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "Yuvraj Ganguly" }]
-keywords = ["fintech", "payments", "automation", "streamlit", "sqlite"]
+keywords = ["fintech", "payments", "automation", "fastapi", "postgresql"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Topic :: Office/Business :: Financial",
 ]
 dependencies = [
-    "streamlit>=1.32",
     "pandas>=2.0",
     "openpyxl>=3.1",
     "bcrypt>=4.0",
