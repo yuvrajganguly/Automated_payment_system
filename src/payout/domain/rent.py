@@ -273,6 +273,33 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
     )
 
 
+def allowed_paid_through(*, cur_through, period_start, rent_paise, weekly_rate):
+    """Furthest ISO date a manual payment may advance the rent meter.
+
+    Guardrail from the 01-Jul-2026 incident, where Rs.1,250 (one week) advanced
+    a meter five weeks and made the unpaid days unbillable forever.
+
+    Only money that did NOT go to arrears buys new meter days — arrears repay
+    days already accounted (missed). ``days = floor(rent_paise / (weekly/7))``.
+    Coverage starts the day after the current meter, or at ``period_start``
+    when there is no meter yet. Returns the current meter unchanged (or None)
+    when the money buys no new days.
+    """
+    day_rate = float(weekly_rate) / 7.0
+    if day_rate <= 0 or rent_paise <= 0:
+        return cur_through or None
+    days = int(float(rent_paise) / day_rate + 1e-6)
+    if days <= 0:
+        return cur_through or None
+    if cur_through:
+        start = date.fromisoformat(str(cur_through)[:10]) + timedelta(days=1)
+    elif period_start:
+        start = date.fromisoformat(str(period_start)[:10])
+    else:
+        return None
+    return (start + timedelta(days=days - 1)).isoformat()
+
+
 def advance_rent_charged_through(conn, person_id, through_date):
     """Move the rent meter forward for every assignment that participated in
     the cycle. Both the open assignment (if any) AND any returned assignment

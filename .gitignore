@@ -73,3 +73,13 @@ payout_db_backup_encrypted.zip
 
 # Contains real rider data - never commit
 scripts/build_seed.py
+restore_myntra.sql
+Myntra_Recovery_README.md
+pg_data*.sql
+staging.db*
+pre_pg.db
+payout_old.db
+run_recovery.ps1
+fix_meters.sql
+fix_meters.ps1
+pg_data4.sql

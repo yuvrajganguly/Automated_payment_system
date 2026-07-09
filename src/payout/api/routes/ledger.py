@@ -297,23 +297,70 @@ def post_rent_payment(body: RentPaymentIn,
                 )
 
         # If the caller specified a coverage window and the payment actually
-        # paid down rent — whether it landed on the current cycle (RENT_COLLECTED)
-        # OR on arrears (RENT_RECOVERED, e.g. the days were previously missed) —
-        # advance the EV's rent_charged_through so the automated engine won't
-        # re-charge for the same days next cycle. Forward-only (monotonic).
+        # paid down rent, advance the EV's rent_charged_through so the engine
+        # won't re-charge the same days. Forward-only (monotonic) — and, since
+        # the 01-Jul-2026 incident, ONLY as far as the money reaches: Rs.1,250
+        # once advanced a meter five weeks, silently writing off ~Rs.5,300.
+        # Only applied_to_rent buys new meter days; arrears money repays days
+        # already accounted as missed. Going further needs force_advance=true.
         advanced_to = None
         if body.period_end and (applied_to_rent > 0 or applied_to_arrears > 0):
             row = conn.execute(
-                "SELECT assignment_id, rent_charged_through FROM ev_assignments "
-                "WHERE person_id=? AND returned_date IS NULL", (pid,)).fetchone()
+                "SELECT a.assignment_id, a.rent_charged_through, m.weekly_rate "
+                "FROM ev_assignments a "
+                "JOIN ev_units u ON u.ev_id = a.ev_id "
+                "JOIN ev_models m ON m.model_id = u.model_id "
+                "WHERE a.person_id=? AND a.returned_date IS NULL", (pid,)).fetchone()
             if row:
                 cur_through = row["rent_charged_through"] or ""
                 if body.period_end > cur_through:
-                    conn.execute(
-                        "UPDATE ev_assignments SET rent_charged_through=? "
-                        "WHERE assignment_id=?",
-                        (body.period_end, row["assignment_id"]))
-                    advanced_to = body.period_end
+                    from payout.domain.rent import allowed_paid_through
+                    covered = allowed_paid_through(
+                        cur_through=cur_through or None,
+                        period_start=body.period_start,
+                        rent_paise=int(applied_to_rent),
+                        weekly_rate=float(row["weekly_rate"]),
+                    ) or cur_through
+                    target = body.period_end
+                    if body.period_end > covered:
+                        if not body.force_advance:
+                            day_rate = float(row["weekly_rate"]) / 7.0
+                            from datetime import date as _d
+                            gap_days = ((_d.fromisoformat(body.period_end)
+                                         - _d.fromisoformat(covered)).days
+                                        if covered else None)
+                            gap_rs = (gap_days * day_rate / 100.0) if gap_days else None
+                            raise HTTPException(400, detail=(
+                                f"This payment covers rent only through "
+                                f"{covered or 'no new days'} (Rs.{applied_to_rent/100.0:,.2f} "
+                                f"toward rent after arrears), but period_end is "
+                                f"{body.period_end}"
+                                + (f" — {gap_days} unpaid days (~Rs.{gap_rs:,.0f}) "
+                                   f"would be marked paid and become unbillable."
+                                   if gap_days else ".")
+                                + " Reduce period_end, or pass force_advance=true "
+                                  "with the reason in remarks (e.g. a waiver)."))
+                        # explicit, documented override
+                    else:
+                        target = max(covered, cur_through) if covered else body.period_end
+                        target = min(target, body.period_end)
+                    if target and target > cur_through:
+                        conn.execute(
+                            "UPDATE ev_assignments SET rent_charged_through=? "
+                            "WHERE assignment_id=?",
+                            (target, row["assignment_id"]))
+                        advanced_to = target
+                        # Day-ledger: create billed rows for newly covered days
+                        # that have no row yet (manual payments used to leave
+                        # holes that day-grain reports undercounted).
+                        if collected_txn_id and applied_to_rent > 0:
+                            from datetime import date as _d2, timedelta as _td
+                            from payout.domain.ev_daily import backfill_billed_days
+                            bf_from = ((_d2.fromisoformat(cur_through) + _td(days=1)).isoformat()
+                                       if cur_through else (body.period_start or target))
+                            backfill_billed_days(
+                                conn, person_id=pid, event_id=collected_txn_id,
+                                day_from=bf_from, day_to=target)
         conn.commit()
 
     return {
