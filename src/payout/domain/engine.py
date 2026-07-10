@@ -304,9 +304,13 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
             # silently slip.)
             charge_here = pid not in rent_done
             if charge_here:
+                # Strong double-charge guardrail: if the rider already carries
+                # EV arrears, a behind meter must NOT catch up over those days
+                # (they are recovered separately). Clamp billing to this cycle.
+                _clamp = cycle_start if _arrears_out(conn, pid) > 0 else None
                 rinfo = resolve_rent(conn, pid, cycle_start, cycle_end,
                                     waive_days=ov.waive_days, waive_all=ov.waive_all,
-                                    rent_override=ov.rent_override)
+                                    rent_override=ov.rent_override, clamp_start=_clamp)
                 rent, rent_days = rinfo.rent, rinfo.days
                 ev_id, model = rinfo.ev_id, rinfo.model
                 # Soft cap: a catch-up window longer than 21 days almost
