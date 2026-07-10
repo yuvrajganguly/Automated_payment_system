@@ -17,6 +17,7 @@ interface RiderLine {
   hub: string | null
   expected_rent: number
   collected_rent: number
+  collected_current?: number
   prior_recovered: number
   rolled_forward: number
   arrears_rent: number
@@ -32,6 +33,7 @@ interface CycleRow {
   cycle_end: string
   expected_rent: number
   collected_rent: number
+  collected_current?: number
   prior_recovered: number
   rolled_forward: number
   rolled_recovered_later: number
@@ -190,8 +192,10 @@ export function EvRentPage() {
             {visible.map((r) => {
               const key = `${r.company}|${r.cycle_end}`
               const isOpen = expanded[key]
+              const currentCollected = r.collected_current
+                ?? (r.collected_rent - (r.prior_recovered ?? 0))
               const collectedPct = r.expected_rent === 0 ? 0
-                                  : (r.collected_rent / r.expected_rent) * 100
+                                  : (currentCollected / r.expected_rent) * 100
               return (
                 <>
                   <tr key={key} className="border-t hover:bg-slate-50 cursor-pointer"

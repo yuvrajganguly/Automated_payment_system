@@ -54,7 +54,8 @@ def ev_rent_details(
 ) -> list[dict]:
     cos = _split_companies(companies) or ([company] if company else [])
     where = ("t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
-             "                  'RENT_RECOVERED', 'XC_RENT_RECOVERED')")
+             "                  'RENT_RECOVERED', 'XC_RENT_RECOVERED')"
+             " AND t.company IS NOT NULL AND t.company <> ''")
     params: list = []
     if cos:
         ph = ",".join("?" for _ in cos)
@@ -98,6 +99,8 @@ def ev_rent_details(
             f"FROM transactions t "
             f"WHERE {where} "
             f"GROUP BY t.company, t.cycle_start, t.cycle_end "
+            f"HAVING SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > 0 "
+            f"    OR SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) > 0 "
             f"ORDER BY t.cycle_end ASC, t.company",
             params,
         ).fetchall()
@@ -266,6 +269,7 @@ def ev_rent_details(
                 "cycle_end": cyc["cycle_end"],
                 "expected_rent": round(expected_present_total + arrears_total, 2),
                 "collected_rent": round(collected_total, 2),
+                "collected_current": round(current_collected_total, 2),
                 "prior_recovered": round(prior_recovered_total, 2),
                 "rolled_forward": round(rolled_forward_total, 2),
                 "rolled_recovered_later": rolled_recovered_later,
