@@ -587,7 +587,12 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
         ).fetchall():
             pid = a["person_id"]
             if pid in present_person_ids: continue
-            rinfo = resolve_rent(conn, pid, cycle_start, cycle_end)
+            # Same guardrail as the present path: a behind meter must NOT inflate
+            # the MISSED amount by catching up days already in arrears (that would
+            # double-count the prior missed week). Clamp to this cycle when the
+            # rider already carries arrears.
+            _clamp = cycle_start if _arrears_out(conn, pid) > 0 else None
+            rinfo = resolve_rent(conn, pid, cycle_start, cycle_end, clamp_start=_clamp)
             # NOTE: absence alone no longer collapses a pending_xc_rent bucket.
             # Under the new model, pending stays alive across every company
             # run in the cycle window — it only falls to general carryforward

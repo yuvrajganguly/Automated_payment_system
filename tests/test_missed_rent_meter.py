@@ -110,3 +110,35 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     # 7-day cycle billed as 7 days / Rs.1250 — NOT a 14-day (Rs.2500) catch-up.
     assert rent["days"] == 7, f"expected 7 days billed, got {rent['days']}"
     assert rent["debit"] == 125000, f"expected 125000 paise, got {rent['debit']}"
+
+
+def test_absence_missed_is_capped_when_arrears(db):
+    """The absence pass must not inflate RENT_MISSED via a stuck-meter catch-up:
+    a rider with prior arrears who is absent again gets missed for THIS cycle
+    only, not a catch-up that double-counts the earlier missed week."""
+    pid = db.execute(
+        "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
+        "VALUES ('T','Blitz','T1')"
+    ).lastrowid
+    db.execute("INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
+               "VALUES ('T1','Blitz',?,'T',1)", (pid,))
+    db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
+    db.execute("INSERT OR IGNORE INTO ev_arrears (person_id,total_missed,total_recovered,outstanding) "
+               "VALUES (?,125000,0,125000)", (pid,))          # prior week already missed
+    mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Raft' AND model_name='Regular'"
+                     ).fetchone()["model_id"]
+    db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('EVT1',?, 'in_use')", (mid,))
+    db.execute("INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
+               "VALUES (?, 'EVT1', '2026-06-14')", (pid,))     # meter stuck a week back
+    db.commit()
+
+    # T1 is ABSENT from this 7-day cycle (file has a different rider).
+    process_cycle("Blitz", date(2026, 6, 22), date(2026, 6, 28),
+                  _blitz_file([("OTHER", 0)]), commit=True)
+
+    m = db.execute(
+        "SELECT MAX(days) AS days, SUM(-amount) AS amt FROM transactions "
+        "WHERE person_id=? AND event_type='RENT_MISSED' AND cycle_start='2026-06-22'",
+        (pid,)).fetchone()
+    assert m["days"] == 7, f"expected 7 missed days, got {m['days']}"
+    assert m["amt"] == 125000, f"expected 125000 paise missed, got {m['amt']}"

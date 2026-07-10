@@ -48,45 +48,39 @@ def main() -> None:
 
     where_co = "" if company is None else "AND t.company = %s"
     params = [] if company is None else [company]
-    rents = conn.execute(
+    rows = conn.execute(
         f"""
-        SELECT t.person_id, pr.display_name, t.company,
-               t.cycle_start, t.cycle_end, t.amount, t.days
+        SELECT t.person_id, pr.display_name, t.company, t.cycle_start,
+               t.cycle_end, t.event_type, t.amount, t.days
         FROM transactions t
         JOIN person_registry pr ON pr.person_id = t.person_id
-        WHERE t.event_type = 'RENT' AND t.days IS NOT NULL {where_co}
+        WHERE t.event_type IN ('RENT', 'RENT_MISSED') AND t.days IS NOT NULL {where_co}
         ORDER BY t.id DESC
         """,
         params,
     ).fetchall()
 
+    # A catch-up over a stuck meter shows up as a RENT (billed) or RENT_MISSED
+    # (added to arrears) whose `days` exceed the cycle span. The excess days are
+    # the ones double-counted (they were already billed/missed in an earlier
+    # cycle), so excess * daily rate is the over-charge to refund/correct.
     flagged = []
-    for pid, name, co, cs, ce, amount, days in rents:
+    for pid, name, co, cs, ce, etype, amount, days in rows:
         span = _span_days(cs, ce)
         if not days or days <= span:
             continue
-        rent_paise = abs(int(amount))
-        daily = rent_paise / days
+        amt = abs(int(amount))
+        daily = amt / days
         excess_days = days - span
-        excess_paise = daily * excess_days
-        rec = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM transactions "
-            "WHERE person_id=%s AND cycle_start=%s AND cycle_end=%s "
-            "AND event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED')",
-            (pid, cs, ce),
-        ).fetchone()[0]
-        recovered = int(rec or 0)
-        overcharge = min(recovered, round(excess_paise))
-        if overcharge <= 0:
-            continue
+        excess = round(daily * excess_days)
         flagged.append({
             "pid": pid, "name": name or "?", "co": co,
-            "cycle": f"{cs}..{ce}",
+            "cycle": f"{cs}..{ce}", "event": etype,
             "days_billed": days, "span": span,
-            "billed": rent_paise / 100.0,
+            "billed": amt / 100.0,
             "correct_rent": round(daily * span / 100.0, 2),
-            "recovered": recovered / 100.0,
-            "overcharge": round(overcharge / 100.0, 2),
+            "recovered": 0.0,
+            "overcharge": round(excess / 100.0, 2),
         })
 
     label = company or "ALL companies"
@@ -94,16 +88,15 @@ def main() -> None:
     if not flagged:
         print("  None found.\n")
         return
-    print(f"  {'pid':>5}  {'name':<22}  {'cycle':<24}  {'days':>4}/{'span':<4} "
-          f"{'billed':>9} {'correct':>9} {'recovered':>10} {'OVERCHARGE':>11}")
-    print("  " + "-" * 100)
+    print(f"  {'pid':>5}  {'name':<20}  {'event':<12}  {'cycle':<22}  {'days':>4}/{'span':<4} "
+          f"{'charged':>9} {'correct':>9} {'OVERCHARGE':>11}")
+    print("  " + "-" * 104)
     total = 0.0
     for f in sorted(flagged, key=lambda x: -x["overcharge"]):
         total += f["overcharge"]
-        print(f"  {f['pid']:>5}  {f['name'][:22]:<22}  {f['cycle']:<24}  "
+        print(f"  {f['pid']:>5}  {f['name'][:20]:<20}  {f['event']:<12}  {f['cycle']:<22}  "
               f"{f['days_billed']:>4}/{f['span']:<4} {f['billed']:>9,.2f} "
-              f"{f['correct_rent']:>9,.2f} {f['recovered']:>10,.2f} "
-              f"{f['overcharge']:>11,.2f}")
+              f"{f['correct_rent']:>9,.2f} {f['overcharge']:>11,.2f}")
     print("  " + "-" * 100)
     print(f"  {len(flagged)} rider(s); total overcharge to refund: "
           f"{total:,.2f}\n")
