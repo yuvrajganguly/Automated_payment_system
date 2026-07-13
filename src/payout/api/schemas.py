@@ -180,6 +180,11 @@ class EvAssignIn(BaseModel):
     handover_date: Optional[date] = None
 
 
+class BackrentIn(BaseModel):
+    ev_id: str
+    amount: Optional[float] = None      # rupees; omit to use the computed amount
+
+
 class EvReturnIn(BaseModel):
     rider_id: Optional[str] = None
     company: Optional[str] = None

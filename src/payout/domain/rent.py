@@ -65,19 +65,16 @@ class RentInfo:
 
 
 def chargeable_window(cycle_start, cycle_end, handover_date,
-                       charged_through=None, returned_date=None, clamp_start=None):
+                       charged_through=None, returned_date=None):
     """Inclusive ``(start, end)`` chargeable range for a single assignment, or
     ``None`` if zero days.
 
     Billing model:
-      * ``start = charged_through + 1``. A behind meter normally catches up the
-        un-billed days (a genuine skipped cycle / late joiner).
-      * BUT if ``clamp_start`` is supplied (the engine passes ``cycle_start``
-        when the rider has outstanding EV arrears), the start is floored to it —
-        the earlier un-billed days are already tracked as RENT_MISSED / arrears
-        and clawed back through the arrears-recovery path, so re-billing them
-        here too would double-charge the rider. This is the strong guardrail
-        against the stuck-meter double-charge.
+      * ``start = max(charged_through + 1, cycle_start)`` — a cycle only ever
+        charges its own days. A meter behind ``cycle_start`` does NOT catch up
+        (no reach-back), which structurally prevents the stuck-meter double
+        charge. Backdated handovers' earlier un-billed days are handled once as
+        back-rent EV arrears via the manual back-rent flow, not re-billed here.
       * Brand-new assignment with no meter: ``handover_date + 1`` when
         handover lands mid-cycle; else ``cycle_start``.
       * Return day is free: ``end = min(cycle_end, returned_date - 1)``.
@@ -93,10 +90,13 @@ def chargeable_window(cycle_start, cycle_end, handover_date,
         start = handover_date + timedelta(days=1)
     else:
         start = cycle_start
-    # Double-charge guardrail: when arrears exist (clamp_start given), never
-    # bill earlier than the cycle start — those earlier days recover separately.
-    if clamp_start is not None and start < clamp_start:
-        start = clamp_start
+    # A cycle only ever bills its OWN days: never reach before cycle_start.
+    # A behind meter (backdated handover, stray data, etc.) does NOT catch up
+    # here — that reach-back is exactly what caused the stuck-meter double
+    # charges. Backdated handovers' earlier un-billed days are captured once as
+    # back-rent EV arrears via the manual back-rent flow instead.
+    if start < cycle_start:
+        start = cycle_start
     end = cycle_end
     if returned_date is not None:
         end = min(end, returned_date - timedelta(days=1))
@@ -147,7 +147,7 @@ def _parse_date(s):
 
 
 def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
-                 waive_days=0, waive_all=False, rent_override=None, clamp_start=None):
+                 waive_days=0, waive_all=False, rent_override=None):
     """Sum rent across every assignment that overlapped the cycle.
 
     Overlap rule: handover_date <= cycle_end AND
@@ -186,8 +186,7 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
         hod = _parse_date(r["handover_date"])
         ret = _parse_date(r["returned_date"])
         charged = _parse_date(r["rent_charged_through"])
-        win = chargeable_window(cycle_start, cycle_end, hod, charged, ret,
-                                clamp_start=clamp_start)
+        win = chargeable_window(cycle_start, cycle_end, hod, charged, ret)
         if win is None:
             base = maint = 0
             rfrom = rthrough = None

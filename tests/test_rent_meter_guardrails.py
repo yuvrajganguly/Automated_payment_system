@@ -97,3 +97,31 @@ def test_backfill_without_open_assignment_is_noop(db):
     assert backfill_billed_days(
         db, person_id=pid, event_id=1,
         day_from="2026-06-01", day_to="2026-06-07") == 0
+
+
+def test_backdated_backrent_goes_to_arrears(db):
+    """A backdated handover's un-billed days convert to EV arrears (not a giant
+    catch-up RENT), and the meter advances so future cycles bill cleanly."""
+    from payout.domain.backrent import compute_backrent, apply_backrent
+    from payout.domain.arrears import get_arrears
+    mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Blive'").fetchone()["model_id"]
+    pid = db.execute("INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
+                     "VALUES ('BD','Myntra','BD1')").lastrowid
+    db.execute("INSERT OR IGNORE INTO ev_arrears (person_id,total_missed,total_recovered,outstanding) VALUES (?,0,0,0)", (pid,))
+    db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('EVBD',?,'in_use')", (mid,))
+    # handover 15 Jun, meter never set (backdated assign) -> owes 16..28 Jun
+    db.execute("INSERT INTO ev_assignments (person_id,ev_id,handover_date) VALUES (?, 'EVBD', '2026-06-15')", (pid,))
+    db.commit()
+    info = compute_backrent(db, pid, "2026-06-28")
+    assert info["days"] == 13                       # 16..28 Jun inclusive
+    assert info["amount"] == 234000                 # 1260/wk * 13/7 = 2340.00 -> paise
+    res = apply_backrent(db, pid, "2026-06-28", "op@x.com")
+    db.commit()
+    assert res["added"] == 234000
+    total_missed, _rec, outstanding = get_arrears(db, pid)
+    assert outstanding == 234000
+    # meter advanced -> a later cycle bills only its own 7 days
+    from payout.domain.rent import resolve_rent
+    from datetime import date
+    r = resolve_rent(db, pid, date(2026, 6, 29), date(2026, 7, 5))
+    assert r.days == 7

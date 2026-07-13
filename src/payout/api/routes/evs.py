@@ -11,9 +11,12 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import (
     EvAssignIn, EvModelOut, EvReturnIn, EvUnitIn, EvUnitOut,
     MaintenanceClose, MaintenanceIn, MaintenanceOut,
-    ExportSelection,
+    ExportSelection, BackrentIn,
 )
 from payout.db import get_connection
+from payout.domain.backrent import (apply_backrent, compute_backrent,
+                                    latest_cycle_end_for)
+from payout.money import to_paise
 from payout.domain.adjustments import log_maintenance
 from payout.exports import xlsx_response
 
@@ -264,6 +267,42 @@ def close_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
     """Deprecated alias for /return, which now retires spares as well. Kept so
     older clients / the existing 'Close' button keep working."""
     return return_ev(body, _)
+
+
+@router.get("/{ev_id}/backrent")
+def backrent_suggestion(ev_id: str, _: dict = Depends(get_current_user)) -> dict:
+    """Soft suggestion: un-billed back-rent for a backdated handover on the EV's
+    current rider. Nothing is written."""
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT person_id FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL",
+            (ev_id,)).fetchone()
+        if not a:
+            return {"applicable": False}
+        cutoff = latest_cycle_end_for(conn, a["person_id"]) or date.today().isoformat()
+        info = compute_backrent(conn, a["person_id"], cutoff)
+    if not info or info["days"] <= 0:
+        return {"applicable": False}
+    return {"applicable": True, "ev_id": info["ev_id"], "handover": info["handover"],
+            "from": info["from"], "to": info["to"], "days": info["days"],
+            "amount": info["amount"], "weekly_rate": info["weekly_rate"]}
+
+
+@router.post("/backrent")
+def apply_backrent_ep(body: BackrentIn, user: dict = Depends(require_admin)) -> dict:
+    """Post the backdated back-rent to EV arrears (operator-confirmed). Optional
+    ``amount`` (rupees) waives part of it."""
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT person_id FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL",
+            (body.ev_id,)).fetchone()
+        if not a:
+            raise HTTPException(404, f"No open assignment for EV {body.ev_id!r}")
+        cutoff = latest_cycle_end_for(conn, a["person_id"]) or date.today().isoformat()
+        amt = to_paise(body.amount) if body.amount is not None else None
+        res = apply_backrent(conn, a["person_id"], cutoff, user["email"], amount_override=amt)
+        conn.commit()
+    return res
 
 
 @router.get("/maintenance", response_model=list[MaintenanceOut])

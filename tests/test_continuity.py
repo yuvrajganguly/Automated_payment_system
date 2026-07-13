@@ -23,12 +23,16 @@ def test_contiguous_weeks(db):
     assert r2.rent_from == date(2026, 3, 9) and r2.days == 7 and r2.rent == 126000.0
 
 
-def test_gap_is_caught_up(db):
+def test_gap_is_not_caught_up(db):
+    """A behind meter must NOT reach back over a skipped week — each cycle bills
+    only its own 7 days, so no catch-up can ever double-charge. (Backdated
+    handovers are captured as one-time back-rent arrears via the manual flow,
+    not silently caught up here.)"""
     pid = _blive(db)
     advance_rent_charged_through(db, pid, date(2026, 3, 8)); db.commit()
-    # next entered cycle skips Mar 9-15
+    # Cycle skips Mar 9-15; the meter sits behind, but billing is clamped.
     r = resolve_rent(db, pid, date(2026, 3, 16), date(2026, 3, 22))
-    assert r.rent_from == date(2026, 3, 9) and r.days == 14 and r.rent == 252000.0
+    assert r.rent_from == date(2026, 3, 16) and r.days == 7 and r.rent == 126000.0
 
 
 def test_overlap_not_double_charged(db):

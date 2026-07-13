@@ -114,7 +114,7 @@ def _iso(d):
 
 def record_missed_rent(
     conn, person_id, amount, cycle_start, cycle_end, *,
-    rider_id="", company="", created_by="engine", days=None,
+    rider_id="", company="", created_by="engine", days=None, remarks=None,
 ):
     """Rider absent from payout: add EV rent to arrears and log RENT_MISSED."""
     if amount <= 0:
@@ -131,7 +131,7 @@ def record_missed_rent(
         "VALUES (?,?,?,?,?,'RENT_MISSED',?,?,?,?,?)",
         (person_id, rider_id, company, _iso(cycle_start), _iso(cycle_end),
          -amount, _gen_balance(conn, person_id), days,
-         "EV rent missed (absent from payout)", created_by),
+         remarks or "EV rent missed (absent from payout)", created_by),
     )
 
 
