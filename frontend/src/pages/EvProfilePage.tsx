@@ -32,15 +32,6 @@ interface Profile {
   maintenance: MaintRow[]
 }
 
-interface Backrent {
-  applicable: boolean
-  handover?: string | null
-  from?: string
-  to?: string
-  days?: number
-  amount?: number
-}
-
 export function EvProfilePage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
@@ -49,31 +40,14 @@ export function EvProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [backrent, setBackrent] = useState<Backrent | null>(null)
-  const [brBusy, setBrBusy] = useState(false)
-  const [brMsg, setBrMsg] = useState<string | null>(null)
 
   const load = () => {
     if (!id) return
     setBusy(true); setError(null)
     api.get<Profile>('/evs/' + encodeURIComponent(id) + '/profile')
-      .then((p) => {
-        setProfile(p)
-        api.get<Backrent>('/evs/' + encodeURIComponent(id) + '/backrent')
-          .then(setBackrent).catch(() => setBackrent(null))
-      })
+      .then(setProfile)
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
-  }
-
-  async function addBackrent() {
-    if (!id) return
-    setBrBusy(true); setBrMsg(null)
-    try {
-      await api.post('/evs/backrent', { ev_id: id })
-      setBrMsg('Added to arrears'); load()
-    } catch (e) { setBrMsg(e instanceof Error ? e.message : 'Failed') }
-    finally { setBrBusy(false) }
   }
   useEffect(load, [id])
 
@@ -100,21 +74,6 @@ export function EvProfilePage() {
         )}
       </div>
 
-      {isAdmin && backrent?.applicable && (
-        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-          <div className="font-medium text-amber-900">Backdated handover — un-billed rent</div>
-          <p className="text-amber-800 text-xs mt-1">
-            Handed over {backrent.handover}. {backrent.days} un-billed day(s)
-            ({backrent.from} → {backrent.to}) — about ₹{fmt(backrent.amount ?? 0)} was
-            never charged. Add it to this rider's EV arrears?
-          </p>
-          <button type="button" onClick={addBackrent} disabled={brBusy}
-                  className="mt-2 bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50">
-            {brBusy ? '…' : `Add ₹${fmt(backrent.amount ?? 0)} to arrears`}
-          </button>
-          {brMsg && <span className="ml-2 text-xs">{brMsg}</span>}
-        </div>
-      )}
 
       <Section title="Current Holder">
         {cur ? (

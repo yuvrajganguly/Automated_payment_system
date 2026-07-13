@@ -20,6 +20,15 @@ interface RiderRow {
 
 interface CompanyOpt { company_name: string }
 
+interface Backrent {
+  applicable: boolean
+  handover?: string | null
+  from?: string
+  to?: string
+  days?: number
+  amount?: number
+}
+
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const EVENT_COLOR: Record<string, string> = {
@@ -39,6 +48,9 @@ export function PersonPage() {
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [splitOpen, setSplitOpen] = useState(false)
+  const [backrent, setBackrent] = useState<Backrent | null>(null)
+  const [brBusy, setBrBusy] = useState(false)
+  const [brMsg, setBrMsg] = useState<string | null>(null)
 
   const load = () => {
     if (!id) return
@@ -46,9 +58,25 @@ export function PersonPage() {
     Promise.all([
       api.get<PersonOut>('/persons/' + id),
       api.get<TransactionOut[]>('/ledger/' + id),
-    ]).then(([p, t]) => { setPerson(p); setTxns(t) })
+    ]).then(([p, t]) => {
+      setPerson(p); setTxns(t)
+      if (p.ev?.ev_id) {
+        api.get<Backrent>('/evs/' + encodeURIComponent(p.ev.ev_id) + '/backrent')
+          .then(setBackrent).catch(() => setBackrent(null))
+      } else setBackrent(null)
+    })
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
+  }
+
+  async function addBackrent() {
+    if (!person?.ev?.ev_id) return
+    setBrBusy(true); setBrMsg(null)
+    try {
+      await api.post('/evs/backrent', { ev_id: person.ev.ev_id })
+      setBrMsg('Added to arrears'); load()
+    } catch (e) { setBrMsg(e instanceof Error ? e.message : 'Failed') }
+    finally { setBrBusy(false) }
   }
   useEffect(load, [id])
   useEffect(() => { api.get<CompanyOpt[]>('/companies').then(setCompanies).catch(() => {}) }, [])
@@ -92,6 +120,22 @@ export function PersonPage() {
             <dt className="text-slate-500">Handover</dt><dd>{person.ev.handover_date ?? '-'}</dd>
             <dt className="text-slate-500">Rent through</dt><dd>{person.ev.rent_charged_through ?? '-'}</dd>
           </dl>
+        </div>
+      )}
+
+      {isAdmin && backrent?.applicable && (
+        <div className="mb-6 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+          <div className="font-medium text-amber-900">Backdated handover — un-billed rent</div>
+          <p className="text-amber-800 text-xs mt-1">
+            EV handed over {backrent.handover}. {backrent.days} un-billed day(s)
+            ({backrent.from} → {backrent.to}) — about ₹{fmt(backrent.amount ?? 0)} was
+            never charged. Add it to this rider's EV arrears?
+          </p>
+          <button type="button" onClick={addBackrent} disabled={brBusy}
+                  className="mt-2 bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50">
+            {brBusy ? '…' : `Add ₹${fmt(backrent.amount ?? 0)} to arrears`}
+          </button>
+          {brMsg && <span className="ml-2 text-xs">{brMsg}</span>}
         </div>
       )}
 
