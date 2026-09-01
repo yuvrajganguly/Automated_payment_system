@@ -263,19 +263,33 @@ def _import_balances(conn, xl, report, created_by):
             continue
         final_bal = -abs(dues)
         if dues:
-            conn.execute("UPDATE balances SET current_balance=?, last_updated=? WHERE person_id=?", (final_bal, today, person_id))
+            conn.execute(
+                "INSERT INTO balances (person_id, current_balance, last_updated) VALUES (?,?,?) "
+                "ON CONFLICT(person_id) DO UPDATE SET current_balance=excluded.current_balance, "
+                "last_updated=excluded.last_updated",
+                (person_id, final_bal, today),
+            )
             conn.execute("INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",
                 (person_id, rid, co or "", today, today, final_bal, final_bal, "Opening dues", created_by))
         if arr:
             a = abs(arr)
-            conn.execute("UPDATE ev_arrears SET total_missed=?, outstanding=?, last_updated=? WHERE person_id=?", (a, a, today, person_id))
+            conn.execute(
+                "INSERT INTO ev_arrears (person_id, total_missed, outstanding, last_updated) "
+                "VALUES (?,?,?,?) ON CONFLICT(person_id) DO UPDATE SET "
+                "total_missed=excluded.total_missed, outstanding=excluded.outstanding, "
+                "last_updated=excluded.last_updated",
+                (person_id, a, a, today),
+            )
             conn.execute("INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",
                 (person_id, rid, co or "", today, today, -a, final_bal, "Opening EV arrears", created_by))
         if cod:
             c_abs = abs(cod)
             conn.execute(
-                "UPDATE ev_arrears SET cod_missed=?, cod_outstanding=?, last_updated=? WHERE person_id=?",
-                (c_abs, c_abs, today, person_id),
+                "INSERT INTO ev_arrears (person_id, cod_missed, cod_outstanding, last_updated) "
+                "VALUES (?,?,?,?) ON CONFLICT(person_id) DO UPDATE SET "
+                "cod_missed=excluded.cod_missed, cod_outstanding=excluded.cod_outstanding, "
+                "last_updated=excluded.last_updated",
+                (person_id, c_abs, c_abs, today),
             )
             conn.execute(
                 "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
@@ -296,10 +310,13 @@ def _process_seed(workbook_bytes, commit, created_by):
         _import_roster(conn, xl, report)
         _import_ev(conn, xl, report)
         _import_balances(conn, xl, report, created_by)
-        if commit:
+        if commit and not report.errors:
             conn.commit()
         else:
+            # Dry run, or a sheet failed validation: a half-imported seed (roster
+            # rejected, EVs and balances still written) used to be committed.
             conn.rollback()
+            report.committed = False
     except Exception:
         conn.rollback()
         raise

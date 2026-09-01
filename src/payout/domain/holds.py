@@ -92,9 +92,16 @@ def persist_holds(
     cycle_end: date,
     hold_result: HoldResult,
 ) -> None:
-    """Write the cycle's COD hold detail to the cod_holds table."""
+    """Write the cycle's COD hold detail to the cod_holds table.
+
+    Replaces whatever this (company, cycle) wrote before, so re-running a cycle
+    (``force=true``) does not double the HOLD sheet's per-rider totals."""
     cs = cycle_start.isoformat() if hasattr(cycle_start, "isoformat") else str(cycle_start)
     ce = cycle_end.isoformat() if hasattr(cycle_end, "isoformat") else str(cycle_end)
+    conn.execute(
+        "DELETE FROM cod_holds WHERE company=? AND cycle_start=? AND cycle_end=?",
+        (company, cs, ce),
+    )
     for ln in hold_result.lines:
         pr = conn.execute(
             "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",

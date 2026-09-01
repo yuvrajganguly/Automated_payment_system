@@ -25,6 +25,11 @@ class RiderRecord:
     # the operator who each unknown rider_id is (rather than just a bare ID).
     name: str | None = None
     hub: str | None = None
+    # The raw cell text when the payout could not be read as money (e.g. "N/A",
+    # a date, "abc"). ``payout`` is 0 in that case and the engine refuses to
+    # settle the rider — it must NOT treat them as absent (that used to write
+    # RENT_MISSED arrears against a rider who was in the file).
+    payout_invalid: str | None = None
 
 
 @dataclass

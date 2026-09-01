@@ -20,7 +20,6 @@ on every assignment that participated in a cycle.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -305,26 +304,46 @@ def allowed_paid_through(*, cur_through, period_start, rent_paise, weekly_rate):
     return (start + timedelta(days=days - 1)).isoformat()
 
 
-def advance_rent_charged_through(conn, person_id, through_date):
-    """Move the rent meter forward for every assignment that participated in
-    the cycle. Both the open assignment (if any) AND any returned assignment
-    whose meter hasn't been moved past its return date yet.
+def advance_rent_charged_through(conn, person_id, through_date, *, assignment_ids=None):
+    """Move the rent meter forward for the assignments that could have been
+    billed up to ``through_date`` (normally the cycle end).
+
+    Per assignment the new meter is ``min(through_date, returned_date - 1)``
+    (the return day is free), and it only ever moves FORWARD. Assignments
+    handed over after ``through_date`` are left alone — they had no days in
+    this window. ``assignment_ids`` restricts the update to the legs that
+    actually participated (the engine passes ``RentInfo.legs``); without it,
+    every assignment of the person that overlaps is considered.
+
+    History (2026-09 review): the previous version ran two unguarded UPDATEs
+    keyed on ``person_id`` and produced three distinct money bugs — a new EV
+    handed over *after* the cycle got its meter set to cycle_end (next cycle
+    billed 7 days for 1 held day and skipped the handover-day-free rule);
+    processing an older cycle after a newer one rolled the meter *backwards*
+    and re-billed a week; and a returned EV's meter was set to
+    ``returned_date - 1`` even when that was past the cycle being billed, so
+    the trailing days were never billed at all.
     """
-    td = through_date.isoformat() if hasattr(through_date, "isoformat") else str(through_date)
-    # Open assignment: meter advances to through_date.
-    conn.execute(
-        "UPDATE ev_assignments SET rent_charged_through=? "
-        "WHERE person_id=? AND returned_date IS NULL",
-        (td, person_id),
-    )
-    # Returned assignments: advance their meter to (returned_date - 1) — the
-    # last day they could have been billed — but only when the current value
-    # is earlier, so we never roll a meter backwards.
-    conn.execute(
-        "UPDATE ev_assignments "
-        "SET rent_charged_through = date(returned_date, '-1 day') "
-        "WHERE person_id=? AND returned_date IS NOT NULL "
-        "  AND (rent_charged_through IS NULL "
-        "       OR rent_charged_through < date(returned_date, '-1 day'))",
+    td = date.fromisoformat(str(through_date)[:10])
+    rows = conn.execute(
+        "SELECT assignment_id, handover_date, returned_date, rent_charged_through "
+        "FROM ev_assignments WHERE person_id=?",
         (person_id,),
-    )
+    ).fetchall()
+    for r in rows:
+        if assignment_ids is not None and r["assignment_id"] not in assignment_ids:
+            continue
+        hod = _parse_date(r["handover_date"])
+        ret = _parse_date(r["returned_date"])
+        cur = _parse_date(r["rent_charged_through"])
+        if hod is not None and hod > td:
+            continue                      # not held yet in this window
+        new = td
+        if ret is not None:
+            new = min(new, ret - timedelta(days=1))
+        if cur is not None and cur >= new:
+            continue                      # never roll a meter backwards
+        conn.execute(
+            "UPDATE ev_assignments SET rent_charged_through=? WHERE assignment_id=?",
+            (new.isoformat(), r["assignment_id"]),
+        )

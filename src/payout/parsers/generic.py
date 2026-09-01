@@ -29,6 +29,19 @@ from payout.parsers.base import match_column, read_table, select_sheet, to_float
 _RIDER_ALIASES = ("rider_id", "rider id", "riderid", "worker code")
 
 
+def _normalise_rider_id(value) -> str:
+    """Canonical rider id text. Excel hands numeric ids over as ``1234.0`` when
+    the cell is a number; strip that, and surrounding whitespace."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+    return text
+
+
 def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     """Parse a payout file using a company's config row."""
     company = config["company_name"]
@@ -92,14 +105,31 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     if hub_col:  matched["hub"]  = hub_col
 
     records: list[RiderRecord] = []
+    seen: dict[str, int] = {}
     for _, row in df.iterrows():
-        rider_id = str(row.get(rider_col, "")).strip()
-        if not rider_id or rider_id.lower() == "nan":
+        rider_id = _normalise_rider_id(row.get(rider_col, ""))
+        if not rider_id:
             continue
-        payout = to_float(row.get(payout_col))
-        if payout is None:
-            warnings.append(f"{company}: skipping {rider_id} — invalid payout value")
-            continue
+        seen[rider_id] = seen.get(rider_id, 0) + 1
+        raw_payout = row.get(payout_col)
+        raw_text = "" if raw_payout is None else str(raw_payout).strip()
+        payout = to_float(raw_payout)
+        payout_invalid = None
+        if payout is None and raw_text.lower() in ("", "nan", "none"):
+            # Blank cell: the rider is in the file, so they are present; there
+            # is just nothing to pay. (Dropping the row made the engine treat
+            # them as ABSENT and charge the week to arrears.)
+            payout = 0.0
+            warnings.append(f"{company}: rider {rider_id} has a blank payout — treated as 0")
+        elif payout is None:
+            # Junk text ("N/A", a date, "abc"): keep the rider present but flag
+            # the row; the engine refuses to commit until the file is fixed.
+            payout_invalid = raw_text
+            payout = 0.0
+            warnings.append(
+                f"{company}: rider {rider_id} has an unreadable payout cell "
+                f"({raw_text!r}) — fix the file before committing"
+            )
         cod = to_float(row.get(cod_col)) if cod_col else None
         orders_val = to_float(row.get(orders_col)) if orders_col else None
         def _cell(col):
@@ -113,7 +143,18 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 rider_id=rider_id, payout=to_paise(payout),
                 cod_pending=to_paise(cod or 0), orders=orders_val,
                 name=_cell(name_col), hub=_cell(hub_col),
+                payout_invalid=payout_invalid,
             )
+        )
+
+    dupes = sorted(rid for rid, n in seen.items() if n > 1)
+    if dupes:
+        # A payout sheet is one row per rider. A repeated id (a subtotal band, a
+        # pasted-twice block) would otherwise be PAID TWICE.
+        shown = ", ".join(dupes[:10]) + (" …" if len(dupes) > 10 else "")
+        raise ValueError(
+            f"{company}: {len(dupes)} rider id(s) appear more than once on sheet "
+            f"'{sheet}': {shown}. Each rider must have exactly one row — fix the file."
         )
 
     # ── Separate hold sheet (Jiffy style), found by content ──────────────────

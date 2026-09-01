@@ -27,12 +27,17 @@ def post_adjustment(
     row = conn.execute(
         "SELECT current_balance FROM balances WHERE person_id=?", (person_id,)
     ).fetchone()
-    current = row["current_balance"] if row else 0.0
+    current = row["current_balance"] if row else 0
     new_balance = current + amount
     today = date.today().isoformat()
+    # Upsert: a rider onboarded from a payout preview has no balances row yet,
+    # and a plain UPDATE affected zero rows while the ADJUSTMENT transaction
+    # below was still written — the money vanished but the audit said it moved.
     conn.execute(
-        "UPDATE balances SET current_balance=?, last_updated=? WHERE person_id=?",
-        (new_balance, today, person_id),
+        "INSERT INTO balances (person_id, current_balance, last_updated) VALUES (?,?,?) "
+        "ON CONFLICT(person_id) DO UPDATE SET current_balance=excluded.current_balance, "
+        "last_updated=excluded.last_updated",
+        (person_id, new_balance, today),
     )
     conn.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, "

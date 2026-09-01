@@ -48,6 +48,27 @@ COMPANIES: list[dict] = [
         "is_active": 1,
     },
     {
+        # Provisional (2026-09): no Nykaa sample file yet, so the layout is a
+        # clone of Blitz's. Adjust the columns in Settings once a real file
+        # arrives. Nykaa pays Blitz riders under their BLITZ rider ids — the
+        # engine links an unknown Nykaa id to the same id at Blitz automatically
+        # (companies.rider_ids_shared_with).
+        "company_name": "Nykaa",
+        "parser_type": "nykaa",
+        "payout_sheet": "0",
+        "rider_id_column": "rider_id",
+        "payout_column": "net_pay",
+        "orders_column": "total_del",
+        "has_hold_sheet": 0,
+        "hold_style": None,
+        "hold_sheet": None,
+        "hold_key_column": None,
+        "hold_amount_column": None,
+        "hold_status_column": None,
+        "is_active": 1,
+        "rider_ids_shared_with": "Blitz",
+    },
+    {
         "company_name": "Myntra",
         "parser_type": "myntra",
         "payout_sheet": "0",
@@ -96,14 +117,14 @@ def seed_companies(conn: sqlite3.Connection) -> None:
             (company_name, parser_type, payout_sheet, rider_id_column,
              payout_column, orders_column, has_hold_sheet, hold_style,
              hold_sheet, hold_key_column, hold_amount_column,
-             hold_status_column, is_active)
+             hold_status_column, is_active, rider_ids_shared_with)
         VALUES
             (:company_name, :parser_type, :payout_sheet, :rider_id_column,
              :payout_column, :orders_column, :has_hold_sheet, :hold_style,
              :hold_sheet, :hold_key_column, :hold_amount_column,
-             :hold_status_column, :is_active)
+             :hold_status_column, :is_active, :rider_ids_shared_with)
         """,
-        COMPANIES,
+        [{"rider_ids_shared_with": None, **c} for c in COMPANIES],
     )
 
 

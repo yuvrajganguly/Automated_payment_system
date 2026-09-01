@@ -11,7 +11,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 
 from payout.api.auth import require_admin
 from payout.api.schemas import RiderOverrideIn
-from payout.domain.engine import CycleOverrides, RiderOverride, process_cycle
+from payout.domain.engine import (
+    CycleAlreadyCommitted,
+    CycleOverrides,
+    RiderOverride,
+    process_cycle,
+)
 from payout.money import to_paise
 from payout.output import build_output, build_output_filename
 
@@ -94,26 +99,6 @@ async def run_cycle(
                 "leave the ledger stale. Wait until the cycle's actually closed."
             ),
         )
-    # Re-commit guard: a committed cycle writes one company_cycles row for
-    # (company, cycle_start, cycle_end). Committing the same cycle again would
-    # append duplicate PAYOUT/RELEASE rows. Refuse unless force=true.
-    if commit and not force:
-        from payout.db import get_connection
-        with get_connection() as _conn:
-            dup = _conn.execute(
-                "SELECT 1 FROM company_cycles WHERE company=? AND cycle_start=? "
-                "AND cycle_end=? LIMIT 1",
-                (company, cycle_start.isoformat(), cycle_end.isoformat()),
-            ).fetchone()
-        if dup:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"{company} {cycle_start}..{cycle_end} has already been "
-                    "committed. Re-committing would double-count payouts. "
-                    "Pass force=true to override intentionally."
-                ),
-            )
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file upload")
@@ -123,8 +108,11 @@ async def run_cycle(
         result = process_cycle(
             company=company, cycle_start=cycle_start, cycle_end=cycle_end,
             file_bytes=file_bytes, overrides=cycle_overrides,
-            created_by=user["email"], commit=commit,
+            created_by=user["email"], commit=commit, force=force,
         )
+    except CycleAlreadyCommitted as exc:
+        # Guard lives in the engine's transaction now (was a racy pre-check here).
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -22,6 +22,20 @@ from payout.parsers import parse_file
 from payout.money import to_rupees
 
 
+class CycleAlreadyCommitted(ValueError):
+    """The (company, cycle_start, cycle_end) already has a committed run.
+
+    Raised inside the engine's own transaction so two concurrent commits cannot
+    both pass a read-then-write check in the HTTP layer. Pass ``force=True`` to
+    re-run deliberately (holds are replaced; PAYOUT/RELEASE rows are appended
+    again, which is why this needs to be explicit)."""
+
+
+class UnreadablePayouts(ValueError):
+    """The file has rider rows whose payout cell is not a number. A dry run
+    reports them; a commit refuses until the file is fixed."""
+
+
 @dataclass
 class RiderOverride:
     waive_days: int = 0
@@ -93,6 +107,12 @@ class CycleResult:
     unknown_ids: list = field(default_factory=list)
     # Each entry: {rider_id, name, hub, payout} — for the onboarding modal.
     unknown_riders: list = field(default_factory=list)
+    # Riders present in the file whose payout cell could not be read. They are
+    # neither paid nor treated as absent; a commit is refused while non-empty.
+    unreadable_riders: list = field(default_factory=list)
+    # Riders whose id was unknown for this company but matched the company
+    # named in companies.rider_ids_shared_with, and were linked automatically.
+    auto_linked: list = field(default_factory=list)
     committed: bool = False
     totals: dict = field(default_factory=dict)
 
@@ -221,8 +241,39 @@ def _vehicle_for(conn, pid, company):
     return "EV" if r else "BIKE"
 
 
+def _shared_rider_source(conn, company):
+    """Company whose rider ids this company reuses (companies.rider_ids_shared_with)."""
+    row = conn.execute(
+        "SELECT rider_ids_shared_with FROM companies WHERE company_name=?", (company,)
+    ).fetchone()
+    src = row["rider_ids_shared_with"] if row else None
+    return (src or "").strip() or None
+
+
+def _auto_link_rider(conn, rider_id, company, source_company):
+    """Create the (rider_id, company) roster row from the same id at
+    ``source_company``, pointing at the same person. Returns the source row or
+    None when the id is unknown there too."""
+    src = conn.execute(
+        "SELECT person_id, name, hub, vehicle, account_no, ifsc, mob_no, email "
+        "FROM rider_master WHERE rider_id=? AND company=?",
+        (rider_id, source_company),
+    ).fetchone()
+    if not src:
+        return None
+    conn.execute(
+        "INSERT OR IGNORE INTO rider_master "
+        "(rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no, email, "
+        " is_active) VALUES (?,?,?,?,?,?,?,?,?,?,1)",
+        (rider_id, company, src["person_id"], src["name"], src["hub"], src["vehicle"],
+         src["account_no"], src["ifsc"], src["mob_no"], src["email"]),
+    )
+    return src
+
+
 def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
-                  overrides=None, created_by="engine", commit=True) -> CycleResult:
+                  overrides=None, created_by="engine", commit=True,
+                  force=False) -> CycleResult:
     overrides = overrides or CycleOverrides()
     parsed = parse_file(company, file_bytes)
     holds = compute_holds(parsed)
@@ -231,11 +282,50 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
 
     conn = get_connection()
     try:
+        if commit:
+            # Re-commit guard, inside THIS transaction. A committed cycle owns
+            # exactly one company_cycles row; claim it first so a concurrent
+            # commit of the same cycle fails on the primary key instead of both
+            # runs passing a check made in a separate connection.
+            dup = conn.execute(
+                "SELECT 1 FROM company_cycles WHERE company=? AND cycle_start=? "
+                "AND cycle_end=?",
+                (company, _iso(cycle_start), _iso(cycle_end)),
+            ).fetchone()
+            if dup and not force:
+                raise CycleAlreadyCommitted(
+                    f"{company} {_iso(cycle_start)}..{_iso(cycle_end)} has already been "
+                    "committed. Re-committing would double-count payouts. "
+                    "Pass force=true to override intentionally."
+                )
+            if not dup:
+                conn.execute(
+                    "INSERT INTO company_cycles (company, cycle_start, cycle_end, "
+                    "week_bucket, processed_by) VALUES (?,?,?,?,?)",
+                    (company, _iso(cycle_start), _iso(cycle_end), "", created_by),
+                )
+
         persist_holds(conn, company, cycle_start, cycle_end, holds)
 
+        shared_from = _shared_rider_source(conn, company)
         present_persons = {}
         for rec in parsed.records:
             p = _lookup(conn, rec.rider_id, company)
+            if not p and shared_from:
+                # e.g. Nykaa pays Blitz riders under their Blitz ids: adopt the
+                # roster row rather than asking the operator to onboard someone
+                # who already exists.
+                if _auto_link_rider(conn, rec.rider_id, company, shared_from):
+                    p = _lookup(conn, rec.rider_id, company)
+                    if p:
+                        result.auto_linked.append({
+                            "rider_id": rec.rider_id, "person_id": p["person_id"],
+                            "name": p["name"], "linked_from": shared_from,
+                        })
+                        result.warnings.append(
+                            f"Rider {rec.rider_id} linked to {p['name']} "
+                            f"(same id at {shared_from})"
+                        )
             if p:
                 present_persons[rec.rider_id] = p
             else:
@@ -247,6 +337,21 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                     "payout": rec.payout,
                 })
                 result.warnings.append(f"Unknown rider_id '{rec.rider_id}' - skipped")
+        unreadable = [rec for rec in parsed.records if rec.payout_invalid is not None]
+        for rec in unreadable:
+            p = present_persons.get(rec.rider_id)
+            result.unreadable_riders.append({
+                "rider_id": rec.rider_id,
+                "name": (p["name"] if p else rec.name) or "",
+                "cell": rec.payout_invalid,
+            })
+        if unreadable and commit:
+            ids = ", ".join(r.rider_id for r in unreadable[:10])
+            raise UnreadablePayouts(
+                f"{company}: {len(unreadable)} rider(s) have a payout cell that is not a "
+                f"number ({ids}{' …' if len(unreadable) > 10 else ''}). "
+                "Fix the file and upload again."
+            )
         present_rider_ids = set(present_persons)
         present_person_ids = {p["person_id"] for p in present_persons.values()}
 
@@ -288,6 +393,10 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
         for rec in parsed.records:
             person = present_persons.get(rec.rider_id)
             if not person: continue
+            if rec.payout_invalid is not None:
+                # Present (so no RENT_MISSED), but nothing can be settled from
+                # an unreadable amount. Dry run only — commit raised above.
+                continue
             pid = person["person_id"]
             ov = overrides.per_rider.get(rec.rider_id, RiderOverride())
 
@@ -546,7 +655,10 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                             new_pending_cycle_end)
             _mark_present(conn, pid, cycle_end)
             if charge_here and rinfo and rinfo.has_ev:
-                advance_rent_charged_through(conn, pid, cycle_end)
+                advance_rent_charged_through(
+                    conn, pid, cycle_end,
+                    assignment_ids={L.assignment_id for L in rinfo.legs},
+                )
                 rent_done.add(pid)
 
             is_hold = pid in held_person_ids or rec.rider_id in held_set
@@ -616,7 +728,10 @@ def process_cycle(company, cycle_start, cycle_end, file_bytes, *,
                 # re-bill those same days via a catch-up RENT *while* the
                 # arrears were also recovered -- double-charging the rider.
                 # Advancing here keeps every EV day billed exactly once.
-                advance_rent_charged_through(conn, pid, cycle_end)
+                advance_rent_charged_through(
+                    conn, pid, cycle_end,
+                    assignment_ids={L.assignment_id for L in rinfo.legs},
+                )
                 total_missed += rinfo.rent
             ridx_rows = conn.execute(
                 "SELECT rider_id, hub FROM rider_master WHERE person_id=? AND company=?",
