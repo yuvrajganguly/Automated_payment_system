@@ -17,7 +17,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useUrlString } from '../state/useUrlState'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
+import { addDaysISO, addMonthsISO, endOfMonthISO, startOfMonthISO, startOfWeekISO, todayISO } from '../lib/dates'
 import { Spinner } from '../components/Spinner'
 import { useAuth } from '../auth/AuthContext'
 
@@ -98,26 +99,6 @@ interface MasterSyncResp {
 const fmt = (n: number | null | undefined) =>
   (n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function addDaysISO(iso: string, n: number): string {
-  const d = new Date(iso + 'T00:00:00')
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
-}
-
-function startOfMonthISO(iso: string): string {
-  return iso.slice(0, 7) + '-01'
-}
-
-function endOfMonthISO(iso: string): string {
-  const d = new Date(iso + 'T00:00:00')
-  const eom = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
-  return eom.toISOString().slice(0, 10)
-}
-
 interface Props {
   provider: 'Raft' | 'Blive'
   cadence: Cadence
@@ -152,17 +133,15 @@ export function ProviderPage({ provider, cadence }: Props) {
   //   weekly  → most recent Monday..Sunday block
   //   monthly → previous calendar month
   const initialRange = useMemo(() => {
+    // All local-time (lib/dates). The previous helpers mixed a local parse
+    // with UTC getters and put every IST user a day (and a week) behind.
     const t = todayISO()
     if (cadence === 'weekly') {
-      const d = new Date(t + 'T00:00:00')
-      const wd = (d.getUTCDay() + 6) % 7   // 0 = Monday
-      const monday = addDaysISO(t, -wd - 7) // last Monday of the prior week
+      const monday = addDaysISO(startOfWeekISO(t), -7)   // Monday of the prior week
       return { from: monday, to: addDaysISO(monday, 6) }
     } else {
       // previous full month
-      const d = new Date(t + 'T00:00:00')
-      const firstOfThisMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
-      const lastOfLastMonth = addDaysISO(firstOfThisMonth, -1)
+      const lastOfLastMonth = addDaysISO(startOfMonthISO(t), -1)
       return { from: startOfMonthISO(lastOfLastMonth), to: endOfMonthISO(lastOfLastMonth) }
     }
   }, [cadence])
@@ -188,10 +167,7 @@ export function ProviderPage({ provider, cadence }: Props) {
   const chips = cadence === 'weekly'
     ? [
         { label: 'This week', fn: () => {
-          const t = todayISO()
-          const d = new Date(t + 'T00:00:00')
-          const wd = (d.getUTCDay() + 6) % 7
-          const monday = addDaysISO(t, -wd)
+          const monday = startOfWeekISO(todayISO())
           return { from: monday, to: addDaysISO(monday, 6) }
         }},
         { label: 'Last week', fn: () => initialRange },
@@ -202,9 +178,7 @@ export function ProviderPage({ provider, cadence }: Props) {
         { label: 'Last month',      fn: () => initialRange },
         { label: 'Last 3 months',   fn: () => {
           const t = todayISO()
-          const d = new Date(t + 'T00:00:00')
-          d.setUTCMonth(d.getUTCMonth() - 3)
-          return { from: d.toISOString().slice(0, 10), to: t }
+          return { from: addMonthsISO(t, -3), to: t }
         }},
       ]
 
@@ -212,9 +186,8 @@ export function ProviderPage({ provider, cadence }: Props) {
     setLoadingPeriod(true)
     setErr(null)
     try {
-      const data = await api.get<PeriodResp>(
-        `/providers/${provider}/period?date_from=${from}&date_to=${to}`,
-      )
+      const data = await api.get<PeriodResp>(`/providers/${provider}/period`,
+                                             { query: { date_from: from, date_to: to } })
       setPeriod(data)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load period')
@@ -228,6 +201,8 @@ export function ProviderPage({ provider, cadence }: Props) {
     try {
       const data = await api.get<BillRow[]>(`/providers/${provider}/bills`)
       setBills(data)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load bills')
     } finally {
       setLoadingBills(false)
     }
@@ -236,9 +211,8 @@ export function ProviderPage({ provider, cadence }: Props) {
   async function loadRecon() {
     setLoadingRecon(true)
     try {
-      const data = await api.get<ReconResp>(
-        `/providers/${provider}/reconciliation?date_from=${from}&date_to=${to}`,
-      )
+      const data = await api.get<ReconResp>(`/providers/${provider}/reconciliation`,
+                                            { query: { date_from: from, date_to: to } })
       setRecon(data)
     } catch {
       setRecon(null)
@@ -248,21 +222,22 @@ export function ProviderPage({ provider, cadence }: Props) {
   }
 
   async function downloadRecon() {
-    const url = `/api/providers/${provider}/reconciliation/export?date_from=${from}&date_to=${to}`
-    const r = await fetch(url, { credentials: 'include' })
-    if (!r.ok) { setErr('Export failed'); return }
-    const blob = await r.blob()
-    const cd = r.headers.get('content-disposition') ?? ''
-    const m = cd.match(/filename="?([^"]+)"?/i)
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = m ? m[1] : `${provider}_reconciliation.xlsx`
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href)
+    try {
+      saveBlob(await api.download(`/providers/${provider}/reconciliation/export`, {
+        query: { date_from: from, date_to: to },
+        fallbackName: `${provider}_reconciliation.xlsx`,
+      }))
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Export failed')
+    }
   }
 
-  useEffect(() => { loadPeriod() }, [from, to, provider])  // eslint-disable-line
-  useEffect(() => { loadRecon() }, [from, to, provider])   // eslint-disable-line
-  useEffect(() => { loadBills() }, [provider])              // eslint-disable-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loaders read from/to/provider from closure
+  useEffect(() => { loadPeriod() }, [from, to, provider])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadRecon() }, [from, to, provider])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadBills() }, [provider])
 
   async function openBillDetail(id: number) {
     setOpenBill(id)

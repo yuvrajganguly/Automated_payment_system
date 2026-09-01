@@ -1,21 +1,19 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
+import { addDaysISO, todayISO } from '../lib/dates'
+import { money as fmt } from '../lib/format'
 import type { Company, CycleResult, InactiveRow, RiderResultRow, RunResponse } from '../api/types'
 
-function isoToday(offset = 0): string {
-  const d = new Date()
-  d.setDate(d.getDate() + offset)
-  // Local date (not UTC) so cycle defaults match the operator's calendar day.
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
+const isoToday = (offset = 0) => addDaysISO(todayISO(), offset)
 
-function fmt(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+/** What a preview was run for. Commit is only offered for an identical set. */
+interface RunKey { company: string; cycleStart: string; cycleEnd: string; fileName: string; fileSize: number; fileMtime: number }
+const runKey = (company: string, cycleStart: string, cycleEnd: string, file: File): RunKey =>
+  ({ company, cycleStart, cycleEnd, fileName: file.name, fileSize: file.size, fileMtime: file.lastModified })
+const sameKey = (a: RunKey | null, b: RunKey) =>
+  !!a && a.company === b.company && a.cycleStart === b.cycleStart && a.cycleEnd === b.cycleEnd &&
+  a.fileName === b.fileName && a.fileSize === b.fileSize && a.fileMtime === b.fileMtime
 
 function downloadBase64(b64: string, filename: string, mime: string) {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
@@ -40,6 +38,19 @@ export function ProcessPayoutPage() {
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [onboardOpen, setOnboardOpen] = useState(false)
+  // The inputs the last successful preview was run with. Commit writes the
+  // ledger irreversibly, so it is enabled only when a preview of exactly these
+  // inputs has been seen (and confirmed) — it used to be one click from a
+  // fresh file pick.
+  const [previewedKey, setPreviewedKey] = useState<RunKey | null>(null)
+  const currentKey = file ? runKey(company, cycleStart, cycleEnd, file) : null
+  const previewIsCurrent = !!currentKey && sameKey(previewedKey, currentKey)
+  const blockers: string[] = []
+  if (preview?.unreadable_riders?.length)
+    blockers.push(`${preview.unreadable_riders.length} rider(s) have an unreadable payout cell`)
+  if (preview?.unknown_riders?.length)
+    blockers.push(`${preview.unknown_riders.length} unknown rider(s) not onboarded`)
+  const canCommit = !!file && !busy && previewIsCurrent && !preview?.committed && blockers.length === 0
 
   useEffect(() => {
     api
@@ -71,6 +82,20 @@ export function ProcessPayoutPage() {
   async function submit(commit: boolean, e?: FormEvent) {
     e?.preventDefault()
     if (!file || !company) return
+    const key = runKey(company, cycleStart, cycleEnd, file)
+    if (commit) {
+      if (!sameKey(previewedKey, key)) {
+        setError('Run a preview of this exact file and cycle before committing.')
+        return
+      }
+      const t = preview?.totals ?? {}
+      const ok = window.confirm(
+        `Commit ${company} ${cycleStart} → ${cycleEnd}?\n\n` +
+        `${t.riders_paid ?? 0} riders paid · ₹${fmt(t.total_release ?? 0)} released · ` +
+        `₹${fmt(t.total_rent_charged ?? 0)} rent charged.\n\nThis writes the ledger and cannot be undone.`,
+      )
+      if (!ok) return
+    }
     setBusy(commit ? 'commit' : 'preview')
     setError(null)
     try {
@@ -82,6 +107,7 @@ export function ProcessPayoutPage() {
       form.set('file', file)
       const r = await api.postForm<RunResponse>('/cycles/run', form)
       setPreview(r.result)
+      setPreviewedKey(key)
       if (commit && r.xlsx) {
         downloadBase64(r.xlsx.content_base64, r.xlsx.filename, r.xlsx.mime)
       }
@@ -149,12 +175,25 @@ export function ProcessPayoutPage() {
             {busy === 'preview' ? 'Previewing...' : 'Preview (dry run)'}
           </button>
           <button
-            type="button" onClick={() => void submit(true)} disabled={!file || !!busy}
+            type="button" onClick={() => void submit(true)} disabled={!canCommit}
+            title={
+              !file ? 'Choose a file first'
+              : !previewIsCurrent ? 'Preview this exact file and cycle first'
+              : blockers.length ? blockers.join('; ')
+              : preview?.committed ? 'Already committed'
+              : 'Write the ledger and download the workbook'
+            }
             className="bg-brand hover:bg-brand-700 text-white px-4 py-2 rounded font-medium disabled:opacity-50"
           >
             {busy === 'commit' ? 'Committing...' : 'Commit & Download'}
           </button>
           {busy && <Spinner />}
+          {file && !previewIsCurrent && !busy && (
+            <span className="text-xs text-slate-500">Preview first — commit unlocks for the previewed file and dates.</span>
+          )}
+          {previewIsCurrent && blockers.length > 0 && (
+            <span className="text-xs text-rose-700">Cannot commit: {blockers.join('; ')}.</span>
+          )}
         </div>
         {error && <p className="text-red-600 mt-3 text-sm">{error}</p>}
       </form>
@@ -177,6 +216,39 @@ export function ProcessPayoutPage() {
             <StatCard label="Arrears recovered" value={fmt(t.total_arrears_recovered ?? 0)} />
             <StatCard label="Rent missed" value={fmt(t.rent_missed_this_cycle ?? 0)} />
           </div>
+
+          {preview.unreadable_riders && preview.unreadable_riders.length > 0 && (
+            <div className="mb-4 bg-rose-50 border border-rose-200 rounded p-3">
+              <p className="font-medium text-rose-900">
+                {preview.unreadable_riders.length} rider(s) have a payout cell that is not a number.
+              </p>
+              <p className="text-xs text-rose-800 mt-1">
+                They are kept as present (no missed-rent arrears), but nothing can be settled from
+                an unreadable amount. Fix the cells in the file and upload it again.
+              </p>
+              <ul className="mt-2 text-sm text-rose-900 list-disc list-inside">
+                {preview.unreadable_riders.map((u) => (
+                  <li key={u.rider_id}>
+                    <span className="font-mono">{u.rider_id}</span>{u.name ? ` — ${u.name}` : ''}:
+                    {' '}<span className="font-mono bg-rose-100 px-1 rounded">{u.cell || '(blank)'}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {preview.auto_linked && preview.auto_linked.length > 0 && (
+            <details className="mb-4 bg-sky-50 border border-sky-200 rounded p-3">
+              <summary className="font-medium cursor-pointer text-sky-900">
+                {preview.auto_linked.length} rider(s) linked from {preview.auto_linked[0].linked_from} by shared rider ID
+              </summary>
+              <ul className="mt-2 text-sm text-sky-900 list-disc list-inside">
+                {preview.auto_linked.map((a) => (
+                  <li key={a.rider_id}><span className="font-mono">{a.rider_id}</span> → {a.name} (person #{a.person_id})</li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           {preview.unknown_riders && preview.unknown_riders.length > 0 && (
             <div className="mb-4 bg-rose-50 border border-rose-200 rounded p-3 flex items-start justify-between gap-3">

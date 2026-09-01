@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react'
 import { useUrlList, useUrlString } from '../state/useUrlState'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, saveBlob } from '../api/client'
+import { useApi } from '../hooks/useApi'
 import { Spinner } from '../components/Spinner'
 
 // ── types ────────────────────────────────────────────────────────────────
@@ -472,18 +473,15 @@ function BreakdownDrawer({ metric, companies, dateFrom, dateTo, onClose }: {
   dateTo:   string
   onClose: () => void
 }) {
-  const [data, setData] = useState<Breakdown | null>(null)
-  const [busy, setBusy] = useState(true)
-  useEffect(() => {
-    setBusy(true)
-    const params = new URLSearchParams()
-    if (companies.length) params.set('companies', companies.join(','))
-    if (dateFrom) params.set('date_from', dateFrom)
-    if (dateTo)   params.set('date_to',   dateTo)
-    api.get<Breakdown>('/dashboard/breakdown/' + metric +
-                       (params.toString() ? '?' + params : ''))
-      .then(setData).finally(() => setBusy(false))
-  }, [metric, companies, dateFrom, dateTo])
+  const params = new URLSearchParams()
+  if (companies.length) params.set('companies', companies.join(','))
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo)   params.set('date_to',   dateTo)
+  // useApi aborts the previous request when the filters change, so a slow
+  // response can't overwrite a newer one, and a failure is shown, not swallowed.
+  const { data, loading: busy, error } = useApi<Breakdown>(
+    '/dashboard/breakdown/' + metric + (params.toString() ? '?' + params : ''),
+  )
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
       <div className="flex-1 bg-black/40" />
@@ -501,7 +499,8 @@ function BreakdownDrawer({ metric, companies, dateFrom, dateTo, onClose }: {
         </div>
         <div className="flex-1 p-4">
           {busy && <Spinner />}
-          {data && !busy && (
+          {error && !busy && <p role="alert" className="text-center text-rose-600 p-8">{error}</p>}
+          {data && !busy && !error && (
             data.rows.length === 0
               ? <p className="text-center text-slate-400 p-8">No rows.</p>
               : (
@@ -572,23 +571,8 @@ function ReportPanel({
         if (!cycleEnd || !cycleCompany) throw new Error('Pick a cycle.')
         params.set('cycle_end', cycleEnd); params.set('cycle_company', cycleCompany)
       }
-      const r = await fetch('/api/dashboard/export?' + params, {
-        credentials: 'include',
-      })
-      if (!r.ok) {
-        const t = await r.text()
-        throw new Error('Export failed: ' + (t || r.statusText))
-      }
-      let name = `dashboard_${mode}.xlsx`
-      const cd = r.headers.get('content-disposition') ?? ''
-      const m = cd.match(/filename="?([^"]+)"?/i)
-      if (m) name = m[1]
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = name
-      document.body.appendChild(a); a.click(); a.remove()
-      URL.revokeObjectURL(url)
+      saveBlob(await api.download('/dashboard/export?' + params,
+                                  { fallbackName: `dashboard_${mode}.xlsx` }))
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed')
     } finally {

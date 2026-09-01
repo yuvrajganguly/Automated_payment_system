@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { todayISO } from '../lib/dates'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import type { PersonOut, TransactionOut } from '../api/types'
@@ -248,7 +249,7 @@ export function PersonPage() {
 }
 
 function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: () => void }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()   // local date; the UTC version was yesterday before 05:30 IST
   const [amount, setAmount] = useState('')
   const [paidOn, setPaidOn] = useState(today)
   const [periodStart, setPeriodStart] = useState('')
@@ -443,21 +444,12 @@ function RiderRow({
       // /riders/rename-rider-id to set the rider_id first, then PATCH the rest.
       let currentRid = rider.rider_id
       if (!currentRid && form.new_rider_id) {
-        const r0 = await fetch('/api/riders/rename-rider-id', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            person_id: rider.person_id,
-            company: rider.company,
-            new_rider_id: form.new_rider_id,
-            current_rider_id: '',
-          }),
+        await api.post('/riders/rename-rider-id', {
+          person_id: rider.person_id,
+          company: rider.company,
+          new_rider_id: form.new_rider_id,
+          current_rider_id: '',
         })
-        if (!r0.ok) {
-          const j = await r0.json().catch(() => ({}))
-          throw new Error(j.detail ?? r0.statusText)
-        }
         currentRid = form.new_rider_id
       }
       if (!currentRid) {
@@ -473,16 +465,7 @@ function RiderRow({
         body.new_rider_id = form.new_rider_id
       if (form.new_company && form.new_company !== rider.company)
         body.new_company = form.new_company
-      const r = await fetch('/api' + url, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail ?? r.statusText)
-      }
+      await api.patch(url, body)
       setEditing(false); onSaved()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed')
@@ -819,35 +802,27 @@ function TxnRow({ t, isCreator, onChanged }:
   const [remarks, setRemarks] = useState(t.remarks ?? '')
   const [busy, setBusy] = useState(false)
 
+  const [err, setErr] = useState<string | null>(null)
+
   async function save() {
-    setBusy(true)
+    const amt = parseFloat(amount)
+    if (!Number.isFinite(amt)) { setErr('Amount must be a number.'); return }
+    setBusy(true); setErr(null)
     try {
-      const r = await fetch('/api/creator/transactions/' + t.id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ amount: parseFloat(amount), remarks }),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        alert(j.detail ?? r.statusText); return
-      }
+      await api.patch('/creator/transactions/' + t.id, { amount: amt, remarks })
       setEditing(false); onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')   // was: try/finally with no catch
     } finally { setBusy(false) }
   }
   async function voidIt() {
     if (!confirm('Void transaction #' + t.id + '? Balance will be recomputed.')) return
-    setBusy(true)
+    setBusy(true); setErr(null)
     try {
-      const r = await fetch('/api/creator/transactions/' + t.id, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        alert(j.detail ?? r.statusText); return
-      }
+      await api.delete('/creator/transactions/' + t.id)
       onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')
     } finally { setBusy(false) }
   }
 
@@ -877,8 +852,19 @@ function TxnRow({ t, isCreator, onChanged }:
             </button>
             <button onClick={() => setEditing(false)} disabled={busy}
                     className="text-xs text-slate-600 underline">Cancel</button>
+            {err && <span role="alert" className="text-[11px] text-rose-600">{err}</span>}
           </div>
         </Td>
+      </tr>
+    )
+  }
+  if (err) {
+    // Void failed on the non-editing row: surface it inline instead of an alert().
+    return (
+      <tr className="border-t">
+        <td colSpan={9} className="px-3 py-2 text-xs text-rose-600" role="alert">
+          #{t.id}: {err} <button className="underline ml-2" onClick={() => setErr(null)}>dismiss</button>
+        </td>
       </tr>
     )
   }
@@ -917,14 +903,8 @@ export function DangerZone({ kind, label, deletePath, onDeleted }:
     if (!confirm(`Hard delete this ${kind} (${label})? Irreversible.`)) return
     setBusy(true); setErr(null)
     try {
-      const r = await fetch(deletePath, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail ?? r.statusText)
-      }
+      // deletePath is given as a full "/api/..." path by callers.
+      await api.delete(deletePath.replace(/^\/api/, ''))
       onDeleted()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed')

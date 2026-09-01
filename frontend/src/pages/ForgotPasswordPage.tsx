@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { api } from '../api/client'
 
 type Stage = 'request' | 'reset' | 'done'
 
@@ -16,13 +17,7 @@ export function ForgotPasswordPage() {
   async function sendOtp(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const r = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.detail ?? r.statusText)
+      const j = await api.post<{ message?: string }>('/auth/forgot-password', { email }, { silent401: true })
       setMsg({ tone: 'ok', text: j.message ?? 'Code sent. Check your inbox.' })
       setStage('reset')
     } catch (e) {
@@ -35,13 +30,7 @@ export function ForgotPasswordPage() {
     if (newPw.length < 8) { setMsg({ tone: 'err', text: 'Password must be 8+ characters.' }); setBusy(false); return }
     if (newPw !== confirm) { setMsg({ tone: 'err', text: 'Passwords don\'t match.' }); setBusy(false); return }
     try {
-      const r = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp, new_password: newPw }),
-      })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.detail ?? r.statusText)
+      await api.post('/auth/reset-password', { email, otp, new_password: newPw }, { silent401: true })
       setStage('done')
       setTimeout(() => navigate('/login'), 1500)
     } catch (e) {

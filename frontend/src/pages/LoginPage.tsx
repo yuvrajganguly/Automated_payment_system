@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useApi } from '../hooks/useApi'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -9,6 +10,11 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The demo button only makes sense where the server actually seeded the demo
+  // accounts (PAYOUT_SEED_DEMO=1). On a real deployment it used to render
+  // anyway — advertising an admin password — and fail with "invalid".
+  const health = useApi<{ status: string; demo: boolean }>('/health', [], { silent401: true })
+  const demo = health.data?.demo === true
 
   async function signIn(em: string, pw: string) {
     setError(null)
@@ -57,9 +63,9 @@ export function LoginPage() {
           />
 
           <div className="text-right mb-4">
-            <a href="/forgot-password" className="text-xs text-silver-400 hover:text-white transition-colors">
+            <Link to="/forgot-password" className="text-xs text-silver-400 hover:text-white transition-colors">
               Forgot password?
-            </a>
+            </Link>
           </div>
 
           {error && <p className="text-rose-300 text-sm mb-3">{error}</p>}
@@ -72,18 +78,22 @@ export function LoginPage() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
 
-          <div className="my-4 flex items-center gap-3 text-[11px] text-silver-500">
-            <span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" />
-          </div>
+          {demo && (
+            <>
+              <div className="my-4 flex items-center gap-3 text-[11px] text-silver-500">
+                <span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" />
+              </div>
 
-          <button
-            type="button" onClick={() => signIn('admin@demo.com', 'Demo-1234')} disabled={busy}
-            className="w-full border border-white/15 text-silver-200 hover:bg-white/5 hover:text-white
-                       font-medium py-2.5 rounded-lg text-sm transition-all disabled:opacity-60"
-          >
-            Explore the live demo
-          </button>
-          <p className="text-[11px] text-silver-500 text-center mt-2">Sample data · no sign-up required</p>
+              <button
+                type="button" onClick={() => signIn('admin@demo.com', 'Demo-1234')} disabled={busy}
+                className="w-full border border-white/15 text-silver-200 hover:bg-white/5 hover:text-white
+                           font-medium py-2.5 rounded-lg text-sm transition-all disabled:opacity-60"
+              >
+                Explore the live demo
+              </button>
+              <p className="text-[11px] text-silver-500 text-center mt-2">Sample data · no sign-up required</p>
+            </>
+          )}
         </form>
       </div>
     </div>

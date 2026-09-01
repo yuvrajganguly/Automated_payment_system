@@ -276,16 +276,7 @@ function MaintenanceCloseCard({ openRow, onClosed }:
     try {
       const body: Record<string, string> = {}
       if (date) body.to_date = date
-      const r = await fetch('/api/evs/maintenance/' + openRow.id, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.detail ?? r.statusText)
-      }
+      await api.patch('/evs/maintenance/' + openRow.id, body)
       setMsg('Closed'); setDate(''); onClosed()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }

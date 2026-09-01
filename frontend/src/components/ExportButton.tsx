@@ -2,13 +2,12 @@
  * "Export to Excel" button that hits an API endpoint returning a styled .xlsx
  * and triggers a browser download.
  *
- * Uses fetch + Blob (instead of an <a download> tag) so we can include the
- * Authorization header that the API requires. The server already sends a
- * proper Content-Disposition with a timestamped filename, but we use the
- * `name` prop as a fallback when the response header gets stripped by some
- * older browsers.
+ * Goes through `api.download` so the auth cookie, the 401 -> login redirect
+ * and error parsing behave like every other call. The server sends a
+ * Content-Disposition with a timestamped filename; `name` is the fallback.
  */
 import { useState } from 'react'
+import { api, saveBlob } from '../api/client'
 
 interface Props {
   /** API path under /api — e.g. "/arrears/export". */
@@ -24,48 +23,37 @@ interface Props {
 
 export function ExportButton({ path, name, query, ids, className = '' }: Props) {
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function go() {
     setBusy(true)
     try {
       const q = query ? (query.startsWith('?') ? query : '?' + query) : ''
-      const init: RequestInit = ids !== undefined
-        ? { method: 'POST', credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ids }) }
-        : { credentials: 'include' }
-      const r = await fetch('/api' + path + q, init)
-      if (!r.ok) {
-        alert('Export failed: ' + r.status + ' ' + r.statusText)
-        return
-      }
-      // Prefer the server-provided filename from Content-Disposition.
-      let filename = name
-      const cd = r.headers.get('content-disposition') ?? ''
-      const m = cd.match(/filename="?([^"]+)"?/i)
-      if (m) filename = m[1]
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = filename
-      document.body.appendChild(a); a.click(); a.remove()
-      URL.revokeObjectURL(url)
+      // Server-provided filename (Content-Disposition) wins over `name`.
+      const dl = await api.download(path + q, {
+        fallbackName: name,
+        ...(ids !== undefined ? { json: { ids } } : {}),
+      })
+      saveBlob(dl)
     } catch (e) {
-      alert('Export failed: ' + (e instanceof Error ? e.message : 'unknown'))
+      setError('Export failed: ' + (e instanceof Error ? e.message : 'unknown'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <button onClick={go} disabled={busy}
-            className={
-              'text-sm bg-emerald-600 hover:bg-emerald-700 text-white ' +
-              'px-3 py-1.5 rounded inline-flex items-center gap-1 ' +
-              'disabled:opacity-50 ' + className
-            }>
-      <span>⬇</span>
-      {busy ? 'Exporting…' : 'Export to Excel'}
-    </button>
+    <span className="inline-flex items-center gap-2">
+      <button onClick={go} disabled={busy}
+              className={
+                'text-sm bg-emerald-600 hover:bg-emerald-700 text-white ' +
+                'px-3 py-1.5 rounded inline-flex items-center gap-1 ' +
+                'disabled:opacity-50 ' + className
+              }>
+        <span aria-hidden="true">⬇</span>
+        {busy ? 'Exporting…' : 'Export to Excel'}
+      </button>
+      {error && <span role="alert" className="text-xs text-rose-600">{error}</span>}
+    </span>
   )
 }

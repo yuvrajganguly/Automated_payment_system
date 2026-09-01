@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useUrlString } from '../state/useUrlState'
 import { api } from '../api/client'
+import { useApi } from '../hooks/useApi'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 
@@ -81,14 +82,9 @@ export function SystemPage() {
 }
 
 function StatsTab() {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [busy, setBusy] = useState(true)
-  useEffect(() => {
-    api.get<Stats>('/creator/system/stats')
-      .then(setStats).finally(() => setBusy(false))
-  }, [])
+  const { data: stats, loading: busy, error } = useApi<Stats>('/creator/system/stats')
   if (busy && !stats) return <Spinner />
-  if (!stats) return <p className="text-red-600">Couldn't load stats.</p>
+  if (!stats) return <p className="text-red-600">Couldn't load stats{error ? `: ${error}` : '.'}</p>
   return (
     <div className="grid md:grid-cols-2 gap-4">
       <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4">
@@ -139,8 +135,11 @@ function AuditTab() {
     if (email) p.set('email', email)
     if (method) p.set('method', method)
     api.get<AuditRow[]>('/creator/audit-log?' + p)
-      .then(setRows).finally(() => setBusy(false))
+      .then(setRows)
+      .catch(() => setRows([]))          // was: no catch -> unhandled rejection, stale rows
+      .finally(() => setBusy(false))
   }
+   
   useEffect(reload, [email, method])
 
   return (
@@ -215,45 +214,57 @@ function EvModelsTab() {
   const [models, setModels] = useState<Model[]>([])
   const [busy, setBusy] = useState(true)
   const [form, setForm] = useState({ provider: '', model_name: '', weekly_rate: '' })
+  const [err, setErr] = useState<string | null>(null)
+  const fail = (e: unknown) => setErr(e instanceof Error ? e.message : 'Failed')
 
   const reload = () => {
     setBusy(true)
     api.get<Model[]>('/evs/models')
-      .then(setModels).finally(() => setBusy(false))
+      .then(setModels)
+      .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'Failed to load models'))
+      .finally(() => setBusy(false))
   }
+   
   useEffect(reload, [])
 
   async function add() {
-    await api.post('/creator/ev-models', {
-      provider: form.provider, model_name: form.model_name,
-      weekly_rate: parseFloat(form.weekly_rate) || 0,
-    })
-    setForm({ provider: '', model_name: '', weekly_rate: '' })
-    reload()
+    setErr(null)
+    const rate = parseFloat(form.weekly_rate)
+    if (!form.provider || !form.model_name || !Number.isFinite(rate) || rate <= 0) {
+      setErr('Provider, model and a positive weekly rate are required.')
+      return
+    }
+    try {
+      await api.post('/creator/ev-models', {
+        provider: form.provider, model_name: form.model_name, weekly_rate: rate,
+      })
+      setForm({ provider: '', model_name: '', weekly_rate: '' })
+      reload()
+    } catch (e) { fail(e) }
   }
   async function edit(m: Model, field: 'weekly_rate' | 'model_name' | 'provider', value: string | number) {
+    setErr(null)
+    if (field === 'weekly_rate' && !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+      setErr('Weekly rate must be a positive number.')
+      reload()                       // snap the input back to the saved value
+      return
+    }
     const next: Model = { ...m, [field]: value }
-    await fetch('/api/creator/ev-models/' + m.model_id, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        provider: next.provider, model_name: next.model_name,
-        weekly_rate: next.weekly_rate,
-      }),
-    })
+    try {
+      // A rejected PATCH used to be ignored: the row kept showing the typed
+      // value while the server still had the old one.
+      await api.patch('/creator/ev-models/' + m.model_id, {
+        provider: next.provider, model_name: next.model_name, weekly_rate: next.weekly_rate,
+      })
+    } catch (e) { fail(e) }
     reload()
   }
   async function del(model_id: number) {
     if (!confirm('Delete this EV model? Existing EVs using it will block deletion.')) return
-    const r = await fetch('/api/creator/ev-models/' + model_id, {
-      method: 'DELETE',
-      credentials: 'include',
-    })
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}))
-      alert(j.detail ?? r.statusText)
-    }
+    setErr(null)
+    try {
+      await api.delete('/creator/ev-models/' + model_id)
+    } catch (e) { fail(e) }
     reload()
   }
 
@@ -271,6 +282,7 @@ function EvModelsTab() {
       </div>
       {busy && <Spinner />}
       <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+        {err && <p role="alert" className="text-sm text-rose-600 mb-2">{err}</p>}
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -283,7 +295,9 @@ function EvModelsTab() {
           </thead>
           <tbody>
             {models.map((m) => (
-              <tr key={m.model_id} className="border-t">
+              // key includes the saved values so a rejected edit re-mounts the
+              // uncontrolled inputs with what the server actually has.
+              <tr key={`${m.model_id}:${m.provider}:${m.model_name}:${m.weekly_rate}`} className="border-t">
                 <td className="px-3 py-2 text-xs">{m.model_id}</td>
                 <td className="px-3 py-2">
                   <input defaultValue={m.provider}
@@ -387,14 +401,8 @@ function DeleteCard({ title, prompt, path, warning, force }:
     if (!confirm(`Hard-delete ${title} "${value}"? This cannot be undone.`)) return
     setBusy(true); setMsg(null)
     try {
-      const url = '/api/creator' + path + encodeURIComponent(value)
-                + (force && useForce ? '?force=true' : '')
-      const r = await fetch(url, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.detail ?? r.statusText)
+      await api.delete('/creator' + path + encodeURIComponent(value),
+                       force && useForce ? { query: { force: true } } : {})
       setMsg({ tone: 'ok', text: `Deleted.` })
       setValue('')
     } catch (e) {

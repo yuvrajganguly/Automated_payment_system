@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
@@ -197,8 +197,8 @@ export function EvRentPage() {
               const collectedPct = r.expected_rent === 0 ? 0
                                   : (currentCollected / r.expected_rent) * 100
               return (
-                <>
-                  <tr key={key} className="border-t hover:bg-slate-50 cursor-pointer"
+                <Fragment key={key}>
+                  <tr className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => setExpanded({ ...expanded, [key]: !isOpen })}>
                     <Td className="text-slate-400">{isOpen ? '▼' : '▶'}</Td>
                     <Td className="font-medium">
@@ -252,7 +252,7 @@ export function EvRentPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               )
             })}
           </tbody>

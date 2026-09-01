@@ -15,17 +15,31 @@ const AuthContext = createContext<AuthState | undefined>(undefined)
 // an httpOnly cookie the browser sends automatically — never in JS storage.
 const USER_KEY = 'payout_user'
 
+// localStorage throws in some private/embedded contexts; treat it as optional.
+const safeGet = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
+const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* ignore */ } }
+const safeRemove = (k: string) => { try { localStorage.removeItem(k) } catch { /* ignore */ } }
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const [user, setUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem(USER_KEY)
-    return raw ? (JSON.parse(raw) as User) : null
+    // A corrupt/legacy value here used to throw inside the initializer and
+    // blank the whole app before first render.
+    try {
+      const raw = safeGet(USER_KEY)
+      const parsed = raw ? (JSON.parse(raw) as Partial<User>) : null
+      return parsed && typeof parsed.email === 'string' && typeof parsed.role === 'string'
+        ? (parsed as User)
+        : null
+    } catch {
+      return null
+    }
   })
   const [loading, setLoading] = useState(true)
 
   function clearSession() {
     setUser(null)
-    localStorage.removeItem(USER_KEY)
+    safeRemove(USER_KEY)
   }
 
   useEffect(() => {
@@ -38,16 +52,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [navigate])
 
   // On load, confirm the cookie session with the server (rehydrate or clear).
-  // Uses a raw fetch so a 401 here doesn't trigger the global redirect — public
-  // pages (login, forgot-password) must stay reachable when logged out.
+  // silent401: a 401 here must not trigger the global redirect — public pages
+  // (login, forgot-password) must stay reachable when logged out.
   useEffect(() => {
     let active = true
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('unauthenticated'))))
+    api.get<User>('/auth/me', { silent401: true })
       .then((u: User) => {
         if (!active) return
         setUser(u)
-        localStorage.setItem(USER_KEY, JSON.stringify(u))
+        safeSet(USER_KEY, JSON.stringify(u))
       })
       .catch(() => {
         if (active) clearSession()
@@ -64,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const r = await api.loginForm(email, password)
     const u: User = { email: r.email, role: r.role }
     setUser(u)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
+    safeSet(USER_KEY, JSON.stringify(u))
   }
 
   const logout = () => {

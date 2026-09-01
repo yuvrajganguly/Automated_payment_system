@@ -71,13 +71,7 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
   async function setRole(role: string) {
     setBusy('role'); setError(null)
     try {
-      const r = await fetch('/api/users/' + encodeURIComponent(row.email) + '/role', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ role }),
-      })
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.detail ?? r.statusText) }
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/role', { role })
       onChanged()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }
@@ -86,11 +80,7 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
     setBusy('active'); setError(null)
     try {
       const path = row.is_active ? 'deactivate' : 'reactivate'
-      const r = await fetch('/api/users/' + encodeURIComponent(row.email) + '/' + path, {
-        method: 'PATCH',
-        credentials: 'include',
-      })
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.detail ?? r.statusText) }
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/' + path)
       onChanged()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }

@@ -13,6 +13,8 @@ export interface Company {
   has_hold_sheet: boolean
   hold_style: string | null
   is_active: boolean
+  /** Another company whose rider IDs this one reuses (Nykaa -> Blitz). */
+  rider_ids_shared_with?: string | null
 }
 
 export interface RiderResultRow {
@@ -64,6 +66,10 @@ export interface CycleResult {
   warnings: string[]
   unknown_ids: string[]
   unknown_riders: { rider_id: string; name: string; hub: string; payout: number }[]
+  /** Riders in the file whose payout cell is not a number. Commit is refused while non-empty. */
+  unreadable_riders: { rider_id: string; name: string; cell: string }[]
+  /** Unknown ids that matched the company in `rider_ids_shared_with` and were linked automatically. */
+  auto_linked: { rider_id: string; person_id: number; name: string; linked_from: string }[]
   committed: boolean
   totals: Record<string, number>
 }
@@ -144,7 +150,7 @@ export interface MaintenanceOut {
   id: number
   ev_id: string
   from_date: string
-  to_date: string
+  to_date: string | null   // NULL while the maintenance window is open (matches schemas.py)
   reason: string | null
   created_by: string | null
   created_at: string | null
