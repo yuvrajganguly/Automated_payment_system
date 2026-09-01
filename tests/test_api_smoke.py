@@ -23,6 +23,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from payout.api import ratelimit  # noqa: E402
+from payout.config import DB_URL  # noqa: E402
 from payout.db import get_connection, initialize_database  # noqa: E402
 from payout.db.demo_seed import seed_demo  # noqa: E402
 from tests.conftest import reset_database  # noqa: E402
@@ -60,6 +61,9 @@ _EXPECTED_STATUS = {
     "/api/providers/{provider}/bills/{bill_id}": 404,  # no bills in the demo seed
     "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
 }
+if DB_URL:
+    # No single file to stream on Postgres; the route says to use pg_dump.
+    _EXPECTED_STATUS["/api/creator/system/backup"] = 501
 
 
 @pytest.fixture(scope="module")

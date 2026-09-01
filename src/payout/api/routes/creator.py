@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from payout.api.auth import require_creator
 from payout.config import DB_PATH as _DB_PATH
+from payout.config import DB_URL
 from payout.db import get_connection
 from payout.db.references import purge_ev, purge_person, repoint_person
 from payout.money import to_paise
@@ -65,33 +66,59 @@ def audit_log(
 # ── 2. System stats ───────────────────────────────────────────────────────
 @router.get("/system/stats")
 def system_stats(_: dict = Depends(require_creator)) -> dict:
-    db_path = str(_DB_PATH)
-    db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+    """Table counts + size for whichever backend is live. (Used to query
+    sqlite_master unconditionally and 500 on Postgres.)"""
     with get_connection() as conn:
-        tables = [
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            )
-        ]
+        if DB_URL:
+            tables = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
+                    "ORDER BY table_name"
+                )
+            ]
+            db_size = conn.execute("SELECT pg_database_size(current_database())").fetchone()[0]
+            db_path = DB_URL.split("@")[-1]  # host:port/db — never the credentials
+        else:
+            tables = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            db_path = str(_DB_PATH)
+            db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
         counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
         last_cycle = conn.execute("SELECT MAX(cycle_end) AS m FROM transactions").fetchone()["m"]
         last_audit = conn.execute("SELECT MAX(at) AS m FROM audit_log").fetchone()["m"]
     return {
+        "backend": "postgresql" if DB_URL else "sqlite",
         "db_path": db_path,
-        "db_size_bytes": db_size,
-        "db_size_mb": round(db_size / (1024 * 1024), 2),
+        "db_size_bytes": int(db_size or 0),
+        "db_size_mb": round(int(db_size or 0) / (1024 * 1024), 2),
         "table_counts": counts,
         "last_cycle_end": last_cycle,
-        "last_audit_at": last_audit,
+        "last_audit_at": str(last_audit) if last_audit is not None else None,
     }
 
 
 # ── 3. Backup ─────────────────────────────────────────────────────────────
 @router.get("/system/backup")
 def backup_download(_: dict = Depends(require_creator)) -> FileResponse:
-    """Stream the SQLite file as a download. WAL pages are flushed first."""
+    """Stream the SQLite file as a download. WAL pages are flushed first.
+
+    On Postgres there is no single file to stream; back up with pg_dump from
+    the database host (see DOCKER.md) — answer 501 with that instruction
+    instead of a 500 from PRAGMA."""
+    if DB_URL:
+        raise HTTPException(
+            501,
+            "This deployment runs on PostgreSQL. Back it up with "
+            "`docker exec payout-db pg_dump -U payout -d payout > C:\\payout_data\\backup.sql` "
+            "(see DOCKER.md).",
+        )
     with get_connection() as conn:
         conn.execute("PRAGMA wal_checkpoint(FULL)")
     return FileResponse(
