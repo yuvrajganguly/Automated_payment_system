@@ -1,3 +1,20 @@
-# Shell scripts must stay LF or they break inside the Linux container
+# Normalise line endings in the repository: every text file is stored as LF and
+# checked out as LF, on every platform. This stops the CRLF/LF churn that made
+# whole files show as modified when nothing changed.
+* text=auto eol=lf
+
+# Windows-only scripts are the one exception — PowerShell is happiest with CRLF.
+*.ps1 text eol=crlf
+
+# Shell scripts must stay LF or they break inside the Linux container.
 *.sh text eol=lf
 docker-entrypoint.sh text eol=lf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.xlsx binary
+*.docx binary
+*.zip binary
+*.db binary

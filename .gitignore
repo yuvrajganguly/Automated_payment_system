@@ -23,14 +23,56 @@ ENV/
 .coverage.*
 htmlcov/
 .tox/
+.claude/
 
-# ─── Sensitive runtime data — NEVER commit real rider data or the database ────
+# ─── Real data — NEVER commit rider data, databases, dumps or backups ────────
+# Rules are by directory and extension so a new dump/backup name is covered
+# without editing this file. Anonymised samples live in data/sample/ only.
+data/
+!data/sample/
+!data/sample/**
+backups/
 *.db
 *.db-wal
 *.db-shm
+*.sql
+*.sqlite
+*.sqlite3
+*.zip
+*.7z
+*.bak
+*.bak_*
+*.backup
+*.pre_paise_backup
+*codex_before_paise*
+*.recovered*
 *.xlsx
 !data/sample/*.xlsx
-data/private/
+*.xls
+*.csv
+*.docx
+*.pdf
+
+# Scripts / notes that embed real rider data
+scripts/build_seed.py
+scripts/oneoff/
+*recovery*
+*Recovery*
+fix_meters.*
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Frontend ────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+# tsc -b used to emit these beside vite.config.ts; tsconfig.node.json now has noEmit.
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # ─── OS / IDE ────────────────────────────────────────────────────────────────
 .DS_Store
@@ -39,47 +81,16 @@ Thumbs.db
 .vscode/
 *.swp
 
-# Cloned sub-repos (managed separately)
+# ─── Unrelated repos cloned beside this one ──────────────────────────────────
 CodeCurators-T08/
 Checkout-Experiment-And-Growth-Analytics/
 -Code_bytes-DASC09/
-
-# PowerShell setup script
 setup_repos.ps1
 
-# DB migration / rollback backups (contain real rider data)
-*.pre_paise_backup
-*codex_before_paise*
+# ─── Local scratch ───────────────────────────────────────────────────────────
+_to_delete/
 
-# Personal / generated docs (not part of the application)
-Yuvraj_Ganguly_CV*.docx
-Payout_System_Operations_Guide.docx
+# ─── Personal / generated docs (not part of the application) ─────────────────
 PAYOUT_SYSTEM_STUDY_GUIDE.*
-
-# Docker / local secrets and artifacts
-.env
-*.recovered*
-*.bak_rate_fix*
-
-# TS incremental build cache
-frontend/tsconfig.tsbuildinfo
-
-# Local-only helpers (not part of the app)
-start.ps1
-scripts/oneoff/
-
-# Local encrypted DB backup (never commit)
-payout_db_backup_encrypted.zip
-
-# Contains real rider data - never commit
-scripts/build_seed.py
-restore_myntra.sql
-Myntra_Recovery_README.md
-pg_data*.sql
-staging.db*
-pre_pg.db
-payout_old.db
-run_recovery.ps1
-fix_meters.sql
-fix_meters.ps1
-pg_data4.sql
+Payout_System_Operations_Guide.*
+Yuvraj_Ganguly_CV*

@@ -76,7 +76,9 @@ Docker Desktop starts, so day-to-day you just open the browser.
 
 ## Back up the database
 
-`pg_dump` into a file (safe to keep in OneDrive — it's a static snapshot):
+`pg_dump` into a file under `C:\payout_data\` — a local, non-synced directory.
+Dumps contain real rider data (Aadhaar, bank details); never keep them inside
+OneDrive or inside this repository folder:
 
 ```powershell
 docker exec payout-db pg_dump -U payout -d payout `

@@ -1,0 +1,39 @@
+# Install once:  pip install pre-commit && pre-commit install
+# Runs on every commit. `pre-commit run --all-files` to check the whole tree.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: \.ps1$
+
+  - repo: local
+    hooks:
+      # Belt-and-braces against `git add -f`: refuse any file that looks like
+      # rider data, a database, a dump or a backup, regardless of .gitignore.
+      - id: no-real-data
+        name: refuse database / dump / spreadsheet files
+        entry: >-
+          bash -c 'echo "Refusing to commit data files:"; printf "  %s\n" "$@"; exit 1' --
+        language: system
+        files: \.(db|db-wal|db-shm|sqlite3?|sql|zip|7z|xlsx|xls|csv|bak)$
+        exclude: ^data/sample/
