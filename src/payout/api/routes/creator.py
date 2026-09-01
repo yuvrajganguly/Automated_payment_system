@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from payout.api.auth import require_creator
 from payout.db import get_connection
+from payout.db.references import purge_ev, purge_person, repoint_person
 from payout.money import to_paise
 from payout.config import DB_PATH as _DB_PATH
 
@@ -116,19 +117,10 @@ def delete_person(person_id: int,
                 "Cascade is required — there's no safe way to delete a person "
                 "without dropping their riders/transactions/EV history too.",
             )
-        # Drop dependents first so FKs don't slap us.
-        for tbl, col in [
-            ("rider_master",   "person_id"),
-            ("transactions",   "person_id"),
-            ("balances",       "person_id"),
-            ("ev_arrears",     "person_id"),
-            ("ev_assignments", "person_id"),
-            ("cod_holds",      "person_id"),
-            ("status_tracking", "person_id"),
-            ("payment_lines",  "person_id"),
-            ("person_registry", "person_id"),
-        ]:
-            conn.execute(f"DELETE FROM {tbl} WHERE {col} = ?", (person_id,))
+        # One canonical, FK-ordered list (db/references.py). The hand-rolled
+        # list here missed ev_daily_ledger and deleted transactions before
+        # payment_lines, so any person with ledger rows 500'd.
+        purge_person(conn, person_id)
         conn.commit()
     return {"deleted": True, "person_id": person_id}
 
@@ -139,9 +131,7 @@ def delete_ev(ev_id: str, _: dict = Depends(require_creator)) -> dict:
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (ev_id,)).fetchone():
             raise HTTPException(404, "EV not found")
-        conn.execute("DELETE FROM ev_assignments WHERE ev_id = ?", (ev_id,))
-        conn.execute("DELETE FROM ev_maintenance WHERE ev_id = ?", (ev_id,))
-        conn.execute("DELETE FROM ev_units WHERE ev_id = ?", (ev_id,))
+        purge_ev(conn, ev_id)   # incl. ev_daily_ledger, which was forgotten here
         conn.commit()
     return {"deleted": True, "ev_id": ev_id}
 
@@ -285,19 +275,8 @@ def force_merge(body: ForceMergeIn, _: dict = Depends(require_creator)) -> dict:
                 "WHERE person_id=? AND returned_date IS NULL",
                 (body.secondary_person_id,),
             )
-        # Now reuse the same UPDATE sequence as the normal merge.
-        for tbl, col in [
-            ("rider_master", "person_id"),
-            ("ev_assignments", "person_id"),
-            ("cod_holds", "person_id"),
-            ("transactions", "person_id"),
-            ("payment_lines", "person_id"),
-            ("ev_daily_ledger", "assigned_person_id"),
-        ]:
-            conn.execute(
-                f"UPDATE {tbl} SET {col}=? WHERE {col}=?",
-                (body.primary_person_id, body.secondary_person_id),
-            )
+        # Now reuse the same re-pointing as the normal merge.
+        repoint_person(conn, body.secondary_person_id, body.primary_person_id)
         # Sum balances + arrears.
         bal = conn.execute(
             "SELECT current_balance FROM balances WHERE person_id=?",

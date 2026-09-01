@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import EvSummary, LinkRidersIn, PersonOut, RiderOut, SplitPersonIn
 from payout.db import get_connection
+from payout.db.references import drop_person_singletons
 
 router = APIRouter()
 
@@ -370,8 +371,10 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
             "WHERE assigned_person_id=?",
             (primary, secondary),
         )
+        # payment_lines was not re-pointed before -> FK failure on the DELETE.
+        conn.execute("UPDATE payment_lines SET person_id=? WHERE person_id=?",
+                     (primary, secondary))
         # Drop secondary's now-orphaned rows + the person_registry row last.
-        for t in ("balances", "ev_arrears", "status_tracking", "person_registry"):
-            conn.execute(f"DELETE FROM {t} WHERE person_id=?", (secondary,))
+        drop_person_singletons(conn, secondary)
         conn.commit()
     return {"merged": True, "into_person_id": primary, "from_person_id": secondary}
