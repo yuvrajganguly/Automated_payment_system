@@ -194,7 +194,11 @@ CREATE TABLE IF NOT EXISTS companies (
     hold_key_column    TEXT,
     hold_amount_column TEXT,
     hold_status_column TEXT,
-    is_active          INTEGER NOT NULL DEFAULT 1
+    is_active          INTEGER NOT NULL DEFAULT 1,
+    -- Name of another company whose rider IDs this company reuses (Nykaa pays
+    -- Blitz riders under their Blitz IDs). An unknown rider_id in this
+    -- company's file that exists under that company is linked automatically.
+    rider_ids_shared_with TEXT
 );
 
 -- ── users ───────────────────────────────────────────────────────────────────
@@ -322,6 +326,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     otp_hash   TEXT NOT NULL,             -- bcrypt of the 6 digits
     expires_at TEXT NOT NULL,
     used_at    TEXT,                      -- NULL until the OTP is consumed
+    attempts   INTEGER NOT NULL DEFAULT 0, -- wrong guesses; locked after MAX_OTP_ATTEMPTS
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pwd_reset_email ON password_reset_tokens (email);

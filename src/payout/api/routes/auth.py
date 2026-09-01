@@ -17,16 +17,27 @@ from payout.api.auth import (
     get_current_user,
     set_auth_cookie,
 )
+from payout.api.ratelimit import rate_limit
 from payout.api.schemas import ChangePasswordIn, TokenOut, UserOut
 from payout.auth import hash_password
 from payout.db import get_connection
-from payout.notifications import send_email
+from payout.notifications import email_configured, send_email
 
 router = APIRouter()
 
 
 # ── OTP password reset ─────────────────────────────────────────────────────
 OTP_TTL_MINUTES = 10
+# A 6-digit code has a 1-in-1,000,000 chance per guess; five guesses keeps the
+# odds of a lucky hit at 0.0005% and the code is then dead until re-issued.
+MAX_OTP_ATTEMPTS = 5
+
+# Per-client-IP limits on the unauthenticated routes. Generous for a human,
+# fatal for a script. bcrypt makes each login/OTP check ~100 ms of CPU, so
+# these also protect the single-process server from being wedged.
+_login_limit = rate_limit("login", limit=20, window_seconds=60)
+_forgot_limit = rate_limit("forgot-password", limit=5, window_seconds=15 * 60)
+_reset_limit = rate_limit("reset-password", limit=10, window_seconds=15 * 60)
 
 
 class ForgotPasswordIn(BaseModel):
@@ -50,7 +61,7 @@ def _verify_otp(otp: str, stored_hash: str) -> bool:
         return False
 
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", dependencies=[Depends(_forgot_limit)])
 def forgot_password(body: ForgotPasswordIn) -> dict:
     """Generate a single-use 6-digit OTP and email it to the user.
 
@@ -59,6 +70,15 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
     email = body.email.strip().lower()
     if not email:
         raise HTTPException(400, "Email is required")
+    if not email_configured():
+        # Checked before the account lookup so the answer is identical for
+        # registered and unregistered addresses. Previously the code was printed
+        # to the server log and the user was told it had been sent.
+        raise HTTPException(
+            503,
+            "Password reset by email is not set up on this server. "
+            "Ask an administrator to reset your password.",
+        )
     with get_connection() as conn:
         row = conn.execute(
             "SELECT email FROM users WHERE email=? AND is_active=1", (email,)
@@ -81,11 +101,12 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
                 f"It expires in {OTP_TTL_MINUTES} minutes. If you didn't request a "
                 f"reset, ignore this email — nothing has changed.\n"
             )
-            send_email(email, "Payout System — password reset code", body_text)
+            if not send_email(email, "Payout System — password reset code", body_text):
+                raise HTTPException(503, "Could not send the reset email. Try again later.")
     return {"ok": True, "message": "If that email is registered, a code has been sent."}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(_reset_limit)])
 def reset_password(body: ResetPasswordIn) -> dict:
     """Validate the OTP and set a new password."""
     email = body.email.strip().lower()
@@ -97,12 +118,14 @@ def reset_password(body: ResetPasswordIn) -> dict:
 
     with get_connection() as conn:
         token = conn.execute(
-            "SELECT id, otp_hash, expires_at FROM password_reset_tokens "
+            "SELECT id, otp_hash, expires_at, attempts FROM password_reset_tokens "
             "WHERE email=? AND used_at IS NULL "
             "ORDER BY id DESC LIMIT 1", (email,),
         ).fetchone()
         if not token:
-            raise HTTPException(400, "No active reset request for this email.")
+            # One message for "no request", "expired" and "user missing" so the
+            # endpoint doesn't confirm which addresses have accounts.
+            raise HTTPException(400, "This code is not valid. Request a new one.")
         # Expiry check.
         try:
             expires_at = datetime.fromisoformat(token["expires_at"])
@@ -114,13 +137,29 @@ def reset_password(body: ResetPasswordIn) -> dict:
                 (token["id"],),
             )
             conn.commit()
-            raise HTTPException(400, "Code has expired — request a new one.")
+            raise HTTPException(400, "This code is not valid. Request a new one.")
         if not _verify_otp(otp, token["otp_hash"]):
+            attempts = int(token["attempts"] or 0) + 1
+            if attempts >= MAX_OTP_ATTEMPTS:
+                # Burn the code: a wrong guess used to leave it live for more.
+                conn.execute(
+                    "UPDATE password_reset_tokens SET attempts=?, used_at=datetime('now') "
+                    "WHERE id=?", (attempts, token["id"]),
+                )
+                conn.commit()
+                raise HTTPException(
+                    401, "Too many incorrect codes. Request a new one to try again."
+                )
+            conn.execute(
+                "UPDATE password_reset_tokens SET attempts=? WHERE id=?",
+                (attempts, token["id"]),
+            )
+            conn.commit()
             raise HTTPException(401, "Incorrect code.")
         if not conn.execute(
             "SELECT 1 FROM users WHERE email=? AND is_active=1", (email,)
         ).fetchone():
-            raise HTTPException(404, "User not found.")
+            raise HTTPException(400, "This code is not valid. Request a new one.")
         conn.execute(
             "UPDATE users SET password_hash=? WHERE email=?",
             (hash_password(body.new_password), email),
@@ -133,7 +172,7 @@ def reset_password(body: ResetPasswordIn) -> dict:
     return {"ok": True, "message": "Password updated. You can sign in now."}
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login", response_model=TokenOut, dependencies=[Depends(_login_limit)])
 def login(response: Response,
           form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
     """Standard OAuth2 password flow. `username` is the user's email.

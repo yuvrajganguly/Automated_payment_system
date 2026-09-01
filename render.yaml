@@ -18,5 +18,8 @@ services:
         value: /tmp/payout.db
       - key: PAYOUT_COOKIE_SECURE
         value: "true"
+      # Demo logins are opt-in; this is the one deployment that wants them.
+      - key: PAYOUT_SEED_DEMO
+        value: "1"
       - key: PYTHONPATH
         value: src

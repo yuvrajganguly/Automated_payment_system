@@ -495,7 +495,7 @@ def dashboard_summary(
 _METRICS = {
     "active_riders", "inactive_riders",
     "active_evs", "inactive_evs", "untouched_evs",
-    "rent_expected", "rent_collected", "rent_missed", "rent_pending",
+    "rent_expected", "rent_collected", "rent_missed", "rent_pending", "rent_partial",
     "arrears_recovered", "manual_rent", "cod", "hold", "payout",
     "total_arrears", "provider_owed",
 }

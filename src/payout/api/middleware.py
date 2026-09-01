@@ -11,7 +11,6 @@ excerpt before persisting.
 
 from __future__ import annotations
 
-import json
 import re
 import time
 
@@ -27,11 +26,19 @@ _SENSITIVE_KEYS = re.compile(
     r'("(?:password|otp|new_password|current_password|access_token)"\s*:\s*)"[^"]*"',
     re.IGNORECASE,
 )
+# Same fields when the body is application/x-www-form-urlencoded (OAuth2 login).
+_SENSITIVE_FORM = re.compile(
+    r"\b(password|otp|new_password|current_password|access_token)=[^&]*", re.IGNORECASE
+)
 _MAX_BODY = 500
+# Bodies on these routes are credentials by definition — never store them, even
+# scrubbed. (The form-encoded login body used to be logged verbatim.)
+_NO_BODY_PREFIXES = ("/api/auth/",)
 
 
 def _scrub(s: str) -> str:
-    return _SENSITIVE_KEYS.sub(r'\1"***"', s)
+    s = _SENSITIVE_KEYS.sub(r'\1"***"', s)
+    return _SENSITIVE_FORM.sub(r"\1=***", s)
 
 
 class AuditLogMiddleware(BaseHTTPMiddleware):
@@ -44,8 +51,11 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
         # Pull body BEFORE handing off so we can capture an excerpt. Starlette
         # caches it so downstream handlers still read normally.
-        body_bytes = await request.body()
         body_excerpt = None
+        if path.startswith(_NO_BODY_PREFIXES):
+            body_bytes = b""
+        else:
+            body_bytes = await request.body()
         if body_bytes:
             try:
                 txt = body_bytes.decode(errors="replace")

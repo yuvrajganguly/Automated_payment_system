@@ -85,12 +85,30 @@ def authenticate(email: str, password: str) -> Optional[dict]:
     return None
 
 
+def _load_user(email: str) -> Optional[dict]:
+    """Current DB state for ``email`` — the JWT is only a session hint.
+
+    A token is valid for 12 hours, so without this lookup deactivating or
+    demoting a user would have no effect until it expired. One primary-key
+    read per request is a price worth paying for that.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT email, role, is_active FROM users WHERE email=?", (email,)
+        ).fetchone()
+    if not row:
+        return None
+    return {"email": row["email"], "role": row["role"], "is_active": bool(row["is_active"])}
+
+
 def get_current_user(
     request: Request,
     header_token: Optional[str] = Depends(oauth2_scheme),
 ) -> dict:
     """Resolve the caller from the JWT, taken from the Authorization header
-    (API/script clients) or the httpOnly auth cookie (browser)."""
+    (API/script clients) or the httpOnly auth cookie (browser), then confirm
+    the account still exists and is active. The role comes from the database,
+    not the token, so a role change takes effect on the next request."""
     token = header_token or request.cookies.get(AUTH_COOKIE_NAME)
     if not token:
         raise HTTPException(
@@ -101,7 +119,14 @@ def get_current_user(
     payload = decode_token(token)
     if not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
-    return {"email": payload["sub"], "role": payload.get("role", "user")}
+    user = _load_user(payload["sub"])
+    if user is None or not user["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is disabled or no longer exists",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return {"email": user["email"], "role": user["role"]}
 
 
 def require_admin(user: dict = Depends(get_current_user)) -> dict:

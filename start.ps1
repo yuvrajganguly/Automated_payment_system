@@ -17,6 +17,10 @@ $venv = "C:\payout_venv\Scripts\Activate.ps1"
 # backend window launched below.
 $env:PAYOUT_DB = "C:\payout_data\payout.db"
 if (-not (Test-Path "C:\payout_data")) { New-Item -ItemType Directory -Path "C:\payout_data" -Force | Out-Null }
+# Local dev only: no demo logins on a real DB, and allow running without a
+# PAYOUT_JWT_SECRET in .env (the app refuses to start otherwise).
+$env:PAYOUT_SEED_DEMO = "0"
+if (-not $env:PAYOUT_JWT_SECRET) { $env:PAYOUT_ALLOW_DEV_SECRET = "1" }
 
 function Free-Port($port) {
     $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
@@ -40,7 +44,7 @@ if ($Build) {
 Write-Host "[start] launching backend  -> http://localhost:8000" -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "& '$venv'; Set-Location '$root'; `$env:PAYOUT_DB='C:\payout_data\payout.db'; uvicorn payout.api.app:app"
+    "& '$venv'; Set-Location '$root'; `$env:PAYOUT_DB='C:\payout_data\payout.db'; `$env:PAYOUT_SEED_DEMO='0'; if (-not `$env:PAYOUT_JWT_SECRET) { `$env:PAYOUT_ALLOW_DEV_SECRET='1' }; uvicorn payout.api.app:app"
 )
 
 # Frontend (Vite dev server) in its own window.

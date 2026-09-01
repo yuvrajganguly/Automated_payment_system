@@ -9,7 +9,7 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-from payout.api.auth import get_current_user
+from payout.api.auth import require_admin
 from payout.api.schemas import RiderOverrideIn
 from payout.domain.engine import CycleOverrides, RiderOverride, process_cycle
 from payout.money import to_paise
@@ -64,7 +64,7 @@ async def run_cycle(
     force: bool = Form(False),
     overrides: str | None = Form(None),
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ) -> dict:
     """Process a company payout file.
 

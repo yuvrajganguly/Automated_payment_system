@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from payout.db.connection import get_connection
+from payout.db.migrations import run_migrations, table_exists
 from payout.db.schema import apply_schema
 from payout.db.seed import seed_all
 
 
-def _migrate(conn) -> None:
-    """Apply small forward-only schema migrations to existing DBs.
+def _legacy_sqlite_migrate(conn) -> None:
+    """The pre-``schema_migrations`` migrator, kept only to bring an old SQLite
+    file up to the ``0001_baseline`` state exactly once. New schema changes go
+    in ``payout.db.migrations.MIGRATIONS`` — never here.
 
-    These use SQLite-only introspection (PRAGMA table_info) and table rebuilds.
-    A fresh Postgres database is already created at the latest schema, so this is
-    a no-op there.
+    Uses SQLite-only introspection (PRAGMA table_info) and table rebuilds; a
+    Postgres database can never predate the baseline, so it is a no-op there.
     """
     from payout.config import DB_URL
     if DB_URL:
@@ -106,18 +108,23 @@ def _migrate(conn) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_maint_ev ON ev_maintenance (ev_id)")
 
 
-def initialize_database() -> None:
-    """Create the schema (if missing) and seed reference data.
+def initialize_database() -> list[str]:
+    """Create the schema (if missing), migrate, and seed reference data.
 
-    Safe to run repeatedly — schema uses ``CREATE TABLE IF NOT EXISTS`` and
-    seeds use ``INSERT OR IGNORE``. Also applies forward-only migrations
-    against pre-existing tables.
+    Safe to run repeatedly — schema uses ``CREATE TABLE IF NOT EXISTS``, seeds
+    use ``INSERT OR IGNORE``, and migrations are tracked in
+    ``schema_migrations`` so each runs exactly once on both backends.
+    Returns the names of the migrations applied in this call.
     """
     with get_connection() as conn:
+        fresh = not table_exists(conn, "person_registry")
         apply_schema(conn)
-        _migrate(conn)
+        applied = run_migrations(
+            conn, fresh_database=fresh, legacy_hook=_legacy_sqlite_migrate
+        )
         seed_all(conn)
         conn.commit()
+    return applied
 
 
 __all__ = ["get_connection", "apply_schema", "seed_all", "initialize_database"]
