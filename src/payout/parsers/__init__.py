@@ -42,15 +42,11 @@ def parse_file(company_name: str, file_bytes: bytes) -> ParseResult:
     return parse_with_config(file_bytes, config)
 
 
-def preview_file(
-    company_name: str, file_bytes: bytes, sample_size: int = 5
-) -> ParsePreview:
+def preview_file(company_name: str, file_bytes: bytes, sample_size: int = 5) -> ParsePreview:
     """Summarise what a file *would* import, without writing anything."""
     result = parse_file(company_name, file_bytes)
     total_payout = sum(r.payout for r in result.records)
-    total_cod = sum(r.cod_pending for r in result.records) + sum(
-        c.amount for c in result.cod_lines
-    )
+    total_cod = sum(r.cod_pending for r in result.records) + sum(c.amount for c in result.cod_lines)
     sample = [
         {"rider_id": r.rider_id, "payout": r.payout, "cod_pending": r.cod_pending}
         for r in result.records[:sample_size]

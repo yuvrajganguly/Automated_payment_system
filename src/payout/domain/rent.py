@@ -29,6 +29,7 @@ from payout.config import STANDARD_CYCLE_DAYS
 @dataclass
 class AssignmentLeg:
     """One assignment's contribution to a cycle's rent."""
+
     assignment_id: int
     ev_id: str
     provider: str
@@ -37,8 +38,8 @@ class AssignmentLeg:
     handover_date: date | None
     returned_date: date | None
     rent_charged_through: date | None
-    days: int            # chargeable after maintenance & waiver
-    base_days: int       # before maintenance / waiver
+    days: int  # chargeable after maintenance & waiver
+    base_days: int  # before maintenance / waiver
     maintenance_days: int
     rent: float
     rent_from: date | None
@@ -48,13 +49,13 @@ class AssignmentLeg:
 @dataclass
 class RentInfo:
     has_ev: bool
-    ev_id: str | None             # display: open assignment if any, else most recent returned
+    ev_id: str | None  # display: open assignment if any, else most recent returned
     provider: str | None
     model: str | None
     weekly_rate: float
     handover_date: date | None
-    days: int                     # total across legs
-    rent: float                   # total across legs
+    days: int  # total across legs
+    rent: float  # total across legs
     base_days: int = 0
     maintenance_days: int = 0
     waived_days: int = 0
@@ -63,8 +64,9 @@ class RentInfo:
     legs: list[AssignmentLeg] = field(default_factory=list)
 
 
-def chargeable_window(cycle_start, cycle_end, handover_date,
-                       charged_through=None, returned_date=None):
+def chargeable_window(
+    cycle_start, cycle_end, handover_date, charged_through=None, returned_date=None
+):
     """Inclusive ``(start, end)`` chargeable range for a single assignment, or
     ``None`` if zero days.
 
@@ -104,16 +106,19 @@ def chargeable_window(cycle_start, cycle_end, handover_date,
     return (start, end)
 
 
-def chargeable_days(cycle_start, cycle_end, handover_date,
-                     charged_through=None, returned_date=None):
-    window = chargeable_window(cycle_start, cycle_end, handover_date,
-                                charged_through, returned_date)
+def chargeable_days(
+    cycle_start, cycle_end, handover_date, charged_through=None, returned_date=None
+):
+    window = chargeable_window(
+        cycle_start, cycle_end, handover_date, charged_through, returned_date
+    )
     return 0 if window is None else (window[1] - window[0]).days + 1
 
 
 def rent_for_days(weekly_rate, days):
     """Rent for ``days`` of a weekly rate, in integer paise (rounded once)."""
     from payout.money import prorate
+
     return prorate(int(weekly_rate), days, STANDARD_CYCLE_DAYS)
 
 
@@ -130,7 +135,7 @@ def maintenance_days_in_window(conn, ev_id, win_start, win_end):
     blocked = set()
     for r in rows:
         lo = max(date.fromisoformat(r["from_date"]), win_start)
-        if r["to_date"]:
+        if r["to_date"]:  # noqa: SIM108
             hi = min(date.fromisoformat(r["to_date"]), win_end)
         else:
             hi = win_end
@@ -145,8 +150,9 @@ def _parse_date(s):
     return date.fromisoformat(s) if s else None
 
 
-def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
-                 waive_days=0, waive_all=False, rent_override=None):
+def resolve_rent(
+    conn, person_id, cycle_start, cycle_end, *, waive_days=0, waive_all=False, rent_override=None
+):
     """Sum rent across every assignment that overlapped the cycle.
 
     Overlap rule: handover_date <= cycle_end AND
@@ -172,8 +178,11 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
           AND (a.handover_date IS NULL OR a.handover_date <= ?)
         ORDER BY COALESCE(a.handover_date, a.created_at) ASC
         """,
-        (person_id, cycle_start.isoformat() if hasattr(cycle_start, "isoformat") else str(cycle_start),
-         cycle_end.isoformat() if hasattr(cycle_end, "isoformat") else str(cycle_end)),
+        (
+            person_id,
+            cycle_start.isoformat() if hasattr(cycle_start, "isoformat") else str(cycle_start),
+            cycle_end.isoformat() if hasattr(cycle_end, "isoformat") else str(cycle_end),
+        ),
     ).fetchall()
 
     if not rows:
@@ -193,11 +202,18 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
             rfrom, rthrough = win
             base = (rthrough - rfrom).days + 1
             maint = maintenance_days_in_window(conn, r["ev_id"], rfrom, rthrough)
-        legs_data.append({
-            "row": r, "hod": hod, "ret": ret, "charged": charged,
-            "rent_from": rfrom, "rent_through": rthrough,
-            "base": base, "maint": maint,
-        })
+        legs_data.append(
+            {
+                "row": r,
+                "hod": hod,
+                "ret": ret,
+                "charged": charged,
+                "rent_from": rfrom,
+                "rent_through": rthrough,
+                "base": base,
+                "maint": maint,
+            }
+        )
 
     # Apply the waive_days budget across legs (largest leg first).
     waive_left = max(0, int(waive_days or 0))
@@ -227,14 +243,20 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
         eff_days = max(0, leg["base"] - leg["maint"] - leg["waived"])
         leg_rent = rent_for_days(r["weekly_rate"], eff_days)
         built = AssignmentLeg(
-            assignment_id=r["assignment_id"], ev_id=r["ev_id"],
-            provider=r["provider"], model=r["model_name"],
+            assignment_id=r["assignment_id"],
+            ev_id=r["ev_id"],
+            provider=r["provider"],
+            model=r["model_name"],
             weekly_rate=int(r["weekly_rate"]),
-            handover_date=leg["hod"], returned_date=leg["ret"],
+            handover_date=leg["hod"],
+            returned_date=leg["ret"],
             rent_charged_through=leg["charged"],
-            days=eff_days, base_days=leg["base"],
-            maintenance_days=leg["maint"], rent=leg_rent,
-            rent_from=leg["rent_from"], rent_through=leg["rent_through"],
+            days=eff_days,
+            base_days=leg["base"],
+            maintenance_days=leg["maint"],
+            rent=leg_rent,
+            rent_from=leg["rent_from"],
+            rent_through=leg["rent_through"],
         )
         built_legs.append(built)
         total_days += eff_days
@@ -243,17 +265,25 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
         total_waived += leg["waived"]
         total_rent += leg_rent
         if leg["rent_from"]:
-            rent_from_overall = (leg["rent_from"] if rent_from_overall is None
-                                 else min(rent_from_overall, leg["rent_from"]))
+            rent_from_overall = (
+                leg["rent_from"]
+                if rent_from_overall is None
+                else min(rent_from_overall, leg["rent_from"])
+            )
         if leg["rent_through"]:
-            rent_through_overall = (leg["rent_through"] if rent_through_overall is None
-                                    else max(rent_through_overall, leg["rent_through"]))
+            rent_through_overall = (
+                leg["rent_through"]
+                if rent_through_overall is None
+                else max(rent_through_overall, leg["rent_through"])
+            )
         if leg["ret"] is None and open_leg is None:
             open_leg = built
-        elif leg["ret"] is not None:
-            if (most_recent_returned is None
-                    or (leg["ret"] and most_recent_returned.returned_date
-                        and leg["ret"] > most_recent_returned.returned_date)):
+        elif leg["ret"] is not None:  # noqa: SIM102
+            if most_recent_returned is None or (
+                leg["ret"]
+                and most_recent_returned.returned_date
+                and leg["ret"] > most_recent_returned.returned_date
+            ):
                 most_recent_returned = built
 
     # Overrides apply to the TOTAL.
@@ -265,11 +295,15 @@ def resolve_rent(conn, person_id, cycle_start, cycle_end, *,
     display = open_leg or most_recent_returned or built_legs[0]
     return RentInfo(
         has_ev=True,
-        ev_id=display.ev_id, provider=display.provider, model=display.model,
+        ev_id=display.ev_id,
+        provider=display.provider,
+        model=display.model,
         weekly_rate=display.weekly_rate,
         handover_date=display.handover_date,
-        days=total_days, rent=total_rent,
-        base_days=total_base, maintenance_days=total_maint,
+        days=total_days,
+        rent=total_rent,
+        base_days=total_base,
+        maintenance_days=total_maint,
         waived_days=total_waived,
         rent_from=rent_from_overall,
         charged_through=rent_through_overall,
@@ -337,12 +371,12 @@ def advance_rent_charged_through(conn, person_id, through_date, *, assignment_id
         ret = _parse_date(r["returned_date"])
         cur = _parse_date(r["rent_charged_through"])
         if hod is not None and hod > td:
-            continue                      # not held yet in this window
+            continue  # not held yet in this window
         new = td
         if ret is not None:
             new = min(new, ret - timedelta(days=1))
         if cur is not None and cur >= new:
-            continue                      # never roll a meter backwards
+            continue  # never roll a meter backwards
         conn.execute(
             "UPDATE ev_assignments SET rent_charged_through=? WHERE assignment_id=?",
             (new.isoformat(), r["assignment_id"]),

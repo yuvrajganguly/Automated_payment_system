@@ -97,9 +97,7 @@ def select_sheet(xl: pd.ExcelFile, selector: str | None) -> str:
     raise ValueError(f"Sheet '{selector}' not found. Sheets: {names}")
 
 
-def read_table(
-    xl: pd.ExcelFile, sheet: str, anchor_candidates, max_scan: int = 15
-) -> pd.DataFrame:
+def read_table(xl: pd.ExcelFile, sheet: str, anchor_candidates, max_scan: int = 15) -> pd.DataFrame:
     """Read a sheet, auto-detecting the header row.
 
     Some files put a title/banner row above the real headers. We scan the first
@@ -117,6 +115,4 @@ def read_table(
         if anchors & cells:
             header_row = i
             break
-    return normalise_columns(
-        xl.parse(sheet, header=header_row, dtype=str, keep_default_na=False)
-    )
+    return normalise_columns(xl.parse(sheet, header=header_row, dtype=str, keep_default_na=False))

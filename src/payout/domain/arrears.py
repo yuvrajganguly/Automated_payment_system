@@ -19,21 +19,25 @@ from datetime import date
 @dataclass
 class Settlement:
     rent_paid: float
-    rent_short: float           # current rent the payout could not cover -> dues
-    cod_paid: float             # COD recovered this cycle (both carryover + new)
-    cod_short: float            # COD-pending NOT covered this cycle -> stays in COD-arrears
+    rent_short: float  # current rent the payout could not cover -> dues
+    cod_paid: float  # COD recovered this cycle (both carryover + new)
+    cod_short: float  # COD-pending NOT covered this cycle -> stays in COD-arrears
     arrears_recovered: float
     dues_cleared: float
-    released: float             # amount actually paid out to the rider
-    new_balance: float          # new general balance (<= 0; negative = dues)
-    new_arrears: float          # new EV-rent arrears outstanding
+    released: float  # amount actually paid out to the rider
+    new_balance: float  # new general balance (<= 0; negative = dues)
+    new_arrears: float  # new EV-rent arrears outstanding
     cod_carry_recovered: float = 0.0
     new_cod_outstanding: float = 0.0
 
 
 def apply_settlement(
-    payout: float, rent: float, prev_balance: float, arrears_outstanding: float,
-    cod_due: float = 0.0, cod_outstanding: float = 0.0,
+    payout: float,
+    rent: float,
+    prev_balance: float,
+    arrears_outstanding: float,
+    cod_due: float = 0.0,
+    cod_outstanding: float = 0.0,
 ) -> Settlement:
     """Net a payout against rent, EV arrears, then dues.
 
@@ -60,12 +64,15 @@ def apply_settlement(
     pool = payout + max(0.0, prev_balance)
     general_dues = max(0.0, -prev_balance)
 
-    rent_paid = min(pool, rent); pool -= rent_paid
+    rent_paid = min(pool, rent)
+    pool -= rent_paid
     rent_short = rent - rent_paid
 
-    arrears_recovered = min(pool, arrears_outstanding); pool -= arrears_recovered
+    arrears_recovered = min(pool, arrears_outstanding)
+    pool -= arrears_recovered
 
-    dues_cleared = min(pool, general_dues); pool -= dues_cleared
+    dues_cleared = min(pool, general_dues)
+    pool -= dues_cleared
 
     released = pool
     new_general_dues = (general_dues - dues_cleared) + rent_short
@@ -104,7 +111,9 @@ def _ensure_arrears(conn, person_id):
 
 
 def _gen_balance(conn, person_id):
-    row = conn.execute("SELECT current_balance FROM balances WHERE person_id=?", (person_id,)).fetchone()
+    row = conn.execute(
+        "SELECT current_balance FROM balances WHERE person_id=?", (person_id,)
+    ).fetchone()
     return row["current_balance"] if row else 0.0
 
 
@@ -113,8 +122,17 @@ def _iso(d):
 
 
 def record_missed_rent(
-    conn, person_id, amount, cycle_start, cycle_end, *,
-    rider_id="", company="", created_by="engine", days=None, remarks=None,
+    conn,
+    person_id,
+    amount,
+    cycle_start,
+    cycle_end,
+    *,
+    rider_id="",
+    company="",
+    created_by="engine",
+    days=None,
+    remarks=None,
 ):
     """Rider absent from payout: add EV rent to arrears and log RENT_MISSED."""
     if amount <= 0:
@@ -129,15 +147,31 @@ def record_missed_rent(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, days, remarks, created_by) "
         "VALUES (?,?,?,?,?,'RENT_MISSED',?,?,?,?,?)",
-        (person_id, rider_id, company, _iso(cycle_start), _iso(cycle_end),
-         -amount, _gen_balance(conn, person_id), days,
-         remarks or "EV rent missed (absent from payout)", created_by),
+        (
+            person_id,
+            rider_id,
+            company,
+            _iso(cycle_start),
+            _iso(cycle_end),
+            -amount,
+            _gen_balance(conn, person_id),
+            days,
+            remarks or "EV rent missed (absent from payout)",
+            created_by,
+        ),
     )
 
 
 def record_recovery(
-    conn, person_id, amount, cycle_start, cycle_end, *,
-    rider_id="", company="", created_by="engine",
+    conn,
+    person_id,
+    amount,
+    cycle_start,
+    cycle_end,
+    *,
+    rider_id="",
+    company="",
+    created_by="engine",
 ):
     """Claw arrears back from a payout: reduce arrears and log RENT_RECOVERED."""
     if amount <= 0:
@@ -152,8 +186,17 @@ def record_recovery(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, remarks, created_by) "
         "VALUES (?,?,?,?,?,'RENT_RECOVERED',?,?,?,?)",
-        (person_id, rider_id, company, _iso(cycle_start), _iso(cycle_end),
-         amount, _gen_balance(conn, person_id), "EV arrears recovered", created_by),
+        (
+            person_id,
+            rider_id,
+            company,
+            _iso(cycle_start),
+            _iso(cycle_end),
+            amount,
+            _gen_balance(conn, person_id),
+            "EV arrears recovered",
+            created_by,
+        ),
     )
     return amount
 
@@ -161,8 +204,8 @@ def record_recovery(
 def get_cod_arrears(conn, person_id):
     """Return (cod_missed_total, cod_recovered_total, cod_outstanding)."""
     row = conn.execute(
-        "SELECT cod_missed, cod_recovered, cod_outstanding FROM ev_arrears "
-        "WHERE person_id=?", (person_id,),
+        "SELECT cod_missed, cod_recovered, cod_outstanding FROM ev_arrears WHERE person_id=?",
+        (person_id,),
     ).fetchone()
     if not row:
         return (0.0, 0.0, 0.0)
@@ -170,8 +213,15 @@ def get_cod_arrears(conn, person_id):
 
 
 def record_cod_missed(
-    conn, person_id, amount, cycle_start, cycle_end, *,
-    rider_id="", company="", created_by="engine",
+    conn,
+    person_id,
+    amount,
+    cycle_start,
+    cycle_end,
+    *,
+    rider_id="",
+    company="",
+    created_by="engine",
 ):
     """COD-pending the rider couldn't clear this cycle → COD-arrears tab."""
     if amount <= 0:
@@ -186,15 +236,30 @@ def record_cod_missed(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, remarks, created_by) "
         "VALUES (?,?,?,?,?,'COD_MISSED',?,?,?,?)",
-        (person_id, rider_id, company, _iso(cycle_start), _iso(cycle_end),
-         -amount, _gen_balance(conn, person_id),
-         "COD pending (rolled into COD-arrears)", created_by),
+        (
+            person_id,
+            rider_id,
+            company,
+            _iso(cycle_start),
+            _iso(cycle_end),
+            -amount,
+            _gen_balance(conn, person_id),
+            "COD pending (rolled into COD-arrears)",
+            created_by,
+        ),
     )
 
 
 def record_cod_recovery(
-    conn, person_id, amount, cycle_start, cycle_end, *,
-    rider_id="", company="", created_by="engine",
+    conn,
+    person_id,
+    amount,
+    cycle_start,
+    cycle_end,
+    *,
+    rider_id="",
+    company="",
+    created_by="engine",
 ):
     """Claw COD-arrears back from a payout: reduce cod_outstanding."""
     if amount <= 0:
@@ -209,7 +274,16 @@ def record_cod_recovery(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, remarks, created_by) "
         "VALUES (?,?,?,?,?,'COD_RECOVERED',?,?,?,?)",
-        (person_id, rider_id, company, _iso(cycle_start), _iso(cycle_end),
-         amount, _gen_balance(conn, person_id), "COD arrears recovered", created_by),
+        (
+            person_id,
+            rider_id,
+            company,
+            _iso(cycle_start),
+            _iso(cycle_end),
+            amount,
+            _gen_balance(conn, person_id),
+            "COD arrears recovered",
+            created_by,
+        ),
     )
     return amount

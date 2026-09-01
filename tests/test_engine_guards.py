@@ -14,6 +14,7 @@ Ledger:
   * manual adjustments for a person with no balances row are not lost;
   * a cycle cannot be committed twice unless forced; forcing replaces holds.
 """
+
 from __future__ import annotations
 
 import io
@@ -28,7 +29,7 @@ from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from tests.conftest import assign, make_ev, make_person, make_rider
 
 RAFT_WEEK = 125000  # Raft Regular, paise
-RAFT_DAY = 17857    # 125000/7 rounded half-up
+RAFT_DAY = 17857  # 125000/7 rounded half-up
 
 
 def _file(rows, headers=("rider_id", "net_pay")):
@@ -77,8 +78,8 @@ def test_meter_ignores_ev_handed_over_after_the_cycle(db):
     advance_rent_charged_through(db, pid, ce, assignment_ids={L.assignment_id for L in info.legs})
     db.commit()
 
-    assert _meter(db, a) == "2026-06-09"   # capped at return day - 1
-    assert _meter(db, b) is None            # untouched: not held yet (was set to 06-14)
+    assert _meter(db, a) == "2026-06-09"  # capped at return day - 1
+    assert _meter(db, b) is None  # untouched: not held yet (was set to 06-14)
 
     # Next cycle: EV-B held from 06-21 (handover day free) -> exactly 1 day, not 7.
     nxt = resolve_rent(db, pid, date(2026, 6, 15), date(2026, 6, 21))
@@ -107,7 +108,7 @@ def test_returned_ev_meter_stops_at_cycle_end(db):
     db.commit()
     advance_rent_charged_through(db, pid, date(2026, 6, 7))
     db.commit()
-    assert _meter(db, a) == "2026-06-07"    # was 06-09: 06-08 and 06-09 lost forever
+    assert _meter(db, a) == "2026-06-07"  # was 06-09: 06-08 and 06-09 lost forever
     trailing = resolve_rent(db, pid, date(2026, 6, 8), date(2026, 6, 14))
     assert trailing.days == 2 and trailing.rent == 2 * RAFT_DAY
 
@@ -133,8 +134,13 @@ def test_engine_advances_only_the_legs_it_billed(db):
 def test_duplicate_rider_rows_are_rejected(db):
     _raft_rider(db)
     with pytest.raises(ValueError, match="more than once"):
-        process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7),
-                      _file([("P1", 3000), ("P1", 3000)]), commit=False)
+        process_cycle(
+            "Blitz",
+            date(2026, 6, 1),
+            date(2026, 6, 7),
+            _file([("P1", 3000), ("P1", 3000)]),
+            commit=False,
+        )
     assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
 
 
@@ -152,19 +158,26 @@ def test_unreadable_payout_keeps_rider_present_and_blocks_commit(db):
 
     with pytest.raises(UnreadablePayouts):
         process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
-    assert db.execute(
-        "SELECT COUNT(*) FROM transactions WHERE event_type='RENT_MISSED'"
-    ).fetchone()[0] == 0
-    assert db.execute("SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)).fetchone()[0] == 0
+    assert (
+        db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='RENT_MISSED'").fetchone()[0]
+        == 0
+    )
+    assert (
+        db.execute("SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)).fetchone()[0]
+        == 0
+    )
 
 
 def test_numeric_rider_ids_lose_the_excel_float_suffix(db):
     pid = make_person(db, "N", balance=0)
     make_rider(db, pid, "8906377190", "Blitz", "N")
     db.commit()
-    wb = Workbook(); ws = wb.active
-    ws.append(["rider_id", "net_pay"]); ws.append([8906377190, 500])   # numeric cell
-    buf = io.BytesIO(); wb.save(buf)
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["rider_id", "net_pay"])
+    ws.append([8906377190, 500])  # numeric cell
+    buf = io.BytesIO()
+    wb.save(buf)
     r = process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), buf.getvalue(), commit=False)
     assert r.unknown_ids == [] and len(r.pay_rows) == 1
 
@@ -173,16 +186,17 @@ def test_numeric_rider_ids_lose_the_excel_float_suffix(db):
 
 
 def test_adjustment_creates_the_balance_row(db):
-    pid = make_person(db, "New rider")            # no balances row, like onboarding
+    pid = make_person(db, "New rider")  # no balances row, like onboarding
     db.commit()
     new_bal = post_adjustment(db, pid, -50000, "Advance given", "tester")
     db.commit()
     assert new_bal == -50000
-    assert db.execute(
-        "SELECT current_balance FROM balances WHERE person_id=?", (pid,)
-    ).fetchone()[0] == -50000
+    assert (
+        db.execute("SELECT current_balance FROM balances WHERE person_id=?", (pid,)).fetchone()[0]
+        == -50000
+    )
     txn = db.execute(
-        "SELECT amount, balance_after FROM transactions WHERE person_id=? AND event_type='ADJUSTMENT'",
+        "SELECT amount, balance_after FROM transactions WHERE person_id=? AND event_type='ADJUSTMENT'",  # noqa: E501
         (pid,),
     ).fetchone()
     assert (txn[0], txn[1]) == (-50000, -50000)
@@ -194,9 +208,9 @@ def test_second_commit_of_same_cycle_is_refused_unless_forced(db):
     process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
     with pytest.raises(CycleAlreadyCommitted):
         process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
-    assert db.execute(
-        "SELECT COUNT(*) FROM transactions WHERE event_type='PAYOUT'"
-    ).fetchone()[0] == 1
+    assert (
+        db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='PAYOUT'").fetchone()[0] == 1
+    )
     # A dry run of an already-committed cycle is still allowed.
     process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=False)
     # force re-runs (documented: appends ledger rows again)
@@ -223,8 +237,9 @@ def test_forced_rerun_replaces_cod_holds_instead_of_doubling(db):
 def test_nykaa_file_links_blitz_rider_ids_automatically(db):
     pid = _raft_rider(db, rid="B77", company="Blitz")
     db.commit()
-    r = process_cycle("Nykaa", date(2026, 6, 1), date(2026, 6, 7), _file([("B77", 1500)]),
-                      commit=True)
+    r = process_cycle(
+        "Nykaa", date(2026, 6, 1), date(2026, 6, 7), _file([("B77", 1500)]), commit=True
+    )
     assert r.unknown_ids == []
     assert r.auto_linked == [
         {"rider_id": "B77", "person_id": pid, "name": "P", "linked_from": "Blitz"}
@@ -237,6 +252,7 @@ def test_nykaa_file_links_blitz_rider_ids_automatically(db):
 
 
 def test_nykaa_id_unknown_at_blitz_is_still_unknown(db):
-    r = process_cycle("Nykaa", date(2026, 6, 1), date(2026, 6, 7), _file([("ZZ9", 1500)]),
-                      commit=False)
+    r = process_cycle(
+        "Nykaa", date(2026, 6, 1), date(2026, 6, 7), _file([("ZZ9", 1500)]), commit=False
+    )
     assert r.unknown_ids == ["ZZ9"] and r.auto_linked == []

@@ -6,6 +6,7 @@ Three databases must all end up identical:
    column set → legacy hook + every migration runs),
 3. one already migrated (nothing to do).
 """
+
 from __future__ import annotations
 
 from payout.db import get_connection, initialize_database
@@ -42,7 +43,7 @@ def test_pre_runner_database_gets_every_migration():
     old_schema = SCHEMA
     # Strip the newer columns out of the DDL so the tables look like the past.
     old_schema = old_schema.replace(
-        "    attempts   INTEGER NOT NULL DEFAULT 0, -- wrong guesses; locked after MAX_OTP_ATTEMPTS\n",
+        "    attempts   INTEGER NOT NULL DEFAULT 0, -- wrong guesses; locked after MAX_OTP_ATTEMPTS\n",  # noqa: E501
         "",
     )
     old_schema = old_schema.replace(

@@ -33,9 +33,7 @@ if _secret_is_weak and not ALLOW_DEV_SECRET:
     )
 if _secret_is_weak and _truthy("PAYOUT_COOKIE_SECURE"):
     # Never allow the escape hatch on an HTTPS (production-looking) deployment.
-    raise RuntimeError(
-        "PAYOUT_ALLOW_DEV_SECRET cannot be combined with PAYOUT_COOKIE_SECURE=true."
-    )
+    raise RuntimeError("PAYOUT_ALLOW_DEV_SECRET cannot be combined with PAYOUT_COOKIE_SECURE=true.")
 
 # Demo accounts (admin@demo.com / Demo-1234) and the synthetic fleet exist for
 # the public demo only. Opt-IN: a real deployment that forgets to set this gets
@@ -43,10 +41,12 @@ if _secret_is_weak and _truthy("PAYOUT_COOKIE_SECURE"):
 DEMO_MODE: bool = _truthy("PAYOUT_SEED_DEMO")
 
 CORS_ORIGINS: list[str] = [
-    o.strip() for o in os.environ.get(
+    o.strip()
+    for o in os.environ.get(
         "PAYOUT_CORS_ORIGINS",
         "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173",
-    ).split(",") if o.strip()
+    ).split(",")
+    if o.strip()
 ]
 
 # ── Auth cookie ──────────────────────────────────────────────────────────────
@@ -58,7 +58,9 @@ AUTH_COOKIE_NAME: str = "payout_token"
 # Secure cookies require HTTPS; disable on localhost http dev. Set
 # PAYOUT_COOKIE_SECURE=true in production (see render.yaml).
 COOKIE_SECURE: bool = os.environ.get("PAYOUT_COOKIE_SECURE", "false").lower() in (
-    "1", "true", "yes",
+    "1",
+    "true",
+    "yes",
 )
 COOKIE_SAMESITE: str = "lax"
 COOKIE_MAX_AGE: int = int(ACCESS_TOKEN_EXPIRES.total_seconds())

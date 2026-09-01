@@ -16,28 +16,26 @@ from __future__ import annotations
 
 import io
 import re
-from typing import Optional
 
 import pdfplumber
-
 
 # Header columns observed in real reports — we match by substring so minor
 # variations don't break parsing.
 _HEADERS = {
-    "mode":      ["pymt_mode", "mode"],
+    "mode": ["pymt_mode", "mode"],
     "bene_name": ["beneficia ry name", "beneficiary name"],
-    "bene_acc":  ["beneficia ry", "beneficiary account no"],
-    "ifsc":      ["bene_ifs c_code", "ifsc"],
-    "amount":    ["amount"],
-    "remark":    ["remark"],
-    "date":      ["pymt_da te", "pymt_date", "payment date"],
-    "status":    ["status"],
-    "ref":       ["custome r ref no", "customer ref no"],
-    "utr":       ["utr no", "utr"],
+    "bene_acc": ["beneficia ry", "beneficiary account no"],
+    "ifsc": ["bene_ifs c_code", "ifsc"],
+    "amount": ["amount"],
+    "remark": ["remark"],
+    "date": ["pymt_da te", "pymt_date", "payment date"],
+    "status": ["status"],
+    "ref": ["custome r ref no", "customer ref no"],
+    "utr": ["utr no", "utr"],
 }
 
 
-def _normalise(s: Optional[str]) -> str:
+def _normalise(s: str | None) -> str:
     return (s or "").replace("\n", " ").strip()
 
 
@@ -68,7 +66,7 @@ def _column_indexes(header_row: list[str]) -> dict[str, int]:
     return out
 
 
-def _stitch(rows: list[list[Optional[str]]]) -> list[list[str]]:
+def _stitch(rows: list[list[str | None]]) -> list[list[str]]:
     """Merge continuation rows (those whose first non-blank column is far
     right of left) into the previous row. pdfplumber emits one row per
     physical line so a wrapped cell becomes its own row with mostly empty
@@ -77,7 +75,8 @@ def _stitch(rows: list[list[Optional[str]]]) -> list[list[str]]:
     for raw in rows:
         cells = [_normalise(c) for c in raw]
         if not stitched:
-            stitched.append(cells); continue
+            stitched.append(cells)
+            continue
         # A continuation row has very few non-empty cells AND those cells
         # are typically in the wider columns (name, account). Heuristic:
         # if more than half the cells are empty, treat as continuation.
@@ -121,8 +120,11 @@ def parse_bank_mis(pdf_bytes: bytes) -> list[dict]:
                     continue
                 # Try to detect a header row on this page.
                 hdr_idx = next(
-                    (i for i, row in enumerate(table)
-                     if any("amount" in (_normalise(c) or "").lower() for c in row)),
+                    (
+                        i
+                        for i, row in enumerate(table)
+                        if any("amount" in (_normalise(c) or "").lower() for c in row)
+                    ),
                     None,
                 )
                 cols: dict[str, int] | None = None
@@ -150,25 +152,29 @@ def parse_bank_mis(pdf_bytes: bytes) -> list[dict]:
                     data_start = 0
                 data_rows = _stitch(table[data_start:])
                 for row in data_rows:
+
                     def cell(key):
-                        i = cols.get(key)
-                        return row[i] if i is not None and i < len(row) else ""
+                        i = cols.get(key)  # noqa: B023
+                        return row[i] if i is not None and i < len(row) else ""  # noqa: B023
+
                     name = cell("bene_name")
                     acct = cell("bene_acc").replace(" ", "")
                     if not name and not acct:
                         continue
                     line_no += 1
-                    out.append({
-                        "line_no": line_no,
-                        "pymt_mode": cell("mode"),
-                        "bene_name": name,
-                        "bene_account_no": acct,
-                        "bene_ifsc": cell("ifsc").replace(" ", ""),
-                        "amount": _to_amount(cell("amount")),
-                        "remark": cell("remark"),
-                        "pymt_date": cell("date"),
-                        "bank_status": cell("status"),
-                        "customer_ref": cell("ref"),
-                        "utr": cell("utr"),
-                    })
+                    out.append(
+                        {
+                            "line_no": line_no,
+                            "pymt_mode": cell("mode"),
+                            "bene_name": name,
+                            "bene_account_no": acct,
+                            "bene_ifsc": cell("ifsc").replace(" ", ""),
+                            "amount": _to_amount(cell("amount")),
+                            "remark": cell("remark"),
+                            "pymt_date": cell("date"),
+                            "bank_status": cell("status"),
+                            "customer_ref": cell("ref"),
+                            "utr": cell("utr"),
+                        }
+                    )
     return out

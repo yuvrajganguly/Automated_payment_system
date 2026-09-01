@@ -90,8 +90,16 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
                     "INSERT INTO audit_log "
                     "(email, role, method, path, status_code, duration_ms, "
                     " body_excerpt, ip) VALUES (?,?,?,?,?,?,?,?)",
-                    (email, role, method, path, response.status_code,
-                     duration_ms, body_excerpt, ip),
+                    (
+                        email,
+                        role,
+                        method,
+                        path,
+                        response.status_code,
+                        duration_ms,
+                        body_excerpt,
+                        ip,
+                    ),
                 )
                 conn.commit()
         except Exception:
@@ -118,13 +126,23 @@ class RupeeizeMiddleware(BaseHTTPMiddleware):
         body = b"".join([chunk async for chunk in response.body_iterator])
         try:
             import json as _json
+
             from payout.money import rupeeize
+
             data = rupeeize(_json.loads(body))
             payload = _json.dumps(data).encode("utf-8")
         except Exception:
-            return Response(content=body, status_code=response.status_code,
-                            headers=dict(response.headers), media_type=ctype)
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=ctype,
+            )
         headers = dict(response.headers)
         headers.pop("content-length", None)
-        return Response(content=payload, status_code=response.status_code,
-                        headers=headers, media_type="application/json")
+        return Response(
+            content=payload,
+            status_code=response.status_code,
+            headers=headers,
+            media_type="application/json",
+        )

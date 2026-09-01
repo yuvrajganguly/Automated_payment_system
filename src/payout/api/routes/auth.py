@@ -89,11 +89,12 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
             # Invalidate any earlier unused tokens for this email.
             conn.execute(
                 "UPDATE password_reset_tokens SET used_at=datetime('now') "
-                "WHERE email=? AND used_at IS NULL", (email,),
+                "WHERE email=? AND used_at IS NULL",
+                (email,),
             )
             conn.execute(
-                "INSERT INTO password_reset_tokens (email, otp_hash, expires_at) "
-                "VALUES (?,?,?)", (email, _hash_otp(otp), expires_at),
+                "INSERT INTO password_reset_tokens (email, otp_hash, expires_at) VALUES (?,?,?)",
+                (email, _hash_otp(otp), expires_at),
             )
             conn.commit()
             body_text = (
@@ -120,7 +121,8 @@ def reset_password(body: ResetPasswordIn) -> dict:
         token = conn.execute(
             "SELECT id, otp_hash, expires_at, attempts FROM password_reset_tokens "
             "WHERE email=? AND used_at IS NULL "
-            "ORDER BY id DESC LIMIT 1", (email,),
+            "ORDER BY id DESC LIMIT 1",
+            (email,),
         ).fetchone()
         if not token:
             # One message for "no request", "expired" and "user missing" so the
@@ -144,7 +146,8 @@ def reset_password(body: ResetPasswordIn) -> dict:
                 # Burn the code: a wrong guess used to leave it live for more.
                 conn.execute(
                     "UPDATE password_reset_tokens SET attempts=?, used_at=datetime('now') "
-                    "WHERE id=?", (attempts, token["id"]),
+                    "WHERE id=?",
+                    (attempts, token["id"]),
                 )
                 conn.commit()
                 raise HTTPException(
@@ -173,8 +176,7 @@ def reset_password(body: ResetPasswordIn) -> dict:
 
 
 @router.post("/login", response_model=TokenOut, dependencies=[Depends(_login_limit)])
-def login(response: Response,
-          form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
+def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
     """Standard OAuth2 password flow. `username` is the user's email.
 
     Sets the JWT as an httpOnly cookie for browser clients and also returns it
@@ -204,14 +206,15 @@ def me(user: dict = Depends(get_current_user)) -> UserOut:
 
 
 @router.post("/change-password")
-def change_password(body: ChangePasswordIn,
-                    user: dict = Depends(get_current_user)) -> dict:
+def change_password(body: ChangePasswordIn, user: dict = Depends(get_current_user)) -> dict:
     if len(body.new_password) < 8:
         raise HTTPException(400, "New password must be at least 8 characters")
     if not authenticate(user["email"], body.current_password):
         raise HTTPException(401, "Current password is incorrect")
     with get_connection() as conn:
-        conn.execute("UPDATE users SET password_hash=? WHERE email=?",
-                     (hash_password(body.new_password), user["email"]))
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE email=?",
+            (hash_password(body.new_password), user["email"]),
+        )
         conn.commit()
     return {"ok": True}

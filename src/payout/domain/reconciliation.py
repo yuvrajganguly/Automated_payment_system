@@ -70,18 +70,20 @@ def provider_rider_reconciliation(
         expected = round(float(r["expected"] or 0), 2)
         collected = round(float(r["collected"] or 0), 2)
         missed = round(float(r["missed"] or 0), 2)
-        out_rows.append({
-            "person_id": r["person_id"],
-            "name": r["name"],
-            "ev_ids": r["ev_ids"] or "",
-            "expected": expected,
-            "collected": collected,
-            "missed": missed,                       # still outstanding for the window
-            "recovered": round(float(r["recovered"] or 0), 2),
-            "pending": round(float(r["pending"] or 0), 2),
-            "collection_pct": round(100.0 * collected / expected, 1) if expected else 0.0,
-            "settled_via": r["settled_via"] or "",
-        })
+        out_rows.append(
+            {
+                "person_id": r["person_id"],
+                "name": r["name"],
+                "ev_ids": r["ev_ids"] or "",
+                "expected": expected,
+                "collected": collected,
+                "missed": missed,  # still outstanding for the window
+                "recovered": round(float(r["recovered"] or 0), 2),
+                "pending": round(float(r["pending"] or 0), 2),
+                "collection_pct": round(100.0 * collected / expected, 1) if expected else 0.0,
+                "settled_via": r["settled_via"] or "",
+            }
+        )
 
     def s(key: str) -> float:
         return round(sum(x[key] for x in out_rows), 2)
@@ -96,5 +98,4 @@ def provider_rider_reconciliation(
         "collection_pct": round(100.0 * col_t / exp_t, 1) if exp_t else 0.0,
         "rider_count": len(out_rows),
     }
-    return {"provider": prov, "from": date_from, "to": date_to,
-            "rows": out_rows, "totals": totals}
+    return {"provider": prov, "from": date_from, "to": date_to, "rows": out_rows, "totals": totals}

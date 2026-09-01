@@ -63,11 +63,14 @@ def cmd_rollback(args) -> None:
     """
     company, cs, ce = args.company, args.cycle_start, args.cycle_end
     with get_connection() as conn:
-        affected = [r["person_id"] for r in conn.execute(
-            "SELECT DISTINCT person_id FROM transactions "
-            "WHERE company=? AND cycle_start=? AND cycle_end=?",
-            (company, cs, ce),
-        ).fetchall()]
+        affected = [
+            r["person_id"]
+            for r in conn.execute(
+                "SELECT DISTINCT person_id FROM transactions "
+                "WHERE company=? AND cycle_start=? AND cycle_end=?",
+                (company, cs, ce),
+            ).fetchall()
+        ]
         if not affected and not args.force:
             print(f"  No transactions found for {company} {cs}..{ce}. Nothing to do.")
             return
@@ -89,28 +92,31 @@ def cmd_rollback(args) -> None:
             # clamped to <= 0 (positive balances aren't carried; they're released).
             # Simpler: pick the most-recent transaction's balance_after.
             row = conn.execute(
-                "SELECT balance_after FROM transactions WHERE person_id=? "
-                "ORDER BY id DESC LIMIT 1", (pid,),
+                "SELECT balance_after FROM transactions WHERE person_id=? ORDER BY id DESC LIMIT 1",
+                (pid,),
             ).fetchone()
             bal = float(row["balance_after"]) if row else 0.0
             conn.execute(
-                "UPDATE balances SET current_balance=?, last_updated=date('now') "
-                "WHERE person_id=?", (bal, pid),
+                "UPDATE balances SET current_balance=?, last_updated=date('now') WHERE person_id=?",
+                (bal, pid),
             )
             # EV arrears: total_missed = sum of RENT_MISSED amounts (positive),
             # total_recovered = sum of RENT_RECOVERED amounts.
             missed = conn.execute(
                 "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
-                "WHERE person_id=? AND event_type='RENT_MISSED'", (pid,),
+                "WHERE person_id=? AND event_type='RENT_MISSED'",
+                (pid,),
             ).fetchone()["s"]
             recovered = conn.execute(
                 "SELECT COALESCE(SUM(amount), 0) AS s FROM transactions "
-                "WHERE person_id=? AND event_type='RENT_RECOVERED'", (pid,),
+                "WHERE person_id=? AND event_type='RENT_RECOVERED'",
+                (pid,),
             ).fetchone()["s"]
             opening = conn.execute(
                 "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
                 "WHERE person_id=? AND event_type='OPENING' "
-                "AND remarks LIKE '%EV arrears%'", (pid,),
+                "AND remarks LIKE '%EV arrears%'",
+                (pid,),
             ).fetchone()["s"]
             total_missed = float(missed) + float(opening)
             outstanding = max(0.0, total_missed - float(recovered))
@@ -123,12 +129,14 @@ def cmd_rollback(args) -> None:
             # for this person, else NULL.
             last = conn.execute(
                 "SELECT MAX(cycle_end) AS m FROM transactions "
-                "WHERE person_id=? AND event_type='RENT'", (pid,),
+                "WHERE person_id=? AND event_type='RENT'",
+                (pid,),
             ).fetchone()
             rct = last["m"] if last and last["m"] else None
             conn.execute(
                 "UPDATE ev_assignments SET rent_charged_through=? "
-                "WHERE person_id=? AND returned_date IS NULL", (rct, pid),
+                "WHERE person_id=? AND returned_date IS NULL",
+                (rct, pid),
             )
         # Also drop COD holds for this cycle so the same file can be re-uploaded.
         conn.execute(
@@ -154,8 +162,10 @@ def cmd_reset_cycles(args) -> None:
             "SELECT COUNT(*) FROM transactions WHERE event_type = 'OPENING'"
         ).fetchone()[0]
         n_to_delete = n_txn_before - n_op
-        print(f"  {n_txn_before} total transactions, {n_op} OPENING (kept), "
-              f"{n_to_delete} cycle/adjustment (will delete)")
+        print(
+            f"  {n_txn_before} total transactions, {n_op} OPENING (kept), "
+            f"{n_to_delete} cycle/adjustment (will delete)"
+        )
         if not args.commit:
             print("  DRY RUN — re-run with --commit to actually delete")
             return
@@ -195,8 +205,8 @@ def cmd_reset_cycles(args) -> None:
         )
         conn.commit()
         print(f"  Deleted {n_to_delete} cycle/adjustment transactions.")
-        print(f"  Cleared cod_holds and rent_charged_through.")
-        print(f"  Balances + arrears rewound to seed-opening state.")
+        print("  Cleared cod_holds and rent_charged_through.")
+        print("  Balances + arrears rewound to seed-opening state.")
 
 
 def main() -> None:
@@ -209,16 +219,16 @@ def main() -> None:
     ps.add_argument("workbook", help="Path to the seed .xlsx")
     ps.add_argument("--commit", action="store_true", help="Actually write to the database")
     ps.add_argument("--created-by", default="seed_import")
-    prx = sub.add_parser("reset-cycles",
-                         help="Delete every committed cycle (keeps seed openings)")
+    prx = sub.add_parser("reset-cycles", help="Delete every committed cycle (keeps seed openings)")
     prx.add_argument("--commit", action="store_true", help="Actually delete")
     pr = sub.add_parser("rollback", help="Undo a previously committed cycle")
     pr.add_argument("--company", required=True)
     pr.add_argument("--cycle-start", dest="cycle_start", required=True)
     pr.add_argument("--cycle-end", dest="cycle_end", required=True)
     pr.add_argument("--commit", action="store_true", help="Actually delete")
-    pr.add_argument("--force", action="store_true",
-                    help="Proceed even if no transactions are matched")
+    pr.add_argument(
+        "--force", action="store_true", help="Proceed even if no transactions are matched"
+    )
     args = p.parse_args()
     if args.command == "init":
         cmd_init(args)

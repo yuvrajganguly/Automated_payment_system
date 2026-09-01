@@ -71,21 +71,39 @@ def _find_sheet(xl, keywords):
 
 def _init_person(conn, person_id):
     now = datetime.now().isoformat()
-    conn.execute("INSERT OR IGNORE INTO balances (person_id, current_balance, last_updated) VALUES (?,0,?)", (person_id, now))
-    conn.execute("INSERT OR IGNORE INTO status_tracking (person_id, status, ev_returned) VALUES (?, 'active', 0)", (person_id,))
-    conn.execute("INSERT OR IGNORE INTO ev_arrears (person_id, total_missed, total_recovered, outstanding, last_updated) VALUES (?,0,0,0,?)", (person_id, now))
+    conn.execute(
+        "INSERT OR IGNORE INTO balances (person_id, current_balance, last_updated) VALUES (?,0,?)",
+        (person_id, now),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO status_tracking (person_id, status, ev_returned) VALUES (?, 'active', 0)",  # noqa: E501
+        (person_id,),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO ev_arrears (person_id, total_missed, total_recovered, outstanding, last_updated) VALUES (?,0,0,0,?)",  # noqa: E501
+        (person_id, now),
+    )
 
 
 def _resolve_person_by_name(conn, name, company, report, ctx):
     if company:
-        rows = conn.execute("SELECT DISTINCT person_id FROM rider_master WHERE LOWER(name)=LOWER(?) AND company=?", (name, company)).fetchall()
+        rows = conn.execute(
+            "SELECT DISTINCT person_id FROM rider_master WHERE LOWER(name)=LOWER(?) AND company=?",
+            (name, company),
+        ).fetchall()
     else:
-        rows = conn.execute("SELECT DISTINCT person_id FROM rider_master WHERE LOWER(name)=LOWER(?)", (name,)).fetchall()
+        rows = conn.execute(
+            "SELECT DISTINCT person_id FROM rider_master WHERE LOWER(name)=LOWER(?)", (name,)
+        ).fetchall()
     if not rows:
-        report.warnings.append(f"{ctx}: rider '{name}'" + (f" @ {company}" if company else "") + " not in roster")
+        report.warnings.append(
+            f"{ctx}: rider '{name}'" + (f" @ {company}" if company else "") + " not in roster"
+        )
         return None
     if len(rows) > 1:
-        report.warnings.append(f"{ctx}: rider '{name}' ambiguous ({len(rows)} people) - needs company")
+        report.warnings.append(
+            f"{ctx}: rider '{name}' ambiguous ({len(rows)} people) - needs company"
+        )
         return None
     return rows[0]["person_id"]
 
@@ -104,30 +122,48 @@ def _import_roster(conn, xl, report):
         "veh": match_column(df.columns, "vehicle", "vehicle type"),
         "acc": match_column(df.columns, "account_no", "account no", "acc_no", "account number"),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
-        "mob": match_column(df.columns, "mob_no", "mob no", "mobile", "phone", "phone no", "phone number"),
+        "mob": match_column(
+            df.columns, "mob_no", "mob no", "mobile", "phone", "phone no", "phone number"
+        ),
     }
     missing = [k for k in ("rid", "co", "name") if not c[k]]
     if missing:
-        report.errors.append(f"Roster missing required column(s) {missing}. Found: {list(df.columns)}")
+        report.errors.append(
+            f"Roster missing required column(s) {missing}. Found: {list(df.columns)}"
+        )
         return
     companies = {r["company_name"] for r in conn.execute("SELECT company_name FROM companies")}
     new_persons = new_riders = skipped = name_grouped = 0
     for _, row in df.iterrows():
-        rid = _cell(row, c["rid"]); name = _cell(row, c["name"]); co = _cell(row, c["co"])
+        rid = _cell(row, c["rid"])
+        name = _cell(row, c["name"])
+        co = _cell(row, c["co"])
         if not rid or not name or not co:
-            skipped += 1; continue
+            skipped += 1
+            continue
         if co not in companies:
             report.warnings.append(f"Roster: unknown company '{co}' (rider {rid}) - skipped")
-            skipped += 1; continue
-        if conn.execute("SELECT 1 FROM rider_master WHERE rider_id=? AND company=?", (rid, co)).fetchone():
-            skipped += 1; continue
-        pr = conn.execute("SELECT person_id FROM person_registry WHERE LOWER(display_name)=LOWER(?)", (name,)).fetchone()
+            skipped += 1
+            continue
+        if conn.execute(
+            "SELECT 1 FROM rider_master WHERE rider_id=? AND company=?", (rid, co)
+        ).fetchone():
+            skipped += 1
+            continue
+        pr = conn.execute(
+            "SELECT person_id FROM person_registry WHERE LOWER(display_name)=LOWER(?)", (name,)
+        ).fetchone()
         if pr:
-            person_id = pr["person_id"]; name_grouped += 1
+            person_id = pr["person_id"]
+            name_grouped += 1
         else:
-            cur = conn.execute("INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) VALUES (?,?,?)", (name, co, rid))
+            cur = conn.execute(
+                "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) VALUES (?,?,?)",  # noqa: E501
+                (name, co, rid),
+            )
             person_id = cur.lastrowid
-            _init_person(conn, person_id); new_persons += 1
+            _init_person(conn, person_id)
+            new_persons += 1
         # Default any blank vehicle to BIKE so the inactive sheet and any
         # downstream raw exports have a consistent fallback.
         veh = (_cell(row, c["veh"]) or "BIKE").upper()
@@ -136,12 +172,29 @@ def _import_roster(conn, xl, report):
         mob = _cell(row, c["mob"]) if c["mob"] else None
         if not mob and co and co.strip().lower().startswith("spencer"):
             mob = rid
-        conn.execute("INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",
-            (rid, co, person_id, name, _cell(row, c["hub"]), veh, _cell(row, c["acc"]), _cell(row, c["ifsc"]), mob))
+        conn.execute(
+            "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",  # noqa: E501
+            (
+                rid,
+                co,
+                person_id,
+                name,
+                _cell(row, c["hub"]),
+                veh,
+                _cell(row, c["acc"]),
+                _cell(row, c["ifsc"]),
+                mob,
+            ),
+        )
         new_riders += 1
         if not _cell(row, c["acc"]) or not _cell(row, c["ifsc"]):
             report.warnings.append(f"Roster: {rid} ({name}) missing bank details")
-    report.stats["roster"] = {"new_persons": new_persons, "new_riders": new_riders, "skipped": skipped, "name_grouped": name_grouped}
+    report.stats["roster"] = {
+        "new_persons": new_persons,
+        "new_riders": new_riders,
+        "skipped": skipped,
+        "name_grouped": name_grouped,
+    }
 
 
 def _import_ev(conn, xl, report):
@@ -154,15 +207,23 @@ def _import_ev(conn, xl, report):
         "ev": match_column(df.columns, "ev_id", "ev id", "evid"),
         "prov": match_column(df.columns, "provider"),
         "model": match_column(df.columns, "model"),
-        "name": match_column(df.columns, "current_holder", "current holder",
-                             "current_rider_name", "rider_name", "rider name", "name"),
-        "co": match_column(df.columns, "company_billed", "company billed",
-                           "company"),
+        "name": match_column(
+            df.columns,
+            "current_holder",
+            "current holder",
+            "current_rider_name",
+            "rider_name",
+            "rider name",
+            "name",
+        ),
+        "co": match_column(df.columns, "company_billed", "company billed", "company"),
         "date": match_column(df.columns, "handover_date", "handover date", "handover"),
     }
     missing = [k for k in ("ev", "prov", "model") if not c[k]]
     if missing:
-        report.errors.append(f"EV Register missing required column(s) {missing}. Found: {list(df.columns)}")
+        report.errors.append(
+            f"EV Register missing required column(s) {missing}. Found: {list(df.columns)}"
+        )
         return
     # Lenient resolver: auto-create unknown (provider, model) entries instead
     # of silently rejecting them, so a fresh master roll-out (e.g. Raft's
@@ -170,42 +231,64 @@ def _import_ev(conn, xl, report):
     # the fleet on first import. Rate is copied from a sibling model under
     # the same provider; if nothing to copy from, the resolver flags it.
     from payout.domain.fleet_sync import resolve_or_create_model
+
     units = assigns = conflicts = bad_models = unresolved = 0
     models_created: list[str] = []
     rate_review: list[str] = []
     for _, row in df.iterrows():
-        ev = _cell(row, c["ev"]); prov = _cell(row, c["prov"]); model = _cell(row, c["model"])
+        ev = _cell(row, c["ev"])
+        prov = _cell(row, c["prov"])
+        model = _cell(row, c["model"])
         if not ev or not prov or not model:
             continue
         try:
             res = resolve_or_create_model(conn, prov, model)
         except Exception as exc:
             report.warnings.append(f"EV {ev}: couldn't resolve '{prov}/{model}' ({exc}) - skipped")
-            bad_models += 1; continue
+            bad_models += 1
+            continue
         if res.created:
             models_created.append(f"{prov}/{model}")
             if res.flagged_rate:
                 rate_review.append(f"{prov}/{model}")
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (ev,)).fetchone():
-            conn.execute("INSERT INTO ev_units (ev_id, model_id, status) VALUES (?,?, 'spare')", (ev, res.model_id)); units += 1
-        name = _cell(row, c["name"]); co = _cell(row, c["co"])
+            conn.execute(
+                "INSERT INTO ev_units (ev_id, model_id, status) VALUES (?,?, 'spare')",
+                (ev, res.model_id),
+            )
+            units += 1
+        name = _cell(row, c["name"])
+        co = _cell(row, c["co"])
         if not name:
             continue
         person_id = _resolve_person_by_name(conn, name, co, report, f"EV {ev}")
         if person_id is None:
-            unresolved += 1; continue
-        if conn.execute("SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL", (person_id,)).fetchone():
+            unresolved += 1
+            continue
+        if conn.execute(
+            "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL", (person_id,)
+        ).fetchone():
             report.warnings.append(f"EV {ev}: {name} already holds an EV - conflict, not assigned")
-            conflicts += 1; continue
-        if conn.execute("SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL", (ev,)).fetchone():
+            conflicts += 1
+            continue
+        if conn.execute(
+            "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL", (ev,)
+        ).fetchone():
             report.warnings.append(f"EV {ev}: already assigned - skipped")
             continue
         hod = _parse_date(_cell(row, c["date"]))
-        conn.execute("INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)", (person_id, ev, hod.isoformat() if hod else None))
-        conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev,)); assigns += 1
+        conn.execute(
+            "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
+            (person_id, ev, hod.isoformat() if hod else None),
+        )
+        conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev,))
+        assigns += 1
     report.stats["ev"] = {
-        "units_added": units, "assignments": assigns, "conflicts": conflicts,
-        "bad_models": bad_models, "unresolved": unresolved,
+        "units_added": units,
+        "assignments": assigns,
+        "conflicts": conflicts,
+        "bad_models": bad_models,
+        "unresolved": unresolved,
         "models_created": sorted(set(models_created)),
         "rate_review_needed": sorted(set(rate_review)),
     }
@@ -226,36 +309,60 @@ def _import_balances(conn, xl, report, created_by):
         "rid": match_column(df.columns, "rider_id", "rider id", "riderid"),
         "co": match_column(df.columns, "company"),
         "dues": match_column(df.columns, "opening_dues", "opening dues", "dues"),
-        "arr": match_column(df.columns, "opening_ev_arrears", "opening ev arrears", "ev arrears", "arrears"),
-        "cod": match_column(df.columns, "opening_cod", "opening cod", "opening cod pending",
-                            "cod pending", "cod_pending", "cod"),
+        "arr": match_column(
+            df.columns, "opening_ev_arrears", "opening ev arrears", "ev arrears", "arrears"
+        ),
+        "cod": match_column(
+            df.columns,
+            "opening_cod",
+            "opening cod",
+            "opening cod pending",
+            "cod pending",
+            "cod_pending",
+            "cod",
+        ),
     }
     if not c["rid"]:
         report.errors.append(f"Opening Balances missing 'rider_id'. Found: {list(df.columns)}")
         return
     applied = skipped = unresolved = 0
-    seen = set(); today = date.today().isoformat()
+    seen = set()
+    today = date.today().isoformat()
     for _, row in df.iterrows():
-        rid = _cell(row, c["rid"]); co = _cell(row, c["co"])
+        rid = _cell(row, c["rid"])
+        co = _cell(row, c["co"])
         if not rid:
             continue
         if co:
-            pr = conn.execute("SELECT person_id FROM rider_master WHERE rider_id=? AND company=?", (rid, co)).fetchone()
+            pr = conn.execute(
+                "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?", (rid, co)
+            ).fetchone()
         else:
-            rows = conn.execute("SELECT DISTINCT person_id FROM rider_master WHERE rider_id=?", (rid,)).fetchall()
+            rows = conn.execute(
+                "SELECT DISTINCT person_id FROM rider_master WHERE rider_id=?", (rid,)
+            ).fetchall()
             if len(rows) > 1:
-                report.warnings.append(f"Opening Balances: rider_id '{rid}' ambiguous - needs company")
+                report.warnings.append(
+                    f"Opening Balances: rider_id '{rid}' ambiguous - needs company"
+                )
             pr = rows[0] if len(rows) == 1 else None
         if not pr:
             report.warnings.append(f"Opening Balances: rider '{rid}' not found")
-            unresolved += 1; continue
+            unresolved += 1
+            continue
         person_id = pr["person_id"]
         if person_id in seen:
-            report.warnings.append(f"Opening Balances: person for '{rid}' listed twice - extra skipped")
-            skipped += 1; continue
+            report.warnings.append(
+                f"Opening Balances: person for '{rid}' listed twice - extra skipped"
+            )
+            skipped += 1
+            continue
         seen.add(person_id)
-        if conn.execute("SELECT 1 FROM transactions WHERE person_id=? AND event_type='OPENING'", (person_id,)).fetchone():
-            skipped += 1; continue
+        if conn.execute(
+            "SELECT 1 FROM transactions WHERE person_id=? AND event_type='OPENING'", (person_id,)
+        ).fetchone():
+            skipped += 1
+            continue
         dues = to_paise(to_float(_cell(row, c["dues"])) or 0)
         arr = to_paise(to_float(_cell(row, c["arr"])) or 0)
         cod = to_paise(to_float(_cell(row, c["cod"])) or 0) if c.get("cod") else 0
@@ -269,8 +376,20 @@ def _import_balances(conn, xl, report, created_by):
                 "last_updated=excluded.last_updated",
                 (person_id, final_bal, today),
             )
-            conn.execute("INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",
-                (person_id, rid, co or "", today, today, final_bal, final_bal, "Opening dues", created_by))
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",  # noqa: E501
+                (
+                    person_id,
+                    rid,
+                    co or "",
+                    today,
+                    today,
+                    final_bal,
+                    final_bal,
+                    "Opening dues",
+                    created_by,
+                ),
+            )
         if arr:
             a = abs(arr)
             conn.execute(
@@ -280,8 +399,20 @@ def _import_balances(conn, xl, report, created_by):
                 "last_updated=excluded.last_updated",
                 (person_id, a, a, today),
             )
-            conn.execute("INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",
-                (person_id, rid, co or "", today, today, -a, final_bal, "Opening EV arrears", created_by))
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, event_type, amount, balance_after, remarks, created_by) VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",  # noqa: E501
+                (
+                    person_id,
+                    rid,
+                    co or "",
+                    today,
+                    today,
+                    -a,
+                    final_bal,
+                    "Opening EV arrears",
+                    created_by,
+                ),
+            )
         if cod:
             c_abs = abs(cod)
             conn.execute(
@@ -295,8 +426,17 @@ def _import_balances(conn, xl, report, created_by):
                 "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
                 "event_type, amount, balance_after, remarks, created_by) "
                 "VALUES (?,?,?,?,?,'OPENING',?,?,?,?)",
-                (person_id, rid, co or "", today, today, -c_abs, final_bal,
-                 "Opening COD pending", created_by),
+                (
+                    person_id,
+                    rid,
+                    co or "",
+                    today,
+                    today,
+                    -c_abs,
+                    final_bal,
+                    "Opening COD pending",
+                    created_by,
+                ),
             )
         applied += 1
     report.stats["balances"] = {"applied": applied, "skipped": skipped, "unresolved": unresolved}

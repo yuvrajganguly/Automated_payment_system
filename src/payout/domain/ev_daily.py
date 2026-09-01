@@ -31,7 +31,6 @@ on the same cycle does not duplicate or drift).
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import date, timedelta
 
 
@@ -46,8 +45,19 @@ def _parse(s):
     return date.fromisoformat(s) if s else None
 
 
-def _upsert_row(conn, *, ev_id, day, state, person_id, daily_cost, provider_cost,
-                billing_status=None, cycle_event_id=None, recovery_event_id=None):
+def _upsert_row(
+    conn,
+    *,
+    ev_id,
+    day,
+    state,
+    person_id,
+    daily_cost,
+    provider_cost,
+    billing_status=None,
+    cycle_event_id=None,
+    recovery_event_id=None,
+):
     """Insert-or-overwrite a single day-row. Status fields are sticky unless
     the caller passes an explicit non-None value — this lets callers update
     just the billing fields without losing the state/cost data."""
@@ -58,17 +68,29 @@ def _upsert_row(conn, *, ev_id, day, state, person_id, daily_cost, provider_cost
     if existing:
         # Preserve recovery info unless caller explicitly resets it.
         new_billing = billing_status if billing_status is not None else existing["billing_status"]
-        new_cycle_event = cycle_event_id if cycle_event_id is not None else existing["cycle_event_id"]
-        new_recovery_event = recovery_event_id if recovery_event_id is not None else existing["recovery_event_id"]
+        new_cycle_event = (
+            cycle_event_id if cycle_event_id is not None else existing["cycle_event_id"]
+        )
+        new_recovery_event = (
+            recovery_event_id if recovery_event_id is not None else existing["recovery_event_id"]
+        )
         conn.execute(
             "UPDATE ev_daily_ledger SET "
             "  state=?, assigned_person_id=?, daily_cost=?, provider_cost=?, "
             "  billing_status=?, cycle_event_id=?, recovery_event_id=?, "
             "  last_updated=datetime('now') "
             "WHERE ev_id=? AND day=?",
-            (state, person_id, daily_cost, provider_cost,
-             new_billing, new_cycle_event, new_recovery_event,
-             ev_id, day.isoformat()),
+            (
+                state,
+                person_id,
+                daily_cost,
+                provider_cost,
+                new_billing,
+                new_cycle_event,
+                new_recovery_event,
+                ev_id,
+                day.isoformat(),
+            ),
         )
     else:
         conn.execute(
@@ -76,14 +98,29 @@ def _upsert_row(conn, *, ev_id, day, state, person_id, daily_cost, provider_cost
             "(ev_id, day, state, assigned_person_id, daily_cost, provider_cost, "
             " billing_status, cycle_event_id, recovery_event_id) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
-            (ev_id, day.isoformat(), state, person_id, daily_cost, provider_cost,
-             billing_status, cycle_event_id, recovery_event_id),
+            (
+                ev_id,
+                day.isoformat(),
+                state,
+                person_id,
+                daily_cost,
+                provider_cost,
+                billing_status,
+                cycle_event_id,
+                recovery_event_id,
+            ),
         )
 
 
 def materialize_cycle_for_person(
-    conn, *, person_id, cycle_start, cycle_end,
-    legs, billing_event_id, billing_status,
+    conn,
+    *,
+    person_id,
+    cycle_start,
+    cycle_end,
+    legs,
+    billing_event_id,
+    billing_status,
 ):
     """Write one day-row for every day of every leg that contributed to this
     cycle's rent for ``person_id``. State/cost are derived from the leg.
@@ -97,12 +134,13 @@ def materialize_cycle_for_person(
     becomes ``return_free``.
     """
     from payout.money import split_evenly
+
     cs = cycle_start if hasattr(cycle_start, "isoformat") else date.fromisoformat(cycle_start)
     ce = cycle_end if hasattr(cycle_end, "isoformat") else date.fromisoformat(cycle_end)
     for leg in legs:
         ev_id = leg.ev_id
-        weekly = int(leg.weekly_rate)          # paise
-        daily = round(weekly / 7)              # provider per-day (paise), uniform
+        weekly = int(leg.weekly_rate)  # paise
+        daily = round(weekly / 7)  # provider per-day (paise), uniform
         hod = leg.handover_date
         ret = leg.returned_date
         # The leg's contributing window inside this cycle. When None, the leg
@@ -120,29 +158,44 @@ def materialize_cycle_for_person(
         ):
             lo = _parse(m["from_date"])
             hi = _parse(m["to_date"]) if m["to_date"] else ce
-            if not lo: continue
+            if not lo:
+                continue
             maint.append((max(lo, cs), min(hi, ce)))
+
         def in_maint(day):
-            return any(lo <= day <= hi for lo, hi in maint)
+            return any(lo <= day <= hi for lo, hi in maint)  # noqa: B023
 
         # For every day of the leg's overlap with the cycle, classify it, then
         # split the leg's (exact, prorated) rent across the in-window billable
         # days so the day-ledger reconciles to the RENT row to the paisa.
         leg_lo = max(cs, hod) if hod else cs
         leg_hi = min(ce, ret) if ret else ce
-        rows = []          # [day, state, this_billing, this_event, kind]
+        rows = []  # [day, state, this_billing, this_event, kind]
         for day in _iter_days(leg_lo, leg_hi):
-            state = "billable"; this_billing = billing_status; this_event = billing_event_id
+            state = "billable"
+            this_billing = billing_status
+            this_event = billing_event_id
             kind = "in_window"
             if hod and day == hod:
-                state = "handover_free"; this_billing = None; this_event = None; kind = "free"
+                state = "handover_free"
+                this_billing = None
+                this_event = None
+                kind = "free"
             elif ret and day == ret:
-                state = "return_free"; this_billing = None; this_event = None; kind = "free"
+                state = "return_free"
+                this_billing = None
+                this_event = None
+                kind = "free"
             elif in_maint(day):
-                state = "maintenance"; this_billing = None; this_event = None; kind = "free"
+                state = "maintenance"
+                this_billing = None
+                this_event = None
+                kind = "free"
             elif win_lo and win_hi and (day < win_lo or day > win_hi):
                 # Already billed in a prior cycle: keep a rider cost, no billing.
-                this_billing = None; this_event = None; kind = "out_window"
+                this_billing = None
+                this_event = None
+                kind = "out_window"
             rows.append([day, state, this_billing, this_event, kind])
         in_window_idx = [i for i, r in enumerate(rows) if r[4] == "in_window"]
         parts = split_evenly(int(leg.rent), len(in_window_idx)) if in_window_idx else []
@@ -151,13 +204,19 @@ def materialize_cycle_for_person(
             if kind == "free":
                 this_daily = 0
             elif kind == "out_window":
-                this_daily = daily          # carryover cost (billed in a prior cycle)
+                this_daily = daily  # carryover cost (billed in a prior cycle)
             else:
                 this_daily = part_map.get(i, 0)
             _upsert_row(
-                conn, ev_id=ev_id, day=day, state=state, person_id=person_id,
-                daily_cost=this_daily, provider_cost=daily,
-                billing_status=this_billing, cycle_event_id=this_event,
+                conn,
+                ev_id=ev_id,
+                day=day,
+                state=state,
+                person_id=person_id,
+                daily_cost=this_daily,
+                provider_cost=daily,
+                billing_status=this_billing,
+                cycle_event_id=this_event,
             )
 
 
@@ -165,16 +224,20 @@ def materialize_unassigned_window(conn, *, ev_id, start, end_inclusive, weekly_r
     """Write 'unassigned' rows for an EV that wasn't held by anyone over the
     window. provider_cost is still owed (we pay the provider regardless).
     """
-    daily = round(int(weekly_rate) / 7)   # paise
+    daily = round(int(weekly_rate) / 7)  # paise
     for day in _iter_days(start, end_inclusive):
         _upsert_row(
-            conn, ev_id=ev_id, day=day, state="unassigned",
-            person_id=None, daily_cost=0.0, provider_cost=daily,
+            conn,
+            ev_id=ev_id,
+            day=day,
+            state="unassigned",
+            person_id=None,
+            daily_cost=0.0,
+            provider_cost=daily,
         )
 
 
-def attribute_recovery(conn, *, person_id, recovery_event_id, amount,
-                       daily_unit_cost_hint=None):
+def attribute_recovery(conn, *, person_id, recovery_event_id, amount, daily_unit_cost_hint=None):
     """Apply a recovery (RENT_RECOVERED or XC_RENT_RECOVERED) by healing the
     oldest 'missed' days for this person. Walks forward chronologically until
     ``amount`` worth of daily_cost is recovered (or no more missed days).
@@ -209,8 +272,7 @@ def attribute_recovery(conn, *, person_id, recovery_event_id, amount,
     return round(healed, 2)
 
 
-def attribute_pending(conn, *, person_id, event_id, amount,
-                      day_from=None, day_to=None):
+def attribute_pending(conn, *, person_id, event_id, amount, day_from=None, day_to=None):
     """Mark this person's oldest 'pending' (not-yet-processed billable) day-rows
     in ``[day_from, day_to]`` as 'billed', pointing at ``event_id``, up to
     ``amount`` worth of daily_cost.
@@ -279,7 +341,7 @@ def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
     ).fetchone()
     if not row:
         return 0
-    daily = round(int(row["weekly_rate"]) / 7)   # paise
+    daily = round(int(row["weekly_rate"]) / 7)  # paise
     created = 0
     for day in _iter_days(_parse(str(day_from)), _parse(str(day_to))):
         if conn.execute(
@@ -288,9 +350,15 @@ def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
         ).fetchone():
             continue
         _upsert_row(
-            conn, ev_id=row["ev_id"], day=day, state="billable",
-            person_id=person_id, daily_cost=daily, provider_cost=daily,
-            billing_status="billed", cycle_event_id=event_id,
+            conn,
+            ev_id=row["ev_id"],
+            day=day,
+            state="billable",
+            person_id=person_id,
+            daily_cost=daily,
+            provider_cost=daily,
+            billing_status="billed",
+            cycle_event_id=event_id,
         )
         created += 1
     return created

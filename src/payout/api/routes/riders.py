@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Optional
 
 import pandas as pd
-from fastapi import Body, APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from payout.api.auth import get_current_user, require_admin
-from payout.api.schemas import RenameRiderIdIn, RiderIn, RiderOut, RiderPatch, ExportSelection
+from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
@@ -19,7 +18,9 @@ router = APIRouter()
 
 
 def _rider_dict(row) -> dict:
-    d = dict(row); d["is_active"] = bool(d["is_active"]); return d
+    d = dict(row)
+    d["is_active"] = bool(d["is_active"])
+    return d
 
 
 def _next_placeholder_rider_id(conn, company: str) -> str:
@@ -28,7 +29,8 @@ def _next_placeholder_rider_id(conn, company: str) -> str:
     row = conn.execute(
         "SELECT rider_id FROM rider_master "
         "WHERE company=? AND rider_id LIKE 'QSPEND%' "
-        "ORDER BY rider_id DESC LIMIT 1", (company,),
+        "ORDER BY rider_id DESC LIMIT 1",
+        (company,),
     ).fetchone()
     n = 1
     if row:
@@ -39,8 +41,9 @@ def _next_placeholder_rider_id(conn, company: str) -> str:
     return f"QSPEND{n:04d}"
 
 
-def _find_existing_rider(conn, name: str, company: str,
-                         account_no: Optional[str] = None) -> Optional[dict]:
+def _find_existing_rider(
+    conn, name: str, company: str, account_no: str | None = None
+) -> dict | None:
     """Return an existing rider_master row when this rider already exists by
     (name, company) — case-insensitive — or by (account_no, company) when an
     account_no is provided."""
@@ -95,8 +98,9 @@ def _conflict_message(conflict: dict, action: str = "save") -> str:
     )
 
 
-def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
-                          account_no, ifsc, person_id=None):
+def _insert_rider_into_db(
+    conn, *, rider_id, company, name, hub, vehicle, account_no, ifsc, person_id=None
+):
     """Shared write path used by both POST and bulk import.
     Returns (created: bool, rider_id: str, person_id: int).
     Raises HTTPException(400) on unknown company; HTTPException(409) on
@@ -105,9 +109,7 @@ def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
     When ``person_id`` is supplied the new rider_master row is attached to that
     existing person directly (skipping the display_name lookup) — used when
     adding a person to a second company."""
-    if not conn.execute(
-        "SELECT 1 FROM companies WHERE company_name=?", (company,)
-    ).fetchone():
+    if not conn.execute("SELECT 1 FROM companies WHERE company_name=?", (company,)).fetchone():
         raise HTTPException(400, f"Unknown company {company!r}")
     if not rider_id:
         rider_id = _next_placeholder_rider_id(conn, company)
@@ -117,8 +119,9 @@ def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
     ).fetchone():
         raise HTTPException(409, f"Rider {rider_id} already exists for {company}")
     if person_id is not None:
-        if not conn.execute("SELECT 1 FROM person_registry WHERE person_id=?",
-                            (person_id,)).fetchone():
+        if not conn.execute(
+            "SELECT 1 FROM person_registry WHERE person_id=?", (person_id,)
+        ).fetchone():
             raise HTTPException(404, f"Person {person_id} not found")
         # Account already owned by a different person?
         conflict = _account_owner_elsewhere(conn, account_no, person_id)
@@ -126,8 +129,8 @@ def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
             raise HTTPException(409, _conflict_message(conflict, "add"))
     else:
         pr = conn.execute(
-            "SELECT person_id FROM person_registry WHERE LOWER(display_name)=LOWER(?)",
-            (name,)).fetchone()
+            "SELECT person_id FROM person_registry WHERE LOWER(display_name)=LOWER(?)", (name,)
+        ).fetchone()
         if pr:
             person_id = pr["person_id"]
             # Same-name match: re-check account ownership against the resolved
@@ -156,8 +159,7 @@ def _insert_rider_into_db(conn, *, rider_id, company, name, hub, vehicle,
     conn.execute(
         "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, "
         "account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
-        (rider_id, company, person_id, name, hub,
-         veh, account_no, ifsc),
+        (rider_id, company, person_id, name, hub, veh, account_no, ifsc),
     )
     return True, rider_id, person_id
 
@@ -177,24 +179,23 @@ def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> 
             (body.person_id, body.company),
         ).fetchall()
         if not rows:
-            raise HTTPException(
-                404, f"Person {body.person_id} has no rider at {body.company}"
-            )
+            raise HTTPException(404, f"Person {body.person_id} has no rider at {body.company}")
         # Pick which existing rider_id we're renaming.
         if body.current_rider_id:
             current = body.current_rider_id
             if current not in [r["rider_id"] for r in rows]:
                 raise HTTPException(
-                    404, f"Rider {current!r} not found for person {body.person_id} "
-                         f"at {body.company}",
+                    404,
+                    f"Rider {current!r} not found for person {body.person_id} at {body.company}",
                 )
         elif len(rows) == 1:
             current = rows[0]["rider_id"]
         else:
             raise HTTPException(
-                409, f"Person {body.person_id} has {len(rows)} rider_ids at "
-                     f"{body.company}; specify current_rider_id "
-                     f"(one of {[r['rider_id'] for r in rows]})",
+                409,
+                f"Person {body.person_id} has {len(rows)} rider_ids at "
+                f"{body.company}; specify current_rider_id "
+                f"(one of {[r['rider_id'] for r in rows]})",
             )
         if current == new_rid:
             return {"renamed": False, "reason": "Same value", "rider_id": new_rid}
@@ -205,8 +206,9 @@ def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> 
         ).fetchone()
         if clash:
             raise HTTPException(
-                409, f"rider_id {new_rid!r} already exists at {body.company} "
-                     f"(person {clash['person_id']}). Use Link Riders to merge instead.",
+                409,
+                f"rider_id {new_rid!r} already exists at {body.company} "
+                f"(person {clash['person_id']}). Use Link Riders to merge instead.",
             )
         conn.execute(
             "UPDATE rider_master SET rider_id=? WHERE rider_id=? AND company=?",
@@ -229,25 +231,34 @@ def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> 
         )
         conn.commit()
     return {
-        "renamed": True, "person_id": body.person_id, "company": body.company,
-        "old_rider_id": current, "new_rider_id": new_rid,
+        "renamed": True,
+        "person_id": body.person_id,
+        "company": body.company,
+        "old_rider_id": current,
+        "new_rider_id": new_rid,
     }
 
 
 @router.post("/export")
 def export_riders(
-    company: Optional[str] = None,
-    hub: Optional[str] = None,
-    active: Optional[bool] = None,
+    company: str | None = None,
+    hub: str | None = None,
+    active: bool | None = None,
     body: ExportSelection = Body(default=ExportSelection()),
     _: dict = Depends(get_current_user),
 ):
     """Riders as a styled .xlsx download. Honours the same filters as the
     list endpoint so the export matches the on-screen scope."""
     where, params = ["1=1"], []
-    if company is not None: where.append("rm.company=?"); params.append(company)
-    if hub is not None:     where.append("rm.hub=?");     params.append(hub)
-    if active is not None:  where.append("rm.is_active=?"); params.append(1 if active else 0)
+    if company is not None:
+        where.append("rm.company=?")
+        params.append(company)
+    if hub is not None:
+        where.append("rm.hub=?")
+        params.append(hub)
+    if active is not None:
+        where.append("rm.is_active=?")
+        params.append(1 if active else 0)
     with get_connection() as conn:
         rows = conn.execute(
             f"SELECT rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
@@ -259,35 +270,61 @@ def export_riders(
             f"WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company",
             params,
         ).fetchall()
-    headers = ["Person ID", "Rider ID", "Company", "Name", "Hub", "Vehicle",
-               "Account No", "IFSC", "Active"]
+    headers = [
+        "Person ID",
+        "Rider ID",
+        "Company",
+        "Name",
+        "Hub",
+        "Vehicle",
+        "Account No",
+        "IFSC",
+        "Active",
+    ]
     out = [
-        (r["person_id"], r["rider_id"], r["company"], r["name"] or "",
-         r["hub"] or "", r["vehicle"], r["account_no"] or "", r["ifsc"] or "",
-         "yes" if r["is_active"] else "no")
+        (
+            r["person_id"],
+            r["rider_id"],
+            r["company"],
+            r["name"] or "",
+            r["hub"] or "",
+            r["vehicle"],
+            r["account_no"] or "",
+            r["ifsc"] or "",
+            "yes" if r["is_active"] else "no",
+        )
         for r in rows
-        if body.ids is None or f'{r["rider_id"]}|{r["company"]}' in {str(x) for x in body.ids}
+        if body.ids is None or f"{r['rider_id']}|{r['company']}" in {str(x) for x in body.ids}
     ]
     return xlsx_response(
-        filename_stem="riders", sheet_name="RIDERS",
-        headers=headers, rows=out, left_align_cols=(4, 5, 7, 8),
+        filename_stem="riders",
+        sheet_name="RIDERS",
+        headers=headers,
+        rows=out,
+        left_align_cols=(4, 5, 7, 8),
     )
 
 
 @router.get("", response_model=list[RiderOut])
 def list_riders(
-    company: Optional[str] = None,
-    hub: Optional[str] = None,
-    active: Optional[bool] = None,
+    company: str | None = None,
+    hub: str | None = None,
+    active: bool | None = None,
     _: dict = Depends(get_current_user),
 ) -> list[RiderOut]:
     """List riders. The ``vehicle`` column is derived from whether the rider's
     person currently holds an open ev_assignment — ``EV`` when they do,
     ``BIKE`` otherwise — independent of whatever was set at rider creation."""
     where, params = ["1=1"], []
-    if company is not None: where.append("rm.company=?"); params.append(company)
-    if hub is not None:     where.append("rm.hub=?");     params.append(hub)
-    if active is not None:  where.append("rm.is_active=?"); params.append(1 if active else 0)
+    if company is not None:
+        where.append("rm.company=?")
+        params.append(company)
+    if hub is not None:
+        where.append("rm.hub=?")
+        params.append(hub)
+    if active is not None:
+        where.append("rm.is_active=?")
+        params.append(1 if active else 0)
     with get_connection() as conn:
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
@@ -303,9 +340,9 @@ def list_riders(
 
 
 @router.patch("/{rider_id}", response_model=RiderOut)
-def update_rider(rider_id: str, body: RiderPatch,
-                 company: str = Query(...),
-                 _: dict = Depends(require_admin)) -> RiderOut:
+def update_rider(
+    rider_id: str, body: RiderPatch, company: str = Query(...), _: dict = Depends(require_admin)
+) -> RiderOut:
     """Partially update a rider — only the fields you send are changed.
 
     ``new_rider_id`` / ``new_company`` rename the primary key; the change
@@ -313,16 +350,23 @@ def update_rider(rider_id: str, body: RiderPatch,
     IFSC and vehicle are uppercased; empty strings become NULL.
     """
     fields: dict = {}
-    if body.name        is not None: fields["name"]       = body.name.strip() or None
-    if body.hub         is not None: fields["hub"]        = body.hub.strip() or None
-    if body.vehicle     is not None: fields["vehicle"]    = (body.vehicle.strip().upper() or None)
-    if body.account_no  is not None: fields["account_no"] = body.account_no.strip() or None
-    if body.ifsc        is not None: fields["ifsc"]       = (body.ifsc.strip().upper() or None)
-    if body.mob_no      is not None: fields["mob_no"]     = body.mob_no.strip() or None
-    if body.is_active   is not None: fields["is_active"]  = 1 if body.is_active else 0
+    if body.name is not None:
+        fields["name"] = body.name.strip() or None
+    if body.hub is not None:
+        fields["hub"] = body.hub.strip() or None
+    if body.vehicle is not None:
+        fields["vehicle"] = body.vehicle.strip().upper() or None
+    if body.account_no is not None:
+        fields["account_no"] = body.account_no.strip() or None
+    if body.ifsc is not None:
+        fields["ifsc"] = body.ifsc.strip().upper() or None
+    if body.mob_no is not None:
+        fields["mob_no"] = body.mob_no.strip() or None
+    if body.is_active is not None:
+        fields["is_active"] = 1 if body.is_active else 0
 
     new_rid = (body.new_rider_id or "").strip() or None
-    new_co  = (body.new_company  or "").strip() or None
+    new_co = (body.new_company or "").strip() or None
 
     if not fields and not new_rid and not new_co:
         raise HTTPException(400, "Nothing to update")
@@ -338,8 +382,7 @@ def update_rider(rider_id: str, body: RiderPatch,
         # If account_no is being changed, make sure we're not stealing it from
         # another person.
         if "account_no" in fields and fields["account_no"]:
-            conflict = _account_owner_elsewhere(
-                conn, fields["account_no"], existing["person_id"])
+            conflict = _account_owner_elsewhere(conn, fields["account_no"], existing["person_id"])
             if conflict:
                 raise HTTPException(409, _conflict_message(conflict, "save"))
 
@@ -349,16 +392,20 @@ def update_rider(rider_id: str, body: RiderPatch,
             params = list(fields.values()) + [rider_id, company]
             conn.execute(
                 f"UPDATE rider_master SET {', '.join(sets)}, updated_at=datetime('now') "
-                f"WHERE rider_id=? AND company=?", params,
+                f"WHERE rider_id=? AND company=?",
+                params,
             )
 
         # PK rename (rider_id and/or company).
         if new_rid or new_co:
             target_rid = new_rid or rider_id
-            target_co  = new_co  or company
-            if new_co and not conn.execute(
-                "SELECT 1 FROM companies WHERE company_name=?", (target_co,)
-            ).fetchone():
+            target_co = new_co or company
+            if (
+                new_co
+                and not conn.execute(
+                    "SELECT 1 FROM companies WHERE company_name=?", (target_co,)
+                ).fetchone()
+            ):
                 raise HTTPException(400, f"Unknown company {target_co!r}")
             if (target_rid, target_co) != (rider_id, company):
                 clash = conn.execute(
@@ -372,18 +419,15 @@ def update_rider(rider_id: str, body: RiderPatch,
                         f"(person {clash['person_id']}). Use Link Riders to merge.",
                     )
                 conn.execute(
-                    "UPDATE rider_master SET rider_id=?, company=? "
-                    "WHERE rider_id=? AND company=?",
+                    "UPDATE rider_master SET rider_id=?, company=? WHERE rider_id=? AND company=?",
                     (target_rid, target_co, rider_id, company),
                 )
                 conn.execute(
-                    "UPDATE transactions SET rider_id=?, company=? "
-                    "WHERE rider_id=? AND company=?",
+                    "UPDATE transactions SET rider_id=?, company=? WHERE rider_id=? AND company=?",
                     (target_rid, target_co, rider_id, company),
                 )
                 conn.execute(
-                    "UPDATE cod_holds SET rider_id=?, company=? "
-                    "WHERE rider_id=? AND company=?",
+                    "UPDATE cod_holds SET rider_id=?, company=? WHERE rider_id=? AND company=?",
                     (target_rid, target_co, rider_id, company),
                 )
                 conn.execute(
@@ -395,19 +439,22 @@ def update_rider(rider_id: str, body: RiderPatch,
 
         row = conn.execute(
             "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, is_active "
-            "FROM rider_master WHERE rider_id=? AND company=?", (rider_id, company),
+            "FROM rider_master WHERE rider_id=? AND company=?",
+            (rider_id, company),
         ).fetchone()
         conn.commit()
     return RiderOut(**_rider_dict(row))
 
 
 @router.get("/{rider_id}", response_model=RiderOut)
-def get_rider(rider_id: str, company: str = Query(...),
-              _: dict = Depends(get_current_user)) -> RiderOut:
+def get_rider(
+    rider_id: str, company: str = Query(...), _: dict = Depends(get_current_user)
+) -> RiderOut:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, is_active "
-            "FROM rider_master WHERE rider_id=? AND company=?", (rider_id, company),
+            "FROM rider_master WHERE rider_id=? AND company=?",
+            (rider_id, company),
         ).fetchone()
     if not row:
         raise HTTPException(404, "Rider not found")
@@ -433,16 +480,27 @@ def create_rider(body: RiderIn, _: dict = Depends(require_admin)) -> RiderOut:
                     f"Use 'Link Riders' to merge if this is intentional.",
                 )
         _, rider_id, person_id = _insert_rider_into_db(
-            conn, rider_id=body.rider_id, company=body.company, name=body.name,
-            hub=body.hub, vehicle=body.vehicle,
-            account_no=body.account_no, ifsc=body.ifsc,
+            conn,
+            rider_id=body.rider_id,
+            company=body.company,
+            name=body.name,
+            hub=body.hub,
+            vehicle=body.vehicle,
+            account_no=body.account_no,
+            ifsc=body.ifsc,
             person_id=body.person_id,
         )
         conn.commit()
     return RiderOut(
-        rider_id=rider_id, company=body.company, person_id=person_id,
-        name=body.name, hub=body.hub, vehicle=body.vehicle,
-        account_no=body.account_no, ifsc=body.ifsc, is_active=True,
+        rider_id=rider_id,
+        company=body.company,
+        person_id=person_id,
+        name=body.name,
+        hub=body.hub,
+        vehicle=body.vehicle,
+        account_no=body.account_no,
+        ifsc=body.ifsc,
+        is_active=True,
     )
 
 
@@ -468,24 +526,27 @@ def bulk_create_riders(
         raise HTTPException(400, f"Could not read Excel: {exc}") from exc
     df.columns = [str(c).strip() for c in df.columns]
     cols = {
-        "rid":  match_column(df.columns, "rider_id", "rider id", "riderid"),
-        "co":   match_column(df.columns, "company"),
+        "rid": match_column(df.columns, "rider_id", "rider id", "riderid"),
+        "co": match_column(df.columns, "company"),
         "name": match_column(df.columns, "rider_name", "rider name", "name"),
-        "hub":  match_column(df.columns, "hub"),
-        "veh":  match_column(df.columns, "vehicle", "vehicle type"),
-        "acc":  match_column(df.columns, "account_no", "account no", "acc_no", "account number"),
+        "hub": match_column(df.columns, "hub"),
+        "veh": match_column(df.columns, "vehicle", "vehicle type"),
+        "acc": match_column(df.columns, "account_no", "account no", "acc_no", "account number"),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
     }
     if not cols["co"] or not cols["name"]:
         raise HTTPException(
-            400, f"Bulk upload needs at least 'company' + 'name' columns. "
-                 f"Found {list(df.columns)}",
+            400,
+            f"Bulk upload needs at least 'company' + 'name' columns. Found {list(df.columns)}",
         )
+
     def cell(row, key):
         col = cols[key]
-        if not col: return None
+        if not col:
+            return None
         v = row.get(col)
-        if v is None or (isinstance(v, float) and pd.isna(v)): return None
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
         s = str(v).strip()
         return s if s and s.lower() != "nan" else None
 
@@ -495,12 +556,11 @@ def bulk_create_riders(
     errors: list[str] = []
 
     with get_connection() as conn:
-        known_co = {r["company_name"] for r in conn.execute(
-            "SELECT company_name FROM companies"
-        )}
+        known_co = {r["company_name"] for r in conn.execute("SELECT company_name FROM companies")}
         for i, row in df.iterrows():
             line = int(i) + 2  # 1-based + header
-            name = cell(row, "name"); co = cell(row, "co")
+            name = cell(row, "name")
+            co = cell(row, "co")
             if not name or not co:
                 skipped.append({"line": line, "reason": "missing name or company"})
                 continue
@@ -509,21 +569,35 @@ def bulk_create_riders(
                 continue
             existing = _find_existing_rider(conn, name, co, cell(row, "acc"))
             if existing:
-                duplicates.append({
-                    "line": line, "name": name, "company": co,
-                    "existing_rider_id": existing["rider_id"],
-                })
+                duplicates.append(
+                    {
+                        "line": line,
+                        "name": name,
+                        "company": co,
+                        "existing_rider_id": existing["rider_id"],
+                    }
+                )
                 continue
             try:
                 _, rid, pid = _insert_rider_into_db(
-                    conn, rider_id=cell(row, "rid"), company=co, name=name,
-                    hub=cell(row, "hub"), vehicle=cell(row, "veh"),
-                    account_no=cell(row, "acc"), ifsc=cell(row, "ifsc"),
+                    conn,
+                    rider_id=cell(row, "rid"),
+                    company=co,
+                    name=name,
+                    hub=cell(row, "hub"),
+                    vehicle=cell(row, "veh"),
+                    account_no=cell(row, "acc"),
+                    ifsc=cell(row, "ifsc"),
                 )
-                created.append({
-                    "line": line, "rider_id": rid, "company": co,
-                    "name": name, "person_id": pid,
-                })
+                created.append(
+                    {
+                        "line": line,
+                        "rider_id": rid,
+                        "company": co,
+                        "name": name,
+                        "person_id": pid,
+                    }
+                )
             except HTTPException as e:
                 errors.append(f"line {line}: {e.detail}")
         if commit and not errors:
@@ -584,13 +658,14 @@ def bulk_update_riders(
 
     df.columns = [str(c).strip() for c in df.columns]
     cols = {
-        "rid":  match_column(df.columns, "rider_id", "rider id", "riderid"),
-        "co":   match_column(df.columns, "company"),
+        "rid": match_column(df.columns, "rider_id", "rider id", "riderid"),
+        "co": match_column(df.columns, "company"),
         "name": match_column(df.columns, "rider_name", "rider name", "name"),
-        "hub":  match_column(df.columns, "hub"),
-        "veh":  match_column(df.columns, "vehicle", "vehicle type"),
-        "acc":  match_column(df.columns, "account_no", "account no",
-                             "acc_no", "account number", "a/c no", "ac no"),
+        "hub": match_column(df.columns, "hub"),
+        "veh": match_column(df.columns, "vehicle", "vehicle type"),
+        "acc": match_column(
+            df.columns, "account_no", "account no", "acc_no", "account number", "a/c no", "ac no"
+        ),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
     }
     if not cols["co"]:
@@ -604,9 +679,11 @@ def bulk_update_riders(
 
     def cell(row, key):
         col = cols[key]
-        if not col: return None
+        if not col:
+            return None
         v = row.get(col)
-        if v is None or (isinstance(v, float) and pd.isna(v)): return None
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
         s = str(v).strip()
         return s if s and s.lower() != "nan" else None
 
@@ -620,13 +697,15 @@ def bulk_update_riders(
             line = int(i) + 2
             co = cell(row, "co")
             if not co:
-                errors.append(f"line {line}: missing company"); continue
+                errors.append(f"line {line}: missing company")
+                continue
 
             # Locate the rider row.
             if match_by == "rider_id+company":
                 rid = cell(row, "rid")
                 if not rid:
-                    errors.append(f"line {line}: missing rider_id"); continue
+                    errors.append(f"line {line}: missing rider_id")
+                    continue
                 cur = conn.execute(
                     "SELECT * FROM rider_master WHERE rider_id=? AND company=?",
                     (rid, co),
@@ -639,42 +718,48 @@ def bulk_update_riders(
                     (acc, co),
                 ).fetchone()
             if cur is None:
-                not_found.append({"line": line, "company": co,
-                                  "key": cell(row, "rid") or cell(row, "acc")})
+                not_found.append(
+                    {"line": line, "company": co, "key": cell(row, "rid") or cell(row, "acc")}
+                )
                 continue
 
             patch: dict[str, str] = {}
-            for field, key in (("name", "name"), ("hub", "hub"),
-                               ("vehicle", "veh"), ("account_no", "acc"),
-                               ("ifsc", "ifsc")):
+            for field, key in (
+                ("name", "name"),
+                ("hub", "hub"),
+                ("vehicle", "veh"),
+                ("account_no", "acc"),
+                ("ifsc", "ifsc"),
+            ):
                 v = cell(row, key)
                 if v is not None and (cur[field] or "") != v:
                     if field == "ifsc":
                         v = v.upper()
                     patch[field] = v
             if not patch:
-                unchanged.append({"line": line, "rider_id": cur["rider_id"],
-                                  "company": co})
+                unchanged.append({"line": line, "rider_id": cur["rider_id"], "company": co})
                 continue
             # Block account theft from another person.
             if "account_no" in patch and patch["account_no"]:
-                conflict = _account_owner_elsewhere(
-                    conn, patch["account_no"], cur["person_id"])
+                conflict = _account_owner_elsewhere(conn, patch["account_no"], cur["person_id"])
                 if conflict:
-                    errors.append(
-                        f"line {line}: {_conflict_message(conflict, 'save')}")
+                    errors.append(f"line {line}: {_conflict_message(conflict, 'save')}")
                     continue
             sets = ", ".join(f"{f}=?" for f in patch)
             params = list(patch.values()) + [cur["rider_id"], co]
             conn.execute(
-                f"UPDATE rider_master SET {sets} "
-                "WHERE rider_id=? AND company=?",
+                f"UPDATE rider_master SET {sets} WHERE rider_id=? AND company=?",
                 params,
             )
-            updated.append({
-                "line": line, "rider_id": cur["rider_id"], "company": co,
-                "fields": list(patch.keys()), "values": patch,
-            })
+            updated.append(
+                {
+                    "line": line,
+                    "rider_id": cur["rider_id"],
+                    "company": co,
+                    "fields": list(patch.keys()),
+                    "values": patch,
+                }
+            )
         if commit and not errors:
             conn.commit()
         else:
@@ -733,15 +818,14 @@ def onboard_unknowns(payload: dict, _: dict = Depends(require_admin)) -> dict:
     errors: list[str] = []
 
     with get_connection() as conn:
-        if not conn.execute(
-            "SELECT 1 FROM companies WHERE company_name=?", (company,)
-        ).fetchone():
+        if not conn.execute("SELECT 1 FROM companies WHERE company_name=?", (company,)).fetchone():
             raise HTTPException(400, f"Unknown company {company!r}")
 
         for i, row in enumerate(rows, 1):
             rider_id = (row.get("rider_id") or "").strip()
             if not rider_id:
-                errors.append(f"row {i}: rider_id missing"); continue
+                errors.append(f"row {i}: rider_id missing")
+                continue
             action = (row.get("action") or "create").strip().lower()
 
             if action == "link":
@@ -749,22 +833,28 @@ def onboard_unknowns(payload: dict, _: dict = Depends(require_admin)) -> dict:
                 if not pid and row.get("link_to_rider_id"):
                     pr = conn.execute(
                         "SELECT person_id FROM rider_master WHERE rider_id=? LIMIT 1",
-                        (row["link_to_rider_id"],)).fetchone()
-                    if pr: pid = pr["person_id"]
+                        (row["link_to_rider_id"],),
+                    ).fetchone()
+                    if pr:
+                        pid = pr["person_id"]
                 if not pid:
-                    errors.append(f"row {i} ({rider_id}): no link target found"); continue
+                    errors.append(f"row {i} ({rider_id}): no link target found")
+                    continue
                 if not conn.execute(
                     "SELECT 1 FROM person_registry WHERE person_id=?", (pid,)
                 ).fetchone():
-                    errors.append(f"row {i} ({rider_id}): person {pid} not found"); continue
+                    errors.append(f"row {i} ({rider_id}): person {pid} not found")
+                    continue
                 # Pull display name from the existing person so the new
                 # rider_master row carries a sane name.
                 target = conn.execute(
-                    "SELECT display_name FROM person_registry WHERE person_id=?",
-                    (pid,)).fetchone()
+                    "SELECT display_name FROM person_registry WHERE person_id=?", (pid,)
+                ).fetchone()
                 try:
                     _, new_rid, new_pid = _insert_rider_into_db(
-                        conn, rider_id=rider_id, company=company,
+                        conn,
+                        rider_id=rider_id,
+                        company=company,
                         name=row.get("name") or target["display_name"],
                         hub=row.get("hub"),
                         vehicle=row.get("vehicle") or "BIKE",
@@ -780,10 +870,14 @@ def onboard_unknowns(payload: dict, _: dict = Depends(require_admin)) -> dict:
             # action == "create" — make a new person + rider
             name = (row.get("name") or "").strip()
             if not name:
-                errors.append(f"row {i} ({rider_id}): name required for create"); continue
+                errors.append(f"row {i} ({rider_id}): name required for create")
+                continue
             try:
                 _, new_rid, new_pid = _insert_rider_into_db(
-                    conn, rider_id=rider_id, company=company, name=name,
+                    conn,
+                    rider_id=rider_id,
+                    company=company,
+                    name=name,
                     hub=row.get("hub"),
                     vehicle=row.get("vehicle") or "BIKE",
                     account_no=row.get("account_no"),

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import Body, APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 
-from payout.api.schemas import ExportSelection
 from payout.api.auth import get_current_user
+from payout.api.schemas import ExportSelection
 from payout.db import get_connection
 from payout.exports import xlsx_response
 
@@ -58,8 +58,9 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
 
 
 @router.post("/export")
-def export_arrears(body: ExportSelection = Body(default=ExportSelection()),
-                  _: dict = Depends(get_current_user)):
+def export_arrears(
+    body: ExportSelection = Body(default=ExportSelection()), _: dict = Depends(get_current_user)
+):
     """Same payload as GET /arrears but as a styled .xlsx download.
 
     Adds a derived Total Dues column (EV outstanding + Dues carry-forward) so
@@ -70,14 +71,27 @@ def export_arrears(body: ExportSelection = Body(default=ExportSelection()),
         idset = {str(x) for x in body.ids}
         data = [r for r in data if str(r["person_id"]) in idset]
     headers = [
-        "Person ID", "Name", "Companies", "Hub", "EV ID", "Model",
-        "EV Outstanding", "Dues (Carryfwd)", "Total Dues", "Last Updated",
+        "Person ID",
+        "Name",
+        "Companies",
+        "Hub",
+        "EV ID",
+        "Model",
+        "EV Outstanding",
+        "Dues (Carryfwd)",
+        "Total Dues",
+        "Last Updated",
     ]
     rows = [
         (
-            r["person_id"], r["display_name"], r["companies"] or "",
-            r["hubs"] or "", r["ev_id"] or "", r["model"] or "",
-            r["outstanding"], r["dues_outstanding"],
+            r["person_id"],
+            r["display_name"],
+            r["companies"] or "",
+            r["hubs"] or "",
+            r["ev_id"] or "",
+            r["model"] or "",
+            r["outstanding"],
+            r["dues_outstanding"],
             (r["outstanding"] or 0) + (r["dues_outstanding"] or 0),
             r["last_updated"] or "",
         )
@@ -86,7 +100,8 @@ def export_arrears(body: ExportSelection = Body(default=ExportSelection()),
     return xlsx_response(
         filename_stem="arrears",
         sheet_name="ARREARS",
-        headers=headers, rows=rows,
+        headers=headers,
+        rows=rows,
         numeric_cols=(7, 8, 9),
         money_cols=(7, 8, 9),
         totals_cols=(7, 8, 9),

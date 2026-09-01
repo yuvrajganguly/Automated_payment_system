@@ -19,9 +19,8 @@ Three responsibilities per provider:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from io import BytesIO
-from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -30,8 +29,8 @@ from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.fleet_sync import IngestRow, ingest_master_rows
 from payout.domain.reconciliation import provider_rider_reconciliation
-from payout.money import to_paise
 from payout.exports import xlsx_response
+from payout.money import to_paise
 from payout.parsers.base import match_column
 
 router = APIRouter()
@@ -60,9 +59,9 @@ def provider_period(
     prov = _normalize_provider(provider)
     try:
         d_from = date.fromisoformat(date_from)
-        d_to   = date.fromisoformat(date_to)
+        d_to = date.fromisoformat(date_to)
     except ValueError:
-        raise HTTPException(400, "date_from / date_to must be ISO dates.")
+        raise HTTPException(400, "date_from / date_to must be ISO dates.")  # noqa: B904
     if d_to < d_from:
         raise HTTPException(400, "date_to must be on or after date_from.")
     df_iso, dt_iso = d_from.isoformat(), d_to.isoformat()
@@ -116,43 +115,45 @@ def provider_period(
                 "status": r["status"] or "spare",
                 "holders": r["holders"] or "",
                 "days": int(r["days"] or 0),
-                "provider_owed":    round(float(r["provider_owed"] or 0), 2),
-                "rider_expected":   round(float(r["rider_expected"] or 0), 2),
-                "rider_collected":  round(float(r["rider_collected"] or 0), 2),
-                "rider_missed":     round(float(r["rider_missed"] or 0), 2),
-                "rider_recovered":  round(float(r["rider_recovered"] or 0), 2),
-                "rider_pending":    round(float(r["rider_pending"] or 0), 2),
+                "provider_owed": round(float(r["provider_owed"] or 0), 2),
+                "rider_expected": round(float(r["rider_expected"] or 0), 2),
+                "rider_collected": round(float(r["rider_collected"] or 0), 2),
+                "rider_missed": round(float(r["rider_missed"] or 0), 2),
+                "rider_recovered": round(float(r["rider_recovered"] or 0), 2),
+                "rider_pending": round(float(r["rider_pending"] or 0), 2),
                 "shortfall": round(
-                    max(0.0, float(r["rider_expected"] or 0)
-                            - float(r["rider_collected"] or 0)), 2),
+                    max(0.0, float(r["rider_expected"] or 0) - float(r["rider_collected"] or 0)), 2
+                ),
             }
             for r in per_ev_rows
         ]
         active_count = sum(1 for e in per_ev if e["days"] > 0)
-        idle_count   = sum(1 for e in per_ev if e["days"] == 0)
+        idle_count = sum(1 for e in per_ev if e["days"] == 0)
         totals = {
-            "provider_owed":   round(sum(e["provider_owed"]    for e in per_ev), 2),
-            "rider_expected":  round(sum(e["rider_expected"]   for e in per_ev), 2),
-            "rider_collected": round(sum(e["rider_collected"]  for e in per_ev), 2),
-            "rider_missed":    round(sum(e["rider_missed"]     for e in per_ev), 2),
-            "rider_recovered": round(sum(e["rider_recovered"]  for e in per_ev), 2),
-            "rider_pending":   round(sum(e["rider_pending"]    for e in per_ev), 2),
-            "shortfall":       round(sum(e["shortfall"]        for e in per_ev), 2),
-            "ev_count":        len(per_ev),       # total fleet for this provider
-            "active_evs":      active_count,      # had ledger activity in window
-            "idle_evs":        idle_count,        # in fleet but no activity
+            "provider_owed": round(sum(e["provider_owed"] for e in per_ev), 2),
+            "rider_expected": round(sum(e["rider_expected"] for e in per_ev), 2),
+            "rider_collected": round(sum(e["rider_collected"] for e in per_ev), 2),
+            "rider_missed": round(sum(e["rider_missed"] for e in per_ev), 2),
+            "rider_recovered": round(sum(e["rider_recovered"] for e in per_ev), 2),
+            "rider_pending": round(sum(e["rider_pending"] for e in per_ev), 2),
+            "shortfall": round(sum(e["shortfall"] for e in per_ev), 2),
+            "ev_count": len(per_ev),  # total fleet for this provider
+            "active_evs": active_count,  # had ledger activity in window
+            "idle_evs": idle_count,  # in fleet but no activity
         }
         # Empty-state hint: if no EV models are registered for this provider
         # at all, the operator probably hasn't set up the rate card yet —
         # surface that distinctly from "fleet registered but no activity".
         if not per_ev:
-            no_models = conn.execute(
-                "SELECT 1 FROM ev_models WHERE LOWER(provider)=LOWER(?) LIMIT 1",
-                (prov,),
-            ).fetchone() is None
+            no_models = (
+                conn.execute(
+                    "SELECT 1 FROM ev_models WHERE LOWER(provider)=LOWER(?) LIMIT 1",
+                    (prov,),
+                ).fetchone()
+                is None
+            )
             totals["no_models_registered"] = no_models
-    return {"provider": prov, "from": df_iso, "to": dt_iso,
-            "totals": totals, "per_ev": per_ev}
+    return {"provider": prov, "from": df_iso, "to": dt_iso, "totals": totals, "per_ev": per_ev}
 
 
 # ── Per-rider reconciliation (the weekly boss report) ─────────────────
@@ -163,7 +164,7 @@ def _validate_range(date_from: str, date_to: str) -> tuple[str, str]:
         d_from = date.fromisoformat(date_from)
         d_to = date.fromisoformat(date_to)
     except ValueError:
-        raise HTTPException(400, "date_from / date_to must be ISO dates.")
+        raise HTTPException(400, "date_from / date_to must be ISO dates.")  # noqa: B904
     if d_to < d_from:
         raise HTTPException(400, "date_to must be on or after date_from.")
     return d_from.isoformat(), d_to.isoformat()
@@ -199,15 +200,33 @@ def provider_reconciliation_export(
     with get_connection() as conn:
         data = provider_rider_reconciliation(conn, provider, df, dt)
     rows = [
-        (r["name"], r["ev_ids"], r["expected"], r["collected"], r["missed"],
-         r["recovered"], r["pending"], r["collection_pct"], r["settled_via"])
+        (
+            r["name"],
+            r["ev_ids"],
+            r["expected"],
+            r["collected"],
+            r["missed"],
+            r["recovered"],
+            r["pending"],
+            r["collection_pct"],
+            r["settled_via"],
+        )
         for r in data["rows"]
     ]
     return xlsx_response(
         filename_stem=f"{data['provider']}_reconciliation_{df}_to_{dt}",
         sheet_name="Reconciliation",
-        headers=["Rider", "EV(s)", "Expected", "Collected", "Missed (outstanding)",
-                 "Recovered", "Pending", "Collection %", "Settled via"],
+        headers=[
+            "Rider",
+            "EV(s)",
+            "Expected",
+            "Collected",
+            "Missed (outstanding)",
+            "Recovered",
+            "Pending",
+            "Collection %",
+            "Settled via",
+        ],
         rows=rows,
         numeric_cols=(3, 4, 5, 6, 7, 8),
         money_cols=(3, 4, 5, 6, 7),
@@ -234,21 +253,37 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
         else:
             df = pd.read_excel(BytesIO(file_bytes), dtype=str)
     except Exception as exc:
-        raise HTTPException(400, f"Couldn't open the file: {exc}")
+        raise HTTPException(400, f"Couldn't open the file: {exc}")  # noqa: B904
 
     df.columns = [str(c).strip() for c in df.columns]
-    ev_col     = match_column(df.columns, "ev_id", "ev id", "ev", "ev no",
-                              "vehicle id", "vehicle no")
-    amount_col = match_column(df.columns, "amount", "rent", "rent charged",
-                              "weekly rent", "monthly rent", "total", "charge")
+    ev_col = match_column(df.columns, "ev_id", "ev id", "ev", "ev no", "vehicle id", "vehicle no")
+    amount_col = match_column(
+        df.columns,
+        "amount",
+        "rent",
+        "rent charged",
+        "weekly rent",
+        "monthly rent",
+        "total",
+        "charge",
+    )
     # Status column heuristic: last non-empty text column.
-    status_col = match_column(df.columns, "status", "remarks", "remark",
-                              "notes", "comment", "comments")
+    status_col = match_column(
+        df.columns, "status", "remarks", "remark", "notes", "comment", "comments"
+    )
     if not status_col and len(df.columns):
         # fall back: last column if it doesn't look numeric
         last_col = df.columns[-1]
-        if not df[last_col].astype(str).str.replace(",", "").str.replace(".", "")\
-                .str.replace("-", "").str.strip().str.match(r"^\d*$").all():
+        if (
+            not df[last_col]
+            .astype(str)
+            .str.replace(",", "")
+            .str.replace(".", "")
+            .str.replace("-", "")
+            .str.strip()
+            .str.match(r"^\d*$")
+            .all()
+        ):
             status_col = last_col
 
     if not ev_col or not amount_col:
@@ -259,9 +294,11 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
         )
 
     def cell(row, col):
-        if not col: return None
+        if not col:
+            return None
         v = row.get(col)
-        if v is None or (isinstance(v, float) and pd.isna(v)): return None
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
         s = str(v).strip()
         return s if s and s.lower() != "nan" else None
 
@@ -277,13 +314,15 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
             amount = to_paise(str(amt).replace(",", "").replace("₹", "").strip()) if amt else 0
         except ValueError:
             amount = 0.0
-        out.append({
-            "line_no": line_no,
-            "ev_id_raw": ev_raw,
-            "ev_id": ev_raw,    # we don't yet have a normaliser; matching is exact
-            "their_amount": amount,
-            "status_note": cell(row, status_col) if status_col else None,
-        })
+        out.append(
+            {
+                "line_no": line_no,
+                "ev_id_raw": ev_raw,
+                "ev_id": ev_raw,  # we don't yet have a normaliser; matching is exact
+                "their_amount": amount,
+                "status_note": cell(row, status_col) if status_col else None,
+            }
+        )
     return out
 
 
@@ -291,18 +330,18 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
 async def upload_bill(
     provider: str,
     period_start: str = Form(...),
-    period_end:   str = Form(...),
+    period_end: str = Form(...),
     file: UploadFile = File(...),
-    notes: Optional[str] = Form(None),
+    notes: str | None = Form(None),
     user: dict = Depends(require_admin),
 ) -> dict:
     """Upload a provider bill and tally each line against our ledger."""
     prov = _normalize_provider(provider)
     try:
         d_from = date.fromisoformat(period_start)
-        d_to   = date.fromisoformat(period_end)
+        d_to = date.fromisoformat(period_end)
     except ValueError:
-        raise HTTPException(400, "period_start / period_end must be ISO dates.")
+        raise HTTPException(400, "period_start / period_end must be ISO dates.")  # noqa: B904
     if d_to < d_from:
         raise HTTPException(400, "period_end must be on or after period_start.")
     pdf_bytes = await file.read()
@@ -319,8 +358,7 @@ async def upload_bill(
             "(provider, period_start, period_end, bill_total, line_count, "
             " file_name, uploaded_by, notes) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            (prov, df_iso, dt_iso, bill_total, len(lines),
-             file.filename, user["email"], notes),
+            (prov, df_iso, dt_iso, bill_total, len(lines), file.filename, user["email"], notes),
         )
         bill_id = cur.lastrowid
 
@@ -349,14 +387,21 @@ async def upload_bill(
                 "(bill_id, line_no, ev_id_raw, ev_id, their_amount, "
                 " status_note, our_amount, discrepancy, notes) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                (bill_id, L["line_no"], L["ev_id_raw"], L["ev_id"],
-                 their, L["status_note"], ours,
-                 round(disc, 2) if disc is not None else None, line_notes),
+                (
+                    bill_id,
+                    L["line_no"],
+                    L["ev_id_raw"],
+                    L["ev_id"],
+                    their,
+                    L["status_note"],
+                    ours,
+                    round(disc, 2) if disc is not None else None,
+                    line_notes,
+                ),
             )
         conn.commit()
 
-    return {"bill_id": bill_id, "line_count": len(lines),
-            "bill_total": bill_total}
+    return {"bill_id": bill_id, "line_count": len(lines), "bill_total": bill_total}
 
 
 @router.get("/{provider}/bills")
@@ -378,14 +423,14 @@ def list_bills(
 
 @router.get("/{provider}/bills/{bill_id}")
 def get_bill(
-    provider: str, bill_id: int,
+    provider: str,
+    bill_id: int,
     _: dict = Depends(get_current_user),
 ) -> dict:
     prov = _normalize_provider(provider)
     with get_connection() as conn:
         bill = conn.execute(
-            "SELECT * FROM provider_bills "
-            "WHERE id=? AND LOWER(provider)=LOWER(?)",
+            "SELECT * FROM provider_bills WHERE id=? AND LOWER(provider)=LOWER(?)",
             (bill_id, prov),
         ).fetchone()
         if not bill:
@@ -416,12 +461,21 @@ def _parse_master_excel(file_bytes: bytes, file_name: str) -> list[IngestRow]:
         else:
             df = pd.read_excel(BytesIO(file_bytes), dtype=str)
     except Exception as exc:
-        raise HTTPException(400, f"Couldn't open the file: {exc}")
+        raise HTTPException(400, f"Couldn't open the file: {exc}")  # noqa: B904
 
     df.columns = [str(c).strip() for c in df.columns]
-    ev_col = match_column(df.columns, "ev_id", "ev id", "ev", "ev no",
-                          "tracker no", "tracker  no", "tracker",
-                          "vehicle id", "vehicle no")
+    ev_col = match_column(
+        df.columns,
+        "ev_id",
+        "ev id",
+        "ev",
+        "ev no",
+        "tracker no",
+        "tracker  no",
+        "tracker",
+        "vehicle id",
+        "vehicle no",
+    )
     model_col = match_column(df.columns, "model", "ev model", "vehicle model")
     if not ev_col or not model_col:
         raise HTTPException(
@@ -432,7 +486,8 @@ def _parse_master_excel(file_bytes: bytes, file_name: str) -> list[IngestRow]:
 
     def cell(row, col):
         v = row.get(col)
-        if v is None or (isinstance(v, float) and pd.isna(v)): return None
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
         s = str(v).strip()
         return s if s and s.lower() != "nan" else None
 
@@ -474,17 +529,18 @@ async def sync_master(
 
 @router.delete("/{provider}/bills/{bill_id}")
 def delete_bill(
-    provider: str, bill_id: int,
+    provider: str,
+    bill_id: int,
     _: dict = Depends(require_admin),
 ) -> dict:
     prov = _normalize_provider(provider)
     with get_connection() as conn:
         n = conn.execute(
-            "DELETE FROM provider_bill_lines WHERE bill_id=?", (bill_id,),
+            "DELETE FROM provider_bill_lines WHERE bill_id=?",
+            (bill_id,),
         ).rowcount
         c = conn.execute(
-            "DELETE FROM provider_bills "
-            "WHERE id=? AND LOWER(provider)=LOWER(?)",
+            "DELETE FROM provider_bills WHERE id=? AND LOWER(provider)=LOWER(?)",
             (bill_id, prov),
         ).rowcount
         conn.commit()

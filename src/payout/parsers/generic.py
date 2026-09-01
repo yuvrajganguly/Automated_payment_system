@@ -80,7 +80,7 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     # Optional orders/deliveries column (pass-through into the PAY sheet so
     # operators can sanity-check payout vs activity at a glance).
     orders_col_name = None
-    try:
+    try:  # noqa: SIM105
         orders_col_name = config["orders_column"]
     except (KeyError, IndexError):
         pass  # older DBs without the column — skip silently
@@ -91,18 +91,27 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
             matched["orders"] = orders_col
         else:
             warnings.append(
-                f"{company}: orders column '{orders_col_name}' not found; "
-                "leaving orders blank"
+                f"{company}: orders column '{orders_col_name}' not found; leaving orders blank"
             )
 
     # Optional name and hub columns. We pull these from the file so the engine
     # can label unknown rider_ids with a real name + hub in the onboarding
     # modal (instead of just "id 8906377190 — who's that?").
     name_col = match_column(df.columns, "rider_name", "rider name", "name")
-    hub_col  = match_column(df.columns, "store", "hub", "store/hub", "store_hub",
-                            "store name", "hub name", "store/hub name")
-    if name_col: matched["name"] = name_col
-    if hub_col:  matched["hub"]  = hub_col
+    hub_col = match_column(
+        df.columns,
+        "store",
+        "hub",
+        "store/hub",
+        "store_hub",
+        "store name",
+        "hub name",
+        "store/hub name",
+    )
+    if name_col:
+        matched["name"] = name_col
+    if hub_col:
+        matched["hub"] = hub_col
 
     records: list[RiderRecord] = []
     seen: dict[str, int] = {}
@@ -132,17 +141,24 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
             )
         cod = to_float(row.get(cod_col)) if cod_col else None
         orders_val = to_float(row.get(orders_col)) if orders_col else None
+
         def _cell(col):
-            if not col: return None
-            v = row.get(col)
-            if v is None: return None
+            if not col:
+                return None
+            v = row.get(col)  # noqa: B023
+            if v is None:
+                return None
             s = str(v).strip()
             return s if s and s.lower() != "nan" else None
+
         records.append(
             RiderRecord(
-                rider_id=rider_id, payout=to_paise(payout),
-                cod_pending=to_paise(cod or 0), orders=orders_val,
-                name=_cell(name_col), hub=_cell(hub_col),
+                rider_id=rider_id,
+                payout=to_paise(payout),
+                cod_pending=to_paise(cod or 0),
+                orders=orders_val,
+                name=_cell(name_col),
+                hub=_cell(hub_col),
                 payout_invalid=payout_invalid,
             )
         )

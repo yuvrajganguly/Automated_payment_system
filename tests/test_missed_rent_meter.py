@@ -1,6 +1,7 @@
 """Regression: a missed-rent cycle must advance the EV meter so a later
 overlapping cycle does not re-bill the same days while arrears are also
 recovered (which double-charged the rider). See engine.py absence pass."""
+
 import io
 from datetime import date
 
@@ -48,9 +49,13 @@ def test_missed_rent_then_catchup_does_not_double_charge(db):
     db.commit()
 
     # Cycle A: rider ABSENT from Blitz 06-14..06-20 -> rent falls to arrears.
-    process_cycle("Blitz", date(2026, 6, 14), date(2026, 6, 20), _blitz_file([("OTHER", 0)]), commit=True)
+    process_cycle(
+        "Blitz", date(2026, 6, 14), date(2026, 6, 20), _blitz_file([("OTHER", 0)]), commit=True
+    )
     # Cycle B: rider PRESENT 06-21..06-27 with a payout big enough to settle.
-    process_cycle("Blitz", date(2026, 6, 21), date(2026, 6, 27), _blitz_file([("P1", 6000)]), commit=True)
+    process_cycle(
+        "Blitz", date(2026, 6, 21), date(2026, 6, 27), _blitz_file([("P1", 6000)]), commit=True
+    )
 
     agg = {
         r["event_type"]: r
@@ -63,16 +68,17 @@ def test_missed_rent_then_catchup_does_not_double_charge(db):
     rent_billed = agg["RENT"]["debit"]
     recovered = agg["RENT_RECOVERED"]["credit"]
     released = agg["RELEASE"]["debit"]
-    arrears = db.execute(
-        "SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)
-    ).fetchone()["outstanding"]
+    arrears = db.execute("SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)).fetchone()[
+        "outstanding"
+    ]
 
     # 14 EV-days (06-14..06-27) at Rs.1250/wk = 250000 paise, billed exactly once.
-    assert rent_billed == 125000          # catch-up bills only the fresh 7 days
-    assert recovered == 125000            # the missed 7 days, clawed from arrears
-    assert rent_billed + recovered == 250000   # charged once -- no double-charge
+    assert rent_billed == 125000  # catch-up bills only the fresh 7 days
+    assert recovered == 125000  # the missed 7 days, clawed from arrears
+    assert rent_billed + recovered == 250000  # charged once -- no double-charge
     assert released == 350000
     assert arrears == 0
+
 
 def test_stuck_meter_catchup_is_capped_to_cycle(db):
     """STRONG guardrail: even with a meter left a week behind cycle_start (a
@@ -84,12 +90,16 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     ).lastrowid
     db.execute(
         "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-        "VALUES ('S1','Blitz',?,'S',1)", (pid,))
+        "VALUES ('S1','Blitz',?,'S',1)",
+        (pid,),
+    )
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
     # The prior missed week is already sitting in arrears.
     db.execute(
         "INSERT OR IGNORE INTO ev_arrears (person_id,total_missed,total_recovered,outstanding) "
-        "VALUES (?,125000,0,125000)", (pid,))
+        "VALUES (?,125000,0,125000)",
+        (pid,),
+    )
     mid = db.execute(
         "SELECT model_id FROM ev_models WHERE provider='Raft' AND model_name='Regular'"
     ).fetchone()["model_id"]
@@ -97,16 +107,21 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     # Meter stuck at 06-14 — a full week behind the 06-22 cycle start.
     db.execute(
         "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
-        "VALUES (?, 'EVS1', '2026-06-14')", (pid,))
+        "VALUES (?, 'EVS1', '2026-06-14')",
+        (pid,),
+    )
     db.commit()
 
-    process_cycle("Blitz", date(2026, 6, 22), date(2026, 6, 28),
-                  _blitz_file([("S1", 6000)]), commit=True)
+    process_cycle(
+        "Blitz", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("S1", 6000)]), commit=True
+    )
 
     rent = db.execute(
         "SELECT event_type, SUM(-amount) AS debit, MAX(days) AS days "
         "FROM transactions WHERE person_id=? AND event_type='RENT' "
-        "GROUP BY event_type", (pid,)).fetchone()
+        "GROUP BY event_type",
+        (pid,),
+    ).fetchone()
     # 7-day cycle billed as 7 days / Rs.1250 — NOT a 14-day (Rs.2500) catch-up.
     assert rent["days"] == 7, f"expected 7 days billed, got {rent['days']}"
     assert rent["debit"] == 125000, f"expected 125000 paise, got {rent['debit']}"
@@ -120,25 +135,37 @@ def test_absence_missed_is_capped_when_arrears(db):
         "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
         "VALUES ('T','Blitz','T1')"
     ).lastrowid
-    db.execute("INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-               "VALUES ('T1','Blitz',?,'T',1)", (pid,))
+    db.execute(
+        "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
+        "VALUES ('T1','Blitz',?,'T',1)",
+        (pid,),
+    )
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
-    db.execute("INSERT OR IGNORE INTO ev_arrears (person_id,total_missed,total_recovered,outstanding) "
-               "VALUES (?,125000,0,125000)", (pid,))          # prior week already missed
-    mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Raft' AND model_name='Regular'"
-                     ).fetchone()["model_id"]
+    db.execute(
+        "INSERT OR IGNORE INTO ev_arrears (person_id,total_missed,total_recovered,outstanding) "
+        "VALUES (?,125000,0,125000)",
+        (pid,),
+    )  # prior week already missed
+    mid = db.execute(
+        "SELECT model_id FROM ev_models WHERE provider='Raft' AND model_name='Regular'"
+    ).fetchone()["model_id"]
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('EVT1',?, 'in_use')", (mid,))
-    db.execute("INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
-               "VALUES (?, 'EVT1', '2026-06-14')", (pid,))     # meter stuck a week back
+    db.execute(
+        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
+        "VALUES (?, 'EVT1', '2026-06-14')",
+        (pid,),
+    )  # meter stuck a week back
     db.commit()
 
     # T1 is ABSENT from this 7-day cycle (file has a different rider).
-    process_cycle("Blitz", date(2026, 6, 22), date(2026, 6, 28),
-                  _blitz_file([("OTHER", 0)]), commit=True)
+    process_cycle(
+        "Blitz", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("OTHER", 0)]), commit=True
+    )
 
     m = db.execute(
         "SELECT MAX(days) AS days, SUM(-amount) AS amt FROM transactions "
         "WHERE person_id=? AND event_type='RENT_MISSED' AND cycle_start='2026-06-22'",
-        (pid,)).fetchone()
+        (pid,),
+    ).fetchone()
     assert m["days"] == 7, f"expected 7 missed days, got {m['days']}"
     assert m["amt"] == 125000, f"expected 125000 paise missed, got {m['amt']}"

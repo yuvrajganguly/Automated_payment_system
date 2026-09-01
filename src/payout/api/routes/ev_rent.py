@@ -26,8 +26,6 @@ company actually billed them. No double-counting.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends
 
 from payout.api.auth import get_current_user
@@ -36,7 +34,7 @@ from payout.db import get_connection
 router = APIRouter()
 
 
-def _split_companies(s: Optional[str]) -> list[str]:
+def _split_companies(s: str | None) -> list[str]:
     """Comma-separated → list. Empty / None → empty list."""
     if not s:
         return []
@@ -45,25 +43,30 @@ def _split_companies(s: Optional[str]) -> list[str]:
 
 @router.get("")
 def ev_rent_details(
-    company: Optional[str] = None,            # legacy single (back-compat)
-    companies: Optional[str] = None,          # comma-separated multi
-    cycle_start: Optional[str] = None,
-    cycle_end: Optional[str] = None,
+    company: str | None = None,  # legacy single (back-compat)
+    companies: str | None = None,  # comma-separated multi
+    cycle_start: str | None = None,
+    cycle_end: str | None = None,
     latest_only: bool = True,
     _: dict = Depends(get_current_user),
 ) -> list[dict]:
     cos = _split_companies(companies) or ([company] if company else [])
-    where = ("t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
-             "                  'RENT_RECOVERED', 'XC_RENT_RECOVERED')"
-             " AND t.company IS NOT NULL AND t.company <> ''")
+    where = (
+        "t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
+        "                  'RENT_RECOVERED', 'XC_RENT_RECOVERED')"
+        " AND t.company IS NOT NULL AND t.company <> ''"
+    )
     params: list = []
     if cos:
         ph = ",".join("?" for _ in cos)
-        where += f" AND t.company IN ({ph})"; params.extend(cos)
+        where += f" AND t.company IN ({ph})"
+        params.extend(cos)
     if cycle_start:
-        where += " AND t.cycle_start = ?"; params.append(cycle_start)
+        where += " AND t.cycle_start = ?"
+        params.append(cycle_start)
     if cycle_end:
-        where += " AND t.cycle_end = ?"; params.append(cycle_end)
+        where += " AND t.cycle_end = ?"
+        params.append(cycle_end)
     # latest_only narrows to the most recent cycle_end per company.
     # IMPORTANT: we filter on event_type='RENT' (and the engine's RENT_MISSED
     # for absence-only cycles) to find the "real" latest cycle. Otherwise a
@@ -89,12 +92,12 @@ def ev_rent_details(
         # arrears first. Result list is reversed at the end for display.
         cycle_rows = conn.execute(
             f"SELECT t.company, t.cycle_start, t.cycle_end, "
-            f"       SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS expected_present, "
-            f"       SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') "
-            f"                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "
+            f"       SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS expected_present, "  # noqa: E501
+            f"       SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') "  # noqa: E501
+            f"                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "  # noqa: E501
             f"       SUM(CASE WHEN t.event_type IN ('XC_RENT_RECOVERED','RENT_RECOVERED') "
-            f"                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "
-            f"       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "
+            f"                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "  # noqa: E501
+            f"       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
             f"       COUNT(DISTINCT t.person_id) AS rider_count "
             f"FROM transactions t "
             f"WHERE {where} "
@@ -147,13 +150,13 @@ def ev_rent_details(
 
             rider_rows = conn.execute(
                 "SELECT t.person_id, t.rider_id, pr.display_name, "
-                "       SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS expected_present, "
-                "       SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') "
-                "                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "
+                "       SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS expected_present, "  # noqa: E501
+                "       SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') "  # noqa: E501
+                "                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "  # noqa: E501
                 "       SUM(CASE WHEN t.event_type IN ('XC_RENT_RECOVERED','RENT_RECOVERED') "
-                "                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "
-                "       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "
-                "       MAX(CASE WHEN t.event_type='RENT'           THEN t.days END) AS days_billed, "
+                "                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "  # noqa: E501
+                "       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
+                "       MAX(CASE WHEN t.event_type='RENT'           THEN t.days END) AS days_billed, "  # noqa: E501
                 "       MAX((SELECT rm.hub FROM rider_master rm "
                 "          WHERE rm.person_id = t.person_id AND rm.company = t.company "
                 "          LIMIT 1)) AS hub "
@@ -163,7 +166,7 @@ def ev_rent_details(
                 "                       'XC_RENT_RECOVERED', 'RENT_RECOVERED') "
                 "  AND t.company = ? AND t.cycle_start = ? AND t.cycle_end = ? "
                 "GROUP BY t.person_id, t.rider_id, pr.display_name "
-                "ORDER BY arrears_rent DESC, (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') THEN t.amount ELSE 0 END)) DESC, pr.display_name",
+                "ORDER BY arrears_rent DESC, (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type IN ('RENT_COLLECTED','XC_RENT_RECOVERED','RENT_RECOVERED') THEN t.amount ELSE 0 END)) DESC, pr.display_name",  # noqa: E501
                 (cyc["company"], cyc["cycle_start"], cyc["cycle_end"]),
             ).fetchall()
             by_rider = []
@@ -229,23 +232,25 @@ def ev_rent_details(
                 else:
                     expected = 0.0
                     status = "paid"
-                by_rider.append({
-                    "person_id": r["person_id"],
-                    "rider_id": r["rider_id"],
-                    "display_name": r["display_name"],
-                    "hub": r["hub"],
-                    "expected_rent": round(expected, 2),
-                    "collected_rent": round(collected, 2),
-                    "prior_recovered": round(prior_recovered, 2),
-                    "rolled_forward": round(rolled_forward if status != "inactive" else 0.0, 2),
-                    "arrears_rent": round(arrears, 2),
-                    "future_arrears_recovered":
-                        round(min(arrears, future_arrears_recovered), 2),
-                    "future_xc_recovered":
-                        round(min(rolled_forward, future_xc_recovered), 2),
-                    "days_billed": r["days_billed"],
-                    "status": status,
-                })
+                by_rider.append(
+                    {
+                        "person_id": r["person_id"],
+                        "rider_id": r["rider_id"],
+                        "display_name": r["display_name"],
+                        "hub": r["hub"],
+                        "expected_rent": round(expected, 2),
+                        "collected_rent": round(collected, 2),
+                        "prior_recovered": round(prior_recovered, 2),
+                        "rolled_forward": round(rolled_forward if status != "inactive" else 0.0, 2),
+                        "arrears_rent": round(arrears, 2),
+                        "future_arrears_recovered": round(
+                            min(arrears, future_arrears_recovered), 2
+                        ),
+                        "future_xc_recovered": round(min(rolled_forward, future_xc_recovered), 2),
+                        "days_billed": r["days_billed"],
+                        "status": status,
+                    }
+                )
             # Cycle-level totals respect the legacy fallback too.
             prior_recovered_total = float(cyc["prior_recovered"] or 0)
             if legacy:
@@ -257,30 +262,30 @@ def ev_rent_details(
             # don't over-claim recovery. Lets the UI show net arrears for
             # the cycle row, healing visually when Spencer's claws back
             # Blitz's miss in a later week.
-            arrears_recovered_later = round(
-                sum(r["future_arrears_recovered"] for r in by_rider), 2)
-            rolled_recovered_later = round(
-                sum(r["future_xc_recovered"] for r in by_rider), 2)
+            arrears_recovered_later = round(sum(r["future_arrears_recovered"] for r in by_rider), 2)
+            rolled_recovered_later = round(sum(r["future_xc_recovered"] for r in by_rider), 2)
             arrears_net = max(0.0, arrears_total - arrears_recovered_later)
             rolled_net = max(0.0, rolled_forward_total - rolled_recovered_later)
-            result.append({
-                "company": cyc["company"],
-                "cycle_start": cyc["cycle_start"],
-                "cycle_end": cyc["cycle_end"],
-                "expected_rent": round(expected_present_total + arrears_total, 2),
-                "collected_rent": round(collected_total, 2),
-                "collected_current": round(current_collected_total, 2),
-                "prior_recovered": round(prior_recovered_total, 2),
-                "rolled_forward": round(rolled_forward_total, 2),
-                "rolled_recovered_later": rolled_recovered_later,
-                "rolled_forward_net": round(rolled_net, 2),
-                "arrears_rent": round(arrears_total, 2),
-                "arrears_recovered_later": arrears_recovered_later,
-                "arrears_net": round(arrears_net, 2),
-                "rider_count": cyc["rider_count"],
-                "legacy": legacy,
-                "by_rider": by_rider,
-            })
+            result.append(
+                {
+                    "company": cyc["company"],
+                    "cycle_start": cyc["cycle_start"],
+                    "cycle_end": cyc["cycle_end"],
+                    "expected_rent": round(expected_present_total + arrears_total, 2),
+                    "collected_rent": round(collected_total, 2),
+                    "collected_current": round(current_collected_total, 2),
+                    "prior_recovered": round(prior_recovered_total, 2),
+                    "rolled_forward": round(rolled_forward_total, 2),
+                    "rolled_recovered_later": rolled_recovered_later,
+                    "rolled_forward_net": round(rolled_net, 2),
+                    "arrears_rent": round(arrears_total, 2),
+                    "arrears_recovered_later": arrears_recovered_later,
+                    "arrears_net": round(arrears_net, 2),
+                    "rider_count": cyc["rider_count"],
+                    "legacy": legacy,
+                    "by_rider": by_rider,
+                }
+            )
     # FIFO walk was oldest-first; display expects newest-first.
     result.reverse()
     return result

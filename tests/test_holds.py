@@ -47,7 +47,10 @@ def test_blank_status_counts_as_pending():
 def test_myntra_inline_column():
     pr = ParseResult(
         company="Myntra",
-        records=[RiderRecord("M1", 1200, cod_pending=0.0), RiderRecord("M2", 800, cod_pending=150.0)],
+        records=[
+            RiderRecord("M1", 1200, cod_pending=0.0),
+            RiderRecord("M2", 800, cod_pending=150.0),
+        ],
     )
     h = compute_holds(pr)
     assert h.per_rider == {"M2": 150.0}
@@ -56,7 +59,10 @@ def test_myntra_inline_column():
 
 def test_persist_holds(db):
     pid = db.execute("INSERT INTO person_registry (display_name) VALUES ('R')").lastrowid
-    db.execute("INSERT INTO rider_master (rider_id, company, person_id, name) VALUES ('J1','Jiffy',?,'R')", (pid,))
+    db.execute(
+        "INSERT INTO rider_master (rider_id, company, person_id, name) VALUES ('J1','Jiffy',?,'R')",
+        (pid,),
+    )
     db.commit()
     h = compute_holds(
         ParseResult(
@@ -70,7 +76,9 @@ def test_persist_holds(db):
     )
     persist_holds(db, "Jiffy", date(2026, 3, 2), date(2026, 3, 8), h)
     db.commit()
-    rows = db.execute("SELECT person_id, amount, source FROM cod_holds WHERE company='Jiffy'").fetchall()
+    rows = db.execute(
+        "SELECT person_id, amount, source FROM cod_holds WHERE company='Jiffy'"
+    ).fetchall()
     assert len(rows) == 2
     assert all(r["person_id"] == pid and r["source"] == "jiffy_sheet" for r in rows)
     assert sum(r["amount"] for r in rows) == 150.0

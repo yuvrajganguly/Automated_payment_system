@@ -9,8 +9,6 @@ See ``DESIGN.md`` for the full rationale behind each table.
 
 from __future__ import annotations
 
-import sqlite3
-
 SCHEMA: str = """
 -- ── person_registry ─────────────────────────────────────────────────────────
 -- Canonical identity. One row = one real human.
@@ -406,7 +404,7 @@ CREATE TABLE IF NOT EXISTS ev_maintenance (
     created_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_maint_ev ON ev_maintenance (ev_id);
-"""
+"""  # noqa: E501
 
 
 def apply_schema(conn) -> None:
@@ -416,8 +414,10 @@ def apply_schema(conn) -> None:
     datetime defaults); on SQLite it runs verbatim.
     """
     from payout.config import DB_URL
+
     if DB_URL:
         from payout.db.connection import translate_ddl
+
         conn.executescript(translate_ddl(SCHEMA))
     else:
         conn.executescript(SCHEMA)

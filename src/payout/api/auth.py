@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
@@ -50,7 +49,7 @@ def clear_auth_cookie(response: Response) -> None:
     )
 
 
-def create_access_token(subject: str, role: str, expires: Optional[timedelta] = None) -> str:
+def create_access_token(subject: str, role: str, expires: timedelta | None = None) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": subject,
@@ -72,7 +71,7 @@ def decode_token(token: str) -> dict:
         ) from exc
 
 
-def authenticate(email: str, password: str) -> Optional[dict]:
+def authenticate(email: str, password: str) -> dict | None:
     """Verify credentials against the users table (bcrypt)."""
     email = email.strip().lower()
     with get_connection() as conn:
@@ -85,7 +84,7 @@ def authenticate(email: str, password: str) -> Optional[dict]:
     return None
 
 
-def _load_user(email: str) -> Optional[dict]:
+def _load_user(email: str) -> dict | None:
     """Current DB state for ``email`` — the JWT is only a session hint.
 
     A token is valid for 12 hours, so without this lookup deactivating or
@@ -103,7 +102,7 @@ def _load_user(email: str) -> Optional[dict]:
 
 def get_current_user(
     request: Request,
-    header_token: Optional[str] = Depends(oauth2_scheme),
+    header_token: str | None = Depends(oauth2_scheme),
 ) -> dict:
     """Resolve the caller from the JWT, taken from the Authorization header
     (API/script clients) or the httpOnly auth cookie (browser), then confirm

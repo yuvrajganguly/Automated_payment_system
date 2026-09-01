@@ -6,6 +6,7 @@ returns numeric -> psycopg would hand back a Decimal, which those converters
 skipped, rendering 100x too large. The connection layer now loads numeric as
 int/float so this can't happen. These tests lock that in on BOTH backends.
 """
+
 from __future__ import annotations
 
 from payout.money import rupeeize, to_rupees
@@ -15,7 +16,9 @@ def _insert_person(db, name):
     db.execute("INSERT INTO person_registry (display_name) VALUES (?)", (name,))
     return db.execute(
         "SELECT person_id FROM person_registry WHERE display_name=? "
-        "ORDER BY person_id DESC LIMIT 1", (name,)).fetchone()[0]
+        "ORDER BY person_id DESC LIMIT 1",
+        (name,),
+    ).fetchone()[0]
 
 
 def test_summed_money_column_is_rupee_scaled(db):
@@ -26,16 +29,18 @@ def test_summed_money_column_is_rupee_scaled(db):
         db.execute(
             "INSERT INTO cod_holds (cycle_start, cycle_end, company, person_id, "
             "amount, source) VALUES ('2026-06-01','2026-06-07','X',?,?,'test')",
-            (pid, amt))
+            (pid, amt),
+        )
     db.commit()
     row = db.execute(
-        "SELECT COALESCE(SUM(amount),0) AS total_pending FROM cod_holds "
-        "WHERE person_id=?", (pid,)).fetchone()
+        "SELECT COALESCE(SUM(amount),0) AS total_pending FROM cod_holds WHERE person_id=?", (pid,)
+    ).fetchone()
     # The value coming out of the DB must be a plain number the converter accepts.
     out = rupeeize({"total_pending": row["total_pending"]})
     assert out["total_pending"] == 5000.00, (
         f"summed money rendered wrong scale: got {out['total_pending']} "
-        f"(raw {row['total_pending']!r}) — expected 5000.00")
+        f"(raw {row['total_pending']!r}) — expected 5000.00"
+    )
 
 
 def test_to_rupees_basic():

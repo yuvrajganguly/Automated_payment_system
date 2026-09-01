@@ -20,19 +20,17 @@ These deliberately bypass the safety rails that admins are bound by.
 from __future__ import annotations
 
 import os
-import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from payout.api.auth import require_creator
+from payout.config import DB_PATH as _DB_PATH
 from payout.db import get_connection
 from payout.db.references import purge_ev, purge_person, repoint_person
 from payout.money import to_paise
-from payout.config import DB_PATH as _DB_PATH
 
 router = APIRouter()
 
@@ -41,18 +39,22 @@ router = APIRouter()
 @router.get("/audit-log")
 def audit_log(
     limit: int = Query(200, ge=1, le=1000),
-    email: Optional[str] = None,
-    method: Optional[str] = None,
+    email: str | None = None,
+    method: str | None = None,
     _: dict = Depends(require_creator),
 ) -> list[dict]:
-    sql = ("SELECT id, at, email, role, method, path, status_code, "
-           "       duration_ms, body_excerpt, ip "
-           "FROM audit_log WHERE 1=1 ")
+    sql = (
+        "SELECT id, at, email, role, method, path, status_code, "
+        "       duration_ms, body_excerpt, ip "
+        "FROM audit_log WHERE 1=1 "
+    )
     params: list = []
     if email:
-        sql += " AND email = ?"; params.append(email)
+        sql += " AND email = ?"
+        params.append(email)
     if method:
-        sql += " AND method = ?"; params.append(method.upper())
+        sql += " AND method = ?"
+        params.append(method.upper())
     sql += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
     with get_connection() as conn:
@@ -66,18 +68,16 @@ def system_stats(_: dict = Depends(require_creator)) -> dict:
     db_path = str(_DB_PATH)
     db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
     with get_connection() as conn:
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
-        )]
-        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                  for t in tables}
-        last_cycle = conn.execute(
-            "SELECT MAX(cycle_end) AS m FROM transactions"
-        ).fetchone()["m"]
-        last_audit = conn.execute(
-            "SELECT MAX(at) AS m FROM audit_log"
-        ).fetchone()["m"]
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+        last_cycle = conn.execute("SELECT MAX(cycle_end) AS m FROM transactions").fetchone()["m"]
+        last_audit = conn.execute("SELECT MAX(at) AS m FROM audit_log").fetchone()["m"]
     return {
         "db_path": db_path,
         "db_size_bytes": db_size,
@@ -103,9 +103,9 @@ def backup_download(_: dict = Depends(require_creator)) -> FileResponse:
 
 # ── 4. Hard delete a person ───────────────────────────────────────────────
 @router.delete("/persons/{person_id}")
-def delete_person(person_id: int,
-                  cascade: bool = Query(True),
-                  _: dict = Depends(require_creator)) -> dict:
+def delete_person(
+    person_id: int, cascade: bool = Query(True), _: dict = Depends(require_creator)
+) -> dict:
     with get_connection() as conn:
         if not conn.execute(
             "SELECT 1 FROM person_registry WHERE person_id=?", (person_id,)
@@ -131,19 +131,18 @@ def delete_ev(ev_id: str, _: dict = Depends(require_creator)) -> dict:
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (ev_id,)).fetchone():
             raise HTTPException(404, "EV not found")
-        purge_ev(conn, ev_id)   # incl. ev_daily_ledger, which was forgotten here
+        purge_ev(conn, ev_id)  # incl. ev_daily_ledger, which was forgotten here
         conn.commit()
     return {"deleted": True, "ev_id": ev_id}
 
 
 # ── 6. Hard delete a company ──────────────────────────────────────────────
 @router.delete("/companies/{name}")
-def delete_company(name: str, force: bool = Query(False),
-                   _: dict = Depends(require_creator)) -> dict:
+def delete_company(
+    name: str, force: bool = Query(False), _: dict = Depends(require_creator)
+) -> dict:
     with get_connection() as conn:
-        if not conn.execute(
-            "SELECT 1 FROM companies WHERE company_name=?", (name,)
-        ).fetchone():
+        if not conn.execute("SELECT 1 FROM companies WHERE company_name=?", (name,)).fetchone():
             raise HTTPException(404, "Company not found")
         ref = conn.execute(
             "SELECT COUNT(*) AS n FROM rider_master WHERE company=?", (name,)
@@ -166,15 +165,15 @@ def delete_company(name: str, force: bool = Query(False),
 
 # ── 7. Transaction surgery ────────────────────────────────────────────────
 class TxnEditIn(BaseModel):
-    amount: Optional[float] = None
-    remarks: Optional[str] = None
+    amount: float | None = None
+    remarks: str | None = None
 
 
 def _rebalance(conn, person_id: int) -> float:
     """Recompute balances.current_balance from the surviving ledger."""
     row = conn.execute(
-        "SELECT balance_after FROM transactions WHERE person_id=? "
-        "ORDER BY id DESC LIMIT 1", (person_id,),
+        "SELECT balance_after FROM transactions WHERE person_id=? ORDER BY id DESC LIMIT 1",
+        (person_id,),
     ).fetchone()
     bal = float(row["balance_after"]) if row else 0.0
     conn.execute(
@@ -187,8 +186,7 @@ def _rebalance(conn, person_id: int) -> float:
 
 
 @router.patch("/transactions/{txn_id}")
-def edit_transaction(txn_id: int, body: TxnEditIn,
-                     _: dict = Depends(require_creator)) -> dict:
+def edit_transaction(txn_id: int, body: TxnEditIn, _: dict = Depends(require_creator)) -> dict:
     if body.amount is None and body.remarks is None:
         raise HTTPException(400, "Nothing to update")
     with get_connection() as conn:
@@ -200,10 +198,13 @@ def edit_transaction(txn_id: int, body: TxnEditIn,
         sets, params = [], []
         if body.amount is not None:
             delta = to_paise(body.amount) - float(row["amount"])
-            sets.append("amount = ?"); params.append(to_paise(body.amount))
-            sets.append("balance_after = balance_after + ?"); params.append(delta)
+            sets.append("amount = ?")
+            params.append(to_paise(body.amount))
+            sets.append("balance_after = balance_after + ?")
+            params.append(delta)
         if body.remarks is not None:
-            sets.append("remarks = ?"); params.append(body.remarks)
+            sets.append("remarks = ?")
+            params.append(body.remarks)
         params.append(txn_id)
         conn.execute(f"UPDATE transactions SET {', '.join(sets)} WHERE id=?", params)
         new_balance = _rebalance(conn, row["person_id"])
@@ -311,17 +312,24 @@ def force_merge(body: ForceMergeIn, _: dict = Depends(require_creator)) -> dict:
                 "  cod_recovered   = cod_recovered   + ?, "
                 "  cod_outstanding = cod_outstanding + ? "
                 "WHERE person_id=?",
-                (arr["total_missed"] or 0, arr["total_recovered"] or 0,
-                 arr["outstanding"] or 0, arr["cod_missed"] or 0,
-                 arr["cod_recovered"] or 0, arr["cod_outstanding"] or 0,
-                 body.primary_person_id),
+                (
+                    arr["total_missed"] or 0,
+                    arr["total_recovered"] or 0,
+                    arr["outstanding"] or 0,
+                    arr["cod_missed"] or 0,
+                    arr["cod_recovered"] or 0,
+                    arr["cod_outstanding"] or 0,
+                    body.primary_person_id,
+                ),
             )
         for t in ("balances", "ev_arrears", "status_tracking", "person_registry"):
-            conn.execute(f"DELETE FROM {t} WHERE person_id=?",
-                         (body.secondary_person_id,))
+            conn.execute(f"DELETE FROM {t} WHERE person_id=?", (body.secondary_person_id,))
         conn.commit()
-    return {"merged": True, "into_person_id": body.primary_person_id,
-            "from_person_id": body.secondary_person_id}
+    return {
+        "merged": True,
+        "into_person_id": body.primary_person_id,
+        "from_person_id": body.secondary_person_id,
+    }
 
 
 # ── 9. EV model CRUD ──────────────────────────────────────────────────────
@@ -344,16 +352,12 @@ def create_ev_model(body: EvModelIn, _: dict = Depends(require_creator)) -> dict
 
 
 @router.patch("/ev-models/{model_id}")
-def edit_ev_model(model_id: int, body: EvModelIn,
-                  _: dict = Depends(require_creator)) -> dict:
+def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_creator)) -> dict:
     with get_connection() as conn:
-        if not conn.execute(
-            "SELECT 1 FROM ev_models WHERE model_id=?", (model_id,)
-        ).fetchone():
+        if not conn.execute("SELECT 1 FROM ev_models WHERE model_id=?", (model_id,)).fetchone():
             raise HTTPException(404, "Model not found")
         conn.execute(
-            "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=? "
-            "WHERE model_id=?",
+            "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=? WHERE model_id=?",
             (body.provider, body.model_name, to_paise(body.weekly_rate), model_id),
         )
         conn.commit()

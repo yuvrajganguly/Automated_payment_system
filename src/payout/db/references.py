@@ -14,7 +14,7 @@ from __future__ import annotations
 # (table, column) pairs that reference person_registry(person_id), ordered so
 # that a DELETE in this order never violates a foreign key: children first.
 PERSON_REFS: tuple[tuple[str, str], ...] = (
-    ("payment_lines", "person_id"),        # -> transactions(id) too: must go first
+    ("payment_lines", "person_id"),  # -> transactions(id) too: must go first
     ("ev_daily_ledger", "assigned_person_id"),
     ("cod_holds", "person_id"),
     ("transactions", "person_id"),
@@ -43,9 +43,7 @@ def repoint_person(conn, from_person_id: int, to_person_id: int) -> None:
     for table, col in PERSON_REFS:
         if table in PERSON_SINGLETON_TABLES:
             continue
-        conn.execute(
-            f"UPDATE {table} SET {col}=? WHERE {col}=?", (to_person_id, from_person_id)
-        )
+        conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (to_person_id, from_person_id))
 
 
 def purge_person(conn, person_id: int) -> None:

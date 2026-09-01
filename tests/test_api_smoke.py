@@ -12,6 +12,7 @@ seed; a path that still contains ``{`` fails the test instead of being skipped.
 Backend-agnostic: runs on SQLite by default; set ``PAYOUT_DB_URL`` to a Postgres
 URL (database name ending in ``_test``) to run the same checks against Postgres.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -27,10 +28,23 @@ from payout.db.demo_seed import seed_demo  # noqa: E402
 from tests.conftest import reset_database  # noqa: E402
 
 _BREAKDOWN_METRICS = [
-    "active_riders", "inactive_riders", "rent_expected", "provider_owed",
-    "active_evs", "inactive_evs", "untouched_evs", "rent_collected",
-    "rent_missed", "rent_pending", "rent_partial", "arrears_recovered",
-    "manual_rent", "cod", "hold", "payout", "total_arrears",
+    "active_riders",
+    "inactive_riders",
+    "rent_expected",
+    "provider_owed",
+    "active_evs",
+    "inactive_evs",
+    "untouched_evs",
+    "rent_collected",
+    "rent_missed",
+    "rent_pending",
+    "rent_partial",
+    "arrears_recovered",
+    "manual_rent",
+    "cod",
+    "hold",
+    "payout",
+    "total_arrears",
 ]
 
 # Required query strings, per OpenAPI path.
@@ -43,8 +57,8 @@ _QUERY = {
 
 # GETs that legitimately answer something other than 200 with these params.
 _EXPECTED_STATUS = {
-    "/api/providers/{provider}/bills/{bill_id}": 404,   # no bills in the demo seed
-    "/api/payments/uploads/{upload_id}": 404,           # no MIS uploads in the demo seed
+    "/api/providers/{provider}/bills/{bill_id}": 404,  # no bills in the demo seed
+    "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
 }
 
 
@@ -65,19 +79,27 @@ def smoke():
     # raise_server_exceptions=False so a 500 comes back as a response we can
     # assert on, instead of propagating and aborting the whole test.
     with TestClient(app, raise_server_exceptions=False) as client:
-        r = client.post("/api/auth/login",
-                        data={"username": "admin@demo.com", "password": "Demo-1234"})
+        r = client.post(
+            "/api/auth/login", data={"username": "admin@demo.com", "password": "Demo-1234"}
+        )
         assert r.status_code == 200, f"demo login failed: {r.status_code} {r.text[:200]}"
         with get_connection() as conn:
             pid = conn.execute("SELECT person_id FROM person_registry LIMIT 1").fetchone()[0]
             ev = conn.execute("SELECT ev_id FROM ev_units LIMIT 1").fetchone()[0]
             rider, company = conn.execute(
-                "SELECT rider_id, company FROM rider_master LIMIT 1").fetchone()
+                "SELECT rider_id, company FROM rider_master LIMIT 1"
+            ).fetchone()
             provider = conn.execute("SELECT provider FROM ev_models LIMIT 1").fetchone()[0]
         subs = {
-            "{person_id}": str(pid), "{ev_id}": str(ev), "{rider_id}": str(rider),
-            "{company_name}": company, "{rider_company}": company, "{provider}": provider,
-            "{email}": "admin@demo.com", "{upload_id}": "1", "{bill_id}": "1",
+            "{person_id}": str(pid),
+            "{ev_id}": str(ev),
+            "{rider_id}": str(rider),
+            "{company_name}": company,
+            "{rider_company}": company,
+            "{provider}": provider,
+            "{email}": "admin@demo.com",
+            "{upload_id}": "1",
+            "{bill_id}": "1",
         }
         yield client, app, subs
 

@@ -51,7 +51,7 @@ def get_next_cycle(company_name: str, _: dict = Depends(get_current_user)) -> di
             raise HTTPException(404, f"Unknown company: {company_name!r}")
         latest = conn.execute(
             "SELECT MAX(cycle_end) AS last_end FROM transactions "
-            "WHERE company = ? AND event_type IN ('PAYOUT','RENT','RENT_MISSED','RENT_RECOVERED','DUES_CARRY')",
+            "WHERE company = ? AND event_type IN ('PAYOUT','RENT','RENT_MISSED','RENT_RECOVERED','DUES_CARRY')",  # noqa: E501
             (company_name,),
         ).fetchone()
     last_end: date | None = None

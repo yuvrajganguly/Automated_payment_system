@@ -12,8 +12,6 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from openpyxl import Workbook
 
@@ -25,23 +23,24 @@ from payout.money import to_rupees
 router = APIRouter()
 
 
-def _split_companies(s: Optional[str]) -> list[str]:
+def _split_companies(s: str | None) -> list[str]:
     """Comma-separated company filter → list. Empty / None → empty list."""
     if not s:
         return []
     return [c.strip() for c in s.split(",") if c.strip()]
 
 
-def _resolve_cycle_ends(conn, companies: list[str],
-                        week_bucket: Optional[str]) -> list[str]:
+def _resolve_cycle_ends(conn, companies: list[str], week_bucket: str | None) -> list[str]:
     """Distinct cycle_ends in scope. ``companies=[]`` means all."""
     sql = "SELECT DISTINCT cycle_end FROM company_cycles WHERE 1=1"
     params: list = []
     if companies:
         ph = ",".join("?" for _ in companies)
-        sql += f" AND company IN ({ph})"; params.extend(companies)
+        sql += f" AND company IN ({ph})"
+        params.extend(companies)
     if week_bucket:
-        sql += " AND week_bucket = ?"; params.append(week_bucket)
+        sql += " AND week_bucket = ?"
+        params.append(week_bucket)
     return [r["cycle_end"] for r in conn.execute(sql, params).fetchall()]
 
 
@@ -51,38 +50,45 @@ def _scope_sql(companies: list[str], cycle_ends: list[str]) -> tuple[str, list]:
     params: list = []
     if companies:
         ph = ",".join("?" for _ in companies)
-        parts.append(f"t.company IN ({ph})"); params.extend(companies)
+        parts.append(f"t.company IN ({ph})")
+        params.extend(companies)
     if cycle_ends:
         ph = ",".join("?" for _ in cycle_ends)
-        parts.append(f"t.cycle_end IN ({ph})"); params.extend(cycle_ends)
+        parts.append(f"t.cycle_end IN ({ph})")
+        params.extend(cycle_ends)
     return ((" AND " + " AND ".join(parts)) if parts else "", params)
 
 
 def _default_window():
     """Default scope when nothing is passed: last 7 days ending today."""
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
     today = _date.today()
     return (today - _td(days=6), today)
 
 
 @router.get("/summary")
 def dashboard_summary(
-    company: Optional[str] = None,        # legacy single (back-compat)
-    companies: Optional[str] = None,      # comma-separated multi
-    date_from: Optional[str] = None,      # ISO date — inclusive
-    date_to: Optional[str] = None,        # ISO date — inclusive
+    company: str | None = None,  # legacy single (back-compat)
+    companies: str | None = None,  # comma-separated multi
+    date_from: str | None = None,  # ISO date — inclusive
+    date_to: str | None = None,  # ISO date — inclusive
     # Back-compat: callers using ?week_bucket=YYYY-Www get the week's [Mon, Sun].
-    week_bucket: Optional[str] = None,
+    week_bucket: str | None = None,
     _: dict = Depends(get_current_user),
 ) -> dict:
     cos = _split_companies(companies) or ([company] if company else [])
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
     # Resolve the date window.
     if week_bucket and not (date_from or date_to):
         # Translate week_bucket → date window for any old client.
         try:
             y, w = week_bucket.split("-W")
             from datetime import datetime as _dt
+
             mon = _dt.strptime(f"{y}-W{int(w):02d}-1", "%G-W%V-%u").date()
             d_from, d_to = mon, mon + _td(days=6)
         except Exception:
@@ -90,15 +96,16 @@ def dashboard_summary(
     elif date_from and date_to:
         try:
             d_from = _date.fromisoformat(date_from)
-            d_to   = _date.fromisoformat(date_to)
+            d_to = _date.fromisoformat(date_to)
         except ValueError:
-            raise HTTPException(400, "date_from / date_to must be ISO dates.")
+            raise HTTPException(400, "date_from / date_to must be ISO dates.")  # noqa: B904
     else:
         d_from, d_to = _default_window()
     with get_connection() as conn:
         # ── filter dropdowns ────────────────────────────────────────────
         avail_companies = [
-            r["company"] for r in conn.execute(
+            r["company"]
+            for r in conn.execute(
                 "SELECT DISTINCT company FROM company_cycles ORDER BY company"
             ).fetchall()
         ]
@@ -145,7 +152,7 @@ def dashboard_summary(
         # ── Rent metrics from the daily ledger (source of truth) ─────────
         rent_sums = conn.execute(
             f"SELECT "
-            f"  COALESCE(SUM(CASE WHEN l.state='billable' THEN l.daily_cost ELSE 0 END), 0) AS expected, "
+            f"  COALESCE(SUM(CASE WHEN l.state='billable' THEN l.daily_cost ELSE 0 END), 0) AS expected, "  # noqa: E501
             f"  COALESCE(SUM(CASE WHEN l.billing_status IN ('billed','recovered') "
             f"                    THEN l.daily_cost ELSE 0 END), 0) AS collected, "
             f"  COALESCE(SUM(CASE WHEN l.billing_status='missed' "
@@ -179,28 +186,37 @@ def dashboard_summary(
             ph = ",".join("?" for _ in cos)
             co_scope = f"AND rm.company IN ({ph})"
             co_scope_params = cos
-        active_pids = {r["person_id"] for r in conn.execute(
-            f"SELECT DISTINCT t.person_id FROM transactions t "
-            f"WHERE t.event_type='PAYOUT' {scope}",
-            scope_params,
-        ).fetchall()}
+        active_pids = {
+            r["person_id"]
+            for r in conn.execute(
+                f"SELECT DISTINCT t.person_id FROM transactions t "
+                f"WHERE t.event_type='PAYOUT' {scope}",
+                scope_params,
+            ).fetchall()
+        }
         # All persons who have an active rider_master row in scope. Inactive
         # is this set minus the active set.
         # Only a company that actually processed a payout in the window can
         # render its riders 'inactive' — otherwise a company that simply
         # did not upload this week marks all its riders absent (false +ve).
-        companies_ran = [r["company"] for r in conn.execute(
-            f"SELECT DISTINCT t.company FROM transactions t "
-            f"WHERE t.event_type='PAYOUT' {scope}",
-            scope_params,
-        ).fetchall()]
+        companies_ran = [
+            r["company"]
+            for r in conn.execute(
+                f"SELECT DISTINCT t.company FROM transactions t "
+                f"WHERE t.event_type='PAYOUT' {scope}",
+                scope_params,
+            ).fetchall()
+        ]
         if companies_ran:
             ran_ph = ",".join("?" for _ in companies_ran)
-            scope_pids = {r["person_id"] for r in conn.execute(
-                f"SELECT DISTINCT rm.person_id FROM rider_master rm "
-                f"WHERE rm.is_active=1 {co_scope} AND rm.company IN ({ran_ph})",
-                co_scope_params + list(companies_ran),
-            ).fetchall()}
+            scope_pids = {
+                r["person_id"]
+                for r in conn.execute(
+                    f"SELECT DISTINCT rm.person_id FROM rider_master rm "
+                    f"WHERE rm.is_active=1 {co_scope} AND rm.company IN ({ran_ph})",
+                    co_scope_params + list(companies_ran),
+                ).fetchall()
+            }
         else:
             scope_pids = set()
         active_riders = len(active_pids)
@@ -225,26 +241,35 @@ def dashboard_summary(
                 f"   WHERE rm.company IN ({ph}) AND rm.is_active=1) "
             )
             ev_co_params = list(cos)
-        in_use_ev_ids = {r["ev_id"] for r in conn.execute(
-            f"SELECT DISTINCT u.ev_id FROM ev_units u "
-            f"LEFT JOIN ev_assignments ea ON ea.ev_id=u.ev_id "
-            f"                            AND ea.returned_date IS NULL "
-            f"WHERE u.status='in_use' "
-            f"  AND (? = 0 OR ea.person_id IS NOT NULL) {ev_co_join}",
-            [1 if cos else 0] + ev_co_params,
-        ).fetchall()}
-        active_ev_ids = {r["ev_id"] for r in conn.execute(
-            f"SELECT DISTINCT l.ev_id FROM ev_daily_ledger l "
-            f"WHERE l.day BETWEEN ? AND ? "
-            f"  AND l.billing_status IN ('billed','recovered') {led_co_filter}",
-            [df_iso, dt_iso] + led_co_params,
-        ).fetchall()} & in_use_ev_ids
-        inactive_ev_ids = {r["ev_id"] for r in conn.execute(
-            f"SELECT DISTINCT l.ev_id FROM ev_daily_ledger l "
-            f"WHERE l.day BETWEEN ? AND ? "
-            f"  AND l.billing_status='missed' {led_co_filter}",
-            [df_iso, dt_iso] + led_co_params,
-        ).fetchall()} & in_use_ev_ids
+        in_use_ev_ids = {
+            r["ev_id"]
+            for r in conn.execute(
+                f"SELECT DISTINCT u.ev_id FROM ev_units u "
+                f"LEFT JOIN ev_assignments ea ON ea.ev_id=u.ev_id "
+                f"                            AND ea.returned_date IS NULL "
+                f"WHERE u.status='in_use' "
+                f"  AND (? = 0 OR ea.person_id IS NOT NULL) {ev_co_join}",
+                [1 if cos else 0] + ev_co_params,
+            ).fetchall()
+        }
+        active_ev_ids = {
+            r["ev_id"]
+            for r in conn.execute(
+                f"SELECT DISTINCT l.ev_id FROM ev_daily_ledger l "
+                f"WHERE l.day BETWEEN ? AND ? "
+                f"  AND l.billing_status IN ('billed','recovered') {led_co_filter}",
+                [df_iso, dt_iso] + led_co_params,
+            ).fetchall()
+        } & in_use_ev_ids
+        inactive_ev_ids = {
+            r["ev_id"]
+            for r in conn.execute(
+                f"SELECT DISTINCT l.ev_id FROM ev_daily_ledger l "
+                f"WHERE l.day BETWEEN ? AND ? "
+                f"  AND l.billing_status='missed' {led_co_filter}",
+                [df_iso, dt_iso] + led_co_params,
+            ).fetchall()
+        } & in_use_ev_ids
         inactive_ev_ids = inactive_ev_ids - active_ev_ids
         untouched_ev_ids = in_use_ev_ids - active_ev_ids - inactive_ev_ids
         active_evs = len(active_ev_ids)
@@ -257,33 +282,34 @@ def dashboard_summary(
             f" SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             f"          THEN t.amount ELSE 0 END) AS arrears_recovered, "
             f" SUM(CASE WHEN t.event_type='RELEASE'        THEN -t.amount ELSE 0 END) AS payout, "
-            f" SUM(CASE WHEN t.event_type='PAYOUT'         THEN  t.amount ELSE 0 END) AS gross_payout, "
+            f" SUM(CASE WHEN t.event_type='PAYOUT'         THEN  t.amount ELSE 0 END) AS gross_payout, "  # noqa: E501
             f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
             f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
             f"          THEN t.amount ELSE 0 END) AS manual_rent "
             f"FROM transactions t WHERE 1=1 {scope}",
             scope_params,
         ).fetchone()
-        arrears_recov   = float(sums["arrears_recovered"] or 0)
-        payout          = float(sums["payout"]          or 0)
-        gross_payout    = float(sums["gross_payout"]    or 0)
-        manual_rent     = float(sums["manual_rent"]     or 0)
+        arrears_recov = float(sums["arrears_recovered"] or 0)
+        payout = float(sums["payout"] or 0)
+        gross_payout = float(sums["gross_payout"] or 0)
+        manual_rent = float(sums["manual_rent"] or 0)
         hold = max(0.0, gross_payout - payout)
 
         # Partial rent collection: per rider this window, rent CHARGED (RENT)
         # minus rent COLLECTED in cash (RENT_COLLECTED). Sum only positive
         # shortfalls -- the part that rolled to dues. Riders who paid nothing
         # toward this cycle's rent are included.
-        rent_partial = float(conn.execute(
-            f"SELECT COALESCE(SUM(shortfall), 0) AS s FROM ("
-            f"  SELECT t.person_id, "
-            f"    SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) "
-            f"    - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS shortfall "
-            f"  FROM transactions t WHERE 1=1 {scope} "
-            f"  GROUP BY t.person_id"
-            f") WHERE shortfall > 0",
-            scope_params,
-        ).fetchone()["s"]
+        rent_partial = float(
+            conn.execute(
+                f"SELECT COALESCE(SUM(shortfall), 0) AS s FROM ("
+                f"  SELECT t.person_id, "
+                f"    SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) "
+                f"    - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS shortfall "  # noqa: E501
+                f"  FROM transactions t WHERE 1=1 {scope} "
+                f"  GROUP BY t.person_id"
+                f") WHERE shortfall > 0",
+                scope_params,
+            ).fetchone()["s"]
         )
 
         # COD: scope by the cod_holds row's created_at — same semantic as
@@ -293,53 +319,64 @@ def dashboard_summary(
         cod_filter = "date(ch.created_at) BETWEEN ? AND ?"
         if cos:
             ph = ",".join("?" for _ in cos)
-            cod_filter += f" AND ch.company IN ({ph})"; cod_params.extend(cos)
-        cod_total = float(conn.execute(
-            f"SELECT COALESCE(SUM(ch.amount), 0) AS s FROM cod_holds ch "
-            f"WHERE {cod_filter}",
-            cod_params,
-        ).fetchone()["s"])
+            cod_filter += f" AND ch.company IN ({ph})"
+            cod_params.extend(cos)
+        cod_total = float(
+            conn.execute(
+                f"SELECT COALESCE(SUM(ch.amount), 0) AS s FROM cod_holds ch WHERE {cod_filter}",
+                cod_params,
+            ).fetchone()["s"]
+        )
 
-        old_dues_now = float(conn.execute(
-            "SELECT COALESCE(SUM(-current_balance), 0) AS s FROM balances "
-            "WHERE current_balance < 0"
-        ).fetchone()["s"])
-        ev_arrears_now = float(conn.execute(
-            "SELECT COALESCE(SUM(outstanding), 0) AS s FROM ev_arrears"
-        ).fetchone()["s"])
+        old_dues_now = float(
+            conn.execute(
+                "SELECT COALESCE(SUM(-current_balance), 0) AS s FROM balances "
+                "WHERE current_balance < 0"
+            ).fetchone()["s"]
+        )
+        ev_arrears_now = float(
+            conn.execute("SELECT COALESCE(SUM(outstanding), 0) AS s FROM ev_arrears").fetchone()[
+                "s"
+            ]
+        )
         total_arrears = old_dues_now + ev_arrears_now
 
         stats = {
-            "active_riders":     active_riders,
-            "inactive_riders":   inactive_riders,
-            "active_evs":        active_evs,
-            "inactive_evs":      inactive_evs,
-            "untouched_evs":     untouched_evs,
-            "rent_expected":     round(rent_expected, 2),
-            "rent_collected":    round(rent_collected, 2),
-            "rent_missed":       round(rent_missed, 2),
-            "rent_pending":      round(rent_pending, 2),
-            "rent_partial":      round(rent_partial, 2),
+            "active_riders": active_riders,
+            "inactive_riders": inactive_riders,
+            "active_evs": active_evs,
+            "inactive_evs": inactive_evs,
+            "untouched_evs": untouched_evs,
+            "rent_expected": round(rent_expected, 2),
+            "rent_collected": round(rent_collected, 2),
+            "rent_missed": round(rent_missed, 2),
+            "rent_pending": round(rent_pending, 2),
+            "rent_partial": round(rent_partial, 2),
             "arrears_recovered": round(arrears_recov, 2),
-            "total_arrears":     round(total_arrears, 2),
-            "manual_rent":       round(manual_rent, 2),
-            "cod":               round(cod_total, 2),
-            "hold":              round(hold, 2),
-            "payout":            round(payout, 2),
-            "provider_owed":     round(provider_owed, 2),
+            "total_arrears": round(total_arrears, 2),
+            "manual_rent": round(manual_rent, 2),
+            "cod": round(cod_total, 2),
+            "hold": round(hold, 2),
+            "payout": round(payout, 2),
+            "provider_owed": round(provider_owed, 2),
         }
 
         lifetime = {
-            "total_riders": conn.execute(
-                "SELECT COUNT(*) AS n FROM person_registry"
-            ).fetchone()["n"],
+            "total_riders": conn.execute("SELECT COUNT(*) AS n FROM person_registry").fetchone()[
+                "n"
+            ],
             "total_evs": conn.execute(
                 "SELECT COUNT(*) AS n FROM ev_units WHERE status <> 'returned'"
             ).fetchone()["n"],
-            "total_payout": round(float(conn.execute(
-                "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
-                "WHERE event_type='RELEASE'"
-            ).fetchone()["s"]), 2),
+            "total_payout": round(
+                float(
+                    conn.execute(
+                        "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
+                        "WHERE event_type='RELEASE'"
+                    ).fetchone()["s"]
+                ),
+                2,
+            ),
         }
 
         # ── charts ──────────────────────────────────────────────────────
@@ -377,10 +414,13 @@ def dashboard_summary(
             arr_co_params,
         ).fetchall()
         top_arrears = [
-            {"person_id": r["person_id"], "name": r["display_name"],
-             "ev_arrears": round(float(r["ev_arrears"] or 0), 2),
-             "dues": round(float(r["dues"] or 0), 2),
-             "arrears_total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2)}
+            {
+                "person_id": r["person_id"],
+                "name": r["display_name"],
+                "ev_arrears": round(float(r["ev_arrears"] or 0), 2),
+                "dues": round(float(r["dues"] or 0), 2),
+                "arrears_total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2),
+            }
             for r in top_arrears_rows
         ]
         ev_status = [
@@ -408,13 +448,17 @@ def dashboard_summary(
             [df_iso, dt_iso] + chart_co_params,
         ).fetchall()
         releases_by_cycle = [
-            {"label": f"{r['cycle_end']} · {r['company']}",
-             "value": round(float(r["total_release"] or 0), 2)}
+            {
+                "label": f"{r['cycle_end']} · {r['company']}",
+                "value": round(float(r["total_release"] or 0), 2),
+            }
             for r in cyc_rows
         ][-20:]
         rent_collected_by_cycle = [
-            {"label": f"{r['cycle_end']} · {r['company']}",
-             "value": round(float(r["total_rent_collected"] or 0), 2)}
+            {
+                "label": f"{r['cycle_end']} · {r['company']}",
+                "value": round(float(r["total_rent_collected"] or 0), 2),
+            }
             for r in cyc_rows
         ][-20:]
         am_chart_co_filter = ""
@@ -436,21 +480,27 @@ def dashboard_summary(
             [df_iso, dt_iso] + list(cos),
         ).fetchall()
         arrears_movement = [
-            {"cycle_end": r["cycle_end"],
-             "recovered": round(float(r["recovered"] or 0), 2),
-             "added":     round(float(r["added"]     or 0), 2)}
+            {
+                "cycle_end": r["cycle_end"],
+                "recovered": round(float(r["recovered"] or 0), 2),
+                "added": round(float(r["added"] or 0), 2),
+            }
             for r in am_rows
         ][-12:]
 
         recent_per_company = [
-            {"company": r["company"], "cycle_start": r["cycle_start"],
-             "cycle_end": r["cycle_end"], "week_bucket": r["week_bucket"],
-             "rider_count": r["rider_count"],
-             "total_release": round(float(r["total_release"] or 0), 2),
-             "total_rent_charged": round(float(r["total_rent_charged"] or 0), 2),
-             "total_rent_collected": round(float(r["total_rent_collected"] or 0), 2),
-             "total_rent_missed": round(float(r["total_rent_missed"] or 0), 2),
-             "processed_at": r["processed_at"]}
+            {
+                "company": r["company"],
+                "cycle_start": r["cycle_start"],
+                "cycle_end": r["cycle_end"],
+                "week_bucket": r["week_bucket"],
+                "rider_count": r["rider_count"],
+                "total_release": round(float(r["total_release"] or 0), 2),
+                "total_rent_charged": round(float(r["total_rent_charged"] or 0), 2),
+                "total_rent_collected": round(float(r["total_rent_collected"] or 0), 2),
+                "total_rent_missed": round(float(r["total_rent_missed"] or 0), 2),
+                "processed_at": r["processed_at"],
+            }
             for r in conn.execute(
                 "SELECT cc.* FROM company_cycles cc "
                 "JOIN (SELECT company, MAX(cycle_end) AS m FROM company_cycles "
@@ -462,16 +512,16 @@ def dashboard_summary(
 
     return {
         "filter": {
-            "company": company,           # legacy single (kept for compat)
+            "company": company,  # legacy single (kept for compat)
             "companies": cos,
             "date_from": df_iso,
-            "date_to":   dt_iso,
+            "date_to": dt_iso,
             "available_companies": avail_companies,
-            "available_weeks": avail_weeks,   # back-compat
+            "available_weeks": avail_weeks,  # back-compat
         },
         "window": {
             "from": df_iso,
-            "to":   dt_iso,
+            "to": dt_iso,
             "days": (d_to - d_from).days + 1,
         },
         "stats": stats,
@@ -493,39 +543,54 @@ def dashboard_summary(
 # ─────────────────────────────────────────────────────────────────────────
 
 _METRICS = {
-    "active_riders", "inactive_riders",
-    "active_evs", "inactive_evs", "untouched_evs",
-    "rent_expected", "rent_collected", "rent_missed", "rent_pending", "rent_partial",
-    "arrears_recovered", "manual_rent", "cod", "hold", "payout",
-    "total_arrears", "provider_owed",
+    "active_riders",
+    "inactive_riders",
+    "active_evs",
+    "inactive_evs",
+    "untouched_evs",
+    "rent_expected",
+    "rent_collected",
+    "rent_missed",
+    "rent_pending",
+    "rent_partial",
+    "arrears_recovered",
+    "manual_rent",
+    "cod",
+    "hold",
+    "payout",
+    "total_arrears",
+    "provider_owed",
 }
 
 
 @router.get("/breakdown/{metric}")
 def dashboard_breakdown(
     metric: str,
-    company: Optional[str] = None,
-    companies: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    week_bucket: Optional[str] = None,    # back-compat
+    company: str | None = None,
+    companies: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    week_bucket: str | None = None,  # back-compat
     limit: int = 500,
     _: dict = Depends(get_current_user),
 ) -> dict:
     if metric not in _METRICS:
         raise HTTPException(400, f"Unknown metric {metric!r}.")
     cos = _split_companies(companies) or ([company] if company else [])
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
     if date_from and date_to:
         try:
             d_from = _date.fromisoformat(date_from)
-            d_to   = _date.fromisoformat(date_to)
+            d_to = _date.fromisoformat(date_to)
         except ValueError:
-            raise HTTPException(400, "date_from / date_to must be ISO dates.")
+            raise HTTPException(400, "date_from / date_to must be ISO dates.")  # noqa: B904
     elif week_bucket:
         try:
             y, w = week_bucket.split("-W")
             from datetime import datetime as _dt
+
             mon = _dt.strptime(f"{y}-W{int(w):02d}-1", "%G-W%V-%u").date()
             d_from, d_to = mon, mon + _td(days=6)
         except Exception:
@@ -566,7 +631,7 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS payout, "
-                f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "
+                f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "  # noqa: E501
                 f"FROM transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE') {scope} "
@@ -580,10 +645,12 @@ def dashboard_breakdown(
             columns = ["person_id", "name", "companies", "has_open_ev"]
             # Active rider_master rows minus persons who showed up in any
             # PAYOUT in the window. Optionally scoped by companies.
-            co_filter = ""; co_params: list = []
+            co_filter = ""
+            co_params: list = []
             if cos:
                 ph = ",".join("?" for _ in cos)
-                co_filter = f"AND rm.company IN ({ph})"; co_params = list(cos)
+                co_filter = f"AND rm.company IN ({ph})"
+                co_params = list(cos)
             sql = (
                 f"SELECT pr.person_id, pr.display_name AS name, "
                 f"       GROUP_CONCAT(DISTINCT rm.company) AS companies, "
@@ -599,10 +666,10 @@ def dashboard_breakdown(
                 f"      AND t.event_type='PAYOUT' "
                 f"      AND date(t.created_at) BETWEEN ? AND ?"
                 + (f" AND t.company IN ({','.join('?' for _ in cos)})" if cos else "")
-                + f") "
-                f"GROUP BY pr.person_id, pr.display_name "
-                f"ORDER BY has_open_ev DESC, pr.display_name "
-                f"LIMIT ?"
+                + ") "
+                "GROUP BY pr.person_id, pr.display_name "
+                "ORDER BY has_open_ev DESC, pr.display_name "
+                "LIMIT ?"
             )
             params = co_params + [df_iso, dt_iso] + list(cos) + [limit]
             rows = [dict(r) for r in conn.execute(sql, params)]
@@ -620,8 +687,7 @@ def dashboard_breakdown(
                 f"GROUP BY l.ev_id, l.assigned_person_id, pr.display_name "
                 f"ORDER BY expected DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "provider_owed":
             title = "Owed to providers (per EV) in window"
@@ -636,8 +702,7 @@ def dashboard_breakdown(
                 f"GROUP BY l.ev_id, m.provider, m.model_name "
                 f"ORDER BY owed DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "active_evs":
             title = "Active EVs (billed or recovered days in window)"
@@ -656,8 +721,7 @@ def dashboard_breakdown(
                 f"GROUP BY l.ev_id, l.assigned_person_id, pr.display_name "
                 f"ORDER BY collected DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "inactive_evs":
             title = "Inactive EVs (missed days in window)"
@@ -665,24 +729,23 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT l.ev_id, l.assigned_person_id AS person_id, "
                 f"       pr.display_name AS name, "
-                f"       SUM(CASE WHEN l.billing_status='missed' THEN 1 ELSE 0 END) AS days_missed, "
-                f"       SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) AS missed_amount "
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN 1 ELSE 0 END) AS days_missed, "  # noqa: E501
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) AS missed_amount "  # noqa: E501
                 f"FROM ev_daily_ledger l "
                 f"LEFT JOIN person_registry pr ON pr.person_id=l.assigned_person_id "
                 f"WHERE l.day BETWEEN ? AND ? AND l.billing_status='missed' {led_co_filter} "
                 f"GROUP BY l.ev_id, l.assigned_person_id, pr.display_name "
                 f"ORDER BY missed_amount DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "untouched_evs":
             title = "Untouched EVs (in_use, no ledger activity in window)"
-            columns = ["ev_id", "person_id", "name", "rent_charged_through",
-                       "reason"]
+            columns = ["ev_id", "person_id", "name", "rent_charged_through", "reason"]
             # EVs with status='in_use' but no rows in ev_daily_ledger over the
             # window. Optionally scoped by the assigned rider's company.
-            co_filter = ""; co_params: list = []
+            co_filter = ""
+            co_params: list = []
             if cos:
                 ph = ",".join("?" for _ in cos)
                 co_filter = (
@@ -714,7 +777,9 @@ def dashboard_breakdown(
                 elif d["rent_charged_through"] and d["rent_charged_through"] >= dt_iso:
                     d["reason"] = "Meter past window — already pre-billed"
                 else:
-                    d["reason"] = "No cycle has covered these days yet, or rider has no rider_master row"
+                    d["reason"] = (
+                        "No cycle has covered these days yet, or rider has no rider_master row"
+                    )
                 rows.append(d)
 
         elif metric == "rent_collected":
@@ -734,8 +799,7 @@ def dashboard_breakdown(
                 f"GROUP BY l.assigned_person_id, pr.display_name "
                 f"ORDER BY collected DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "rent_missed":
             title = "Rent missed (rider absent -> arrears) per rider"
@@ -743,16 +807,15 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT l.assigned_person_id AS person_id, "
                 f"       pr.display_name AS name, "
-                f"       SUM(CASE WHEN l.billing_status='missed' THEN 1 ELSE 0 END) AS days_missed, "
-                f"       SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) AS missed "
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN 1 ELSE 0 END) AS days_missed, "  # noqa: E501
+                f"       SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) AS missed "  # noqa: E501
                 f"FROM ev_daily_ledger l "
                 f"JOIN person_registry pr ON pr.person_id=l.assigned_person_id "
                 f"WHERE l.day BETWEEN ? AND ? AND l.billing_status='missed' {led_co_filter} "
                 f"GROUP BY l.assigned_person_id, pr.display_name "
                 f"ORDER BY missed DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "rent_pending":
             title = "Rent pending - billable days no cycle has processed yet"
@@ -774,22 +837,21 @@ def dashboard_breakdown(
                 f"GROUP BY l.assigned_person_id, pr.display_name "
                 f"ORDER BY pending DESC LIMIT ?"
             )
-            rows = [dict(r) for r in conn.execute(
-                sql, [df_iso, dt_iso] + led_co_params + [limit])]
+            rows = [dict(r) for r in conn.execute(sql, [df_iso, dt_iso] + led_co_params + [limit])]
 
         elif metric == "rent_partial":
             title = "Partial rent collection - charged vs collected (cash) this window"
             columns = ["person_id", "name", "rent_charged", "rent_collected", "shortfall"]
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, "
-                f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
-                f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected "
+                f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "  # noqa: E501
+                f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected "  # noqa: E501
                 f"FROM transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('RENT','RENT_COLLECTED') {scope} "
                 f"GROUP BY t.person_id, pr.display_name "
-                f"HAVING SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
-                f"ORDER BY (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END)) DESC LIMIT ?"
+                f"HAVING SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "  # noqa: E501
+                f"ORDER BY (SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END)) DESC LIMIT ?"  # noqa: E501
             )
             rows = []
             for r in conn.execute(sql, scope_params + [limit]):
@@ -834,7 +896,8 @@ def dashboard_breakdown(
             cod_params: list = []
             if cos:
                 ph = ",".join("?" for _ in cos)
-                cod_filter += f" AND ch.company IN ({ph})"; cod_params.extend(cos)
+                cod_filter += f" AND ch.company IN ({ph})"
+                cod_params.extend(cos)
             cod_filter += " AND date(ch.created_at) BETWEEN ? AND ?"
             cod_params.extend([df_iso, dt_iso])
             sql = (
@@ -851,13 +914,13 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS payout, "
-                f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "
+                f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "  # noqa: E501
                 f"FROM transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
-                f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) "
-                f"ORDER BY (SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END)) DESC LIMIT ?"
+                f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) "  # noqa: E501
+                f"ORDER BY (SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) - SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END)) DESC LIMIT ?"  # noqa: E501
             )
             rows = []
             for r in conn.execute(sql, scope_params + [limit]):
@@ -912,22 +975,23 @@ def dashboard_breakdown(
 # Excel report — multi-sheet styled workbook.
 # ─────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/export")
 def dashboard_export(
-    mode: str = "current",                     # current | range | specific
-    companies: Optional[str] = None,
-    week_bucket: Optional[str] = None,         # used in mode=current
-    from_date: Optional[str] = None,           # used in mode=range
-    to_date: Optional[str] = None,             # used in mode=range
-    cycle_end: Optional[str] = None,           # used in mode=specific
-    cycle_company: Optional[str] = None,       # used in mode=specific
+    mode: str = "current",  # current | range | specific
+    companies: str | None = None,
+    week_bucket: str | None = None,  # used in mode=current
+    from_date: str | None = None,  # used in mode=range
+    to_date: str | None = None,  # used in mode=range
+    cycle_end: str | None = None,  # used in mode=specific
+    cycle_company: str | None = None,  # used in mode=specific
     _: dict = Depends(get_current_user),
 ):
     """Multi-sheet styled .xlsx report. Scopes:
 
-      mode=current   — week_bucket + companies filter (what the dashboard shows)
-      mode=range     — every cycle_end in [from_date, to_date] across companies
-      mode=specific  — one exact (cycle_company, cycle_end) pair
+    mode=current   — week_bucket + companies filter (what the dashboard shows)
+    mode=range     — every cycle_end in [from_date, to_date] across companies
+    mode=specific  — one exact (cycle_company, cycle_end) pair
     """
     cos = _split_companies(companies)
     with get_connection() as conn:
@@ -945,7 +1009,8 @@ def dashboard_export(
             qp: list = [from_date, to_date]
             if cos:
                 ph = ",".join("?" for _ in cos)
-                q += f" AND company IN ({ph})"; qp.extend(cos)
+                q += f" AND company IN ({ph})"
+                qp.extend(cos)
             cycle_ends = [r["cycle_end"] for r in conn.execute(q, qp).fetchall()]
             scope_label = f"{from_date} → {to_date}"
         else:
@@ -956,28 +1021,31 @@ def dashboard_export(
                 qp: list = [from_date, to_date]
                 if cos:
                     ph = ",".join("?" for _ in cos)
-                    q += f" AND company IN ({ph})"; qp.extend(cos)
+                    q += f" AND company IN ({ph})"
+                    qp.extend(cos)
                 cycle_ends = [r["cycle_end"] for r in conn.execute(q, qp).fetchall()]
-                scope_label = (f"{from_date} → {to_date}"
-                               + (f" · {', '.join(cos)}" if cos else " · all companies"))
+                scope_label = f"{from_date} → {to_date}" + (
+                    f" · {', '.join(cos)}" if cos else " · all companies"
+                )
             else:
                 cycle_ends = _resolve_cycle_ends(conn, cos, week_bucket)
-                scope_label = (
-                    f"week {week_bucket}" if week_bucket else "latest week"
-                ) + (f" · {', '.join(cos)}" if cos else " · all companies")
+                scope_label = (f"week {week_bucket}" if week_bucket else "latest week") + (
+                    f" · {', '.join(cos)}" if cos else " · all companies"
+                )
 
         scope, scope_params = _scope_sql(cos, cycle_ends)
 
         # ── Build the workbook ─────────────────────────────────────────
-        wb = Workbook(); wb.remove(wb.active)
+        wb = Workbook()
+        wb.remove(wb.active)
 
         # 1. Overview — the 13 cards
         sums = conn.execute(
             f"SELECT "
-            f" COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS active_riders, "
-            f" SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS rent_charged, "
-            f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS rent_collected, "
-            f" SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS rent_missed, "
+            f" COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS active_riders, "  # noqa: E501
+            f" SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS rent_charged, "  # noqa: E501
+            f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS rent_collected, "  # noqa: E501
+            f" SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS rent_missed, "  # noqa: E501
             f" SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             f"          THEN t.amount ELSE 0 END) AS arrears_recovered, "
             f" SUM(CASE WHEN t.event_type='RELEASE'        THEN -t.amount ELSE 0 END) AS payout, "
@@ -992,26 +1060,32 @@ def dashboard_export(
         cod_params: list = []
         if cos:
             ph = ",".join("?" for _ in cos)
-            cod_filter += f" AND ch.company IN ({ph})"; cod_params.extend(cos)
+            cod_filter += f" AND ch.company IN ({ph})"
+            cod_params.extend(cos)
         if cycle_ends:
             ph = ",".join("?" for _ in cycle_ends)
-            cod_filter += f" AND ch.cycle_end IN ({ph})"; cod_params.extend(cycle_ends)
-        cod_total = float(conn.execute(
-            f"SELECT COALESCE(SUM(ch.amount), 0) AS s FROM cod_holds ch WHERE {cod_filter}",
-            cod_params,
-        ).fetchone()["s"])
+            cod_filter += f" AND ch.cycle_end IN ({ph})"
+            cod_params.extend(cycle_ends)
+        cod_total = float(
+            conn.execute(
+                f"SELECT COALESCE(SUM(ch.amount), 0) AS s FROM cod_holds ch WHERE {cod_filter}",
+                cod_params,
+            ).fetchone()["s"]
+        )
         gross = float(sums["gross"] or 0)
         payout = float(sums["payout"] or 0)
         rent_charged = float(sums["rent_charged"] or 0)
         rent_collected = float(sums["rent_collected"] or 0)
         rent_dues = max(0.0, rent_charged - rent_collected)
-        old_dues = float(conn.execute(
-            "SELECT COALESCE(SUM(-current_balance),0) AS s FROM balances "
-            "WHERE current_balance < 0"
-        ).fetchone()["s"])
-        ev_arr = float(conn.execute(
-            "SELECT COALESCE(SUM(outstanding),0) AS s FROM ev_arrears"
-        ).fetchone()["s"])
+        old_dues = float(
+            conn.execute(
+                "SELECT COALESCE(SUM(-current_balance),0) AS s FROM balances "
+                "WHERE current_balance < 0"
+            ).fetchone()["s"]
+        )
+        ev_arr = float(
+            conn.execute("SELECT COALESCE(SUM(outstanding),0) AS s FROM ev_arrears").fetchone()["s"]
+        )
 
         add_styled_sheet(
             wb,
@@ -1021,13 +1095,13 @@ def dashboard_export(
                 ("Scope", scope_label),
                 ("Cycle ends included", ", ".join(cycle_ends) or "—"),
                 ("Active Riders", sums["active_riders"] or 0),
-                ("Rent Charged",      to_rupees(rent_charged)),
-                ("Rent Collected",    to_rupees(rent_collected)),
+                ("Rent Charged", to_rupees(rent_charged)),
+                ("Rent Collected", to_rupees(rent_collected)),
                 ("Rent Dues (shortfall)", to_rupees(rent_dues)),
-                ("Rent Missed",       to_rupees(float(sums["rent_missed"] or 0))),
+                ("Rent Missed", to_rupees(float(sums["rent_missed"] or 0))),
                 ("Arrears Recovered", to_rupees(float(sums["arrears_recovered"] or 0))),
-                ("Manual Rent",       to_rupees(float(sums["manual_rent"] or 0))),
-                ("COD",               to_rupees(cod_total)),
+                ("Manual Rent", to_rupees(float(sums["manual_rent"] or 0))),
+                ("COD", to_rupees(cod_total)),
                 ("HOLD (gross − net)", to_rupees(max(0.0, gross - payout))),
                 ("Payout (released)", to_rupees(payout)),
                 ("— Live —", ""),
@@ -1040,35 +1114,52 @@ def dashboard_export(
         )
 
         # 2. EV Rent: Collected vs Expected per rider (MAIN FOCUS)
-        rows_evrent = list(conn.execute(
-            f"SELECT t.person_id, pr.display_name AS name, t.company, "
-            f"       (SELECT ea.ev_id FROM ev_assignments ea "
-            f"          WHERE ea.person_id=t.person_id AND ea.returned_date IS NULL "
-            f"          LIMIT 1) AS ev_id, "
-            f"       SUM(CASE WHEN t.event_type='RENT'         THEN -t.amount ELSE 0 END) AS expected, "
-            f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS collected, "
-            f"       SUM(CASE WHEN t.event_type='RENT_MISSED'  THEN -t.amount ELSE 0 END) AS missed, "
-            f"       SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
-            f"                THEN t.amount ELSE 0 END) AS recovered "
-            f"FROM transactions t "
-            f"JOIN person_registry pr ON pr.person_id=t.person_id "
-            f"WHERE t.event_type IN ('RENT','RENT_COLLECTED','RENT_MISSED', "
-            f"                       'RENT_RECOVERED','XC_RENT_RECOVERED') {scope} "
-            f"GROUP BY t.person_id, pr.display_name, t.company "
-            f"ORDER BY expected DESC, missed DESC",
-            scope_params,
-        ))
+        rows_evrent = list(
+            conn.execute(
+                f"SELECT t.person_id, pr.display_name AS name, t.company, "
+                f"       (SELECT ea.ev_id FROM ev_assignments ea "
+                f"          WHERE ea.person_id=t.person_id AND ea.returned_date IS NULL "
+                f"          LIMIT 1) AS ev_id, "
+                f"       SUM(CASE WHEN t.event_type='RENT'         THEN -t.amount ELSE 0 END) AS expected, "  # noqa: E501
+                f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS collected, "  # noqa: E501
+                f"       SUM(CASE WHEN t.event_type='RENT_MISSED'  THEN -t.amount ELSE 0 END) AS missed, "  # noqa: E501
+                f"       SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+                f"                THEN t.amount ELSE 0 END) AS recovered "
+                f"FROM transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"WHERE t.event_type IN ('RENT','RENT_COLLECTED','RENT_MISSED', "
+                f"                       'RENT_RECOVERED','XC_RENT_RECOVERED') {scope} "
+                f"GROUP BY t.person_id, pr.display_name, t.company "
+                f"ORDER BY expected DESC, missed DESC",
+                scope_params,
+            )
+        )
         add_styled_sheet(
             wb,
             sheet_name="EV Rent vs Expected",
-            headers=["Person ID", "Name", "Company", "EV ID",
-                     "Expected", "Collected", "Shortfall (Exp − Col)",
-                     "Missed (absent)", "Arrears Recovered"],
+            headers=[
+                "Person ID",
+                "Name",
+                "Company",
+                "EV ID",
+                "Expected",
+                "Collected",
+                "Shortfall (Exp − Col)",
+                "Missed (absent)",
+                "Arrears Recovered",
+            ],
             rows=[
-                (r["person_id"], r["name"], r["company"], r["ev_id"] or "",
-                 float(r["expected"] or 0), float(r["collected"] or 0),
-                 max(0.0, float(r["expected"] or 0) - float(r["collected"] or 0)),
-                 float(r["missed"] or 0), float(r["recovered"] or 0))
+                (
+                    r["person_id"],
+                    r["name"],
+                    r["company"],
+                    r["ev_id"] or "",
+                    float(r["expected"] or 0),
+                    float(r["collected"] or 0),
+                    max(0.0, float(r["expected"] or 0) - float(r["collected"] or 0)),
+                    float(r["missed"] or 0),
+                    float(r["recovered"] or 0),
+                )
                 for r in rows_evrent
             ],
             numeric_cols=(5, 6, 7, 8, 9),
@@ -1078,8 +1169,9 @@ def dashboard_export(
         )
 
         # 3. All riders with arrears or dues (MAIN FOCUS, live)
-        arr_rows = list(conn.execute(
-            """
+        arr_rows = list(
+            conn.execute(
+                """
             SELECT pr.person_id, pr.display_name,
                    COALESCE(ar.outstanding, 0) AS ev_arrears,
                    CASE WHEN COALESCE(b.current_balance, 0) < 0
@@ -1098,17 +1190,30 @@ def dashboard_export(
                       CASE WHEN COALESCE(b.current_balance, 0) < 0
                            THEN -b.current_balance ELSE 0 END) DESC
             """
-        ))
+            )
+        )
         add_styled_sheet(
             wb,
             sheet_name="Riders in Arrears",
-            headers=["Person ID", "Name", "Companies", "Hub",
-                     "EV Arrears", "Dues (Carryfwd)", "Total"],
+            headers=[
+                "Person ID",
+                "Name",
+                "Companies",
+                "Hub",
+                "EV Arrears",
+                "Dues (Carryfwd)",
+                "Total",
+            ],
             rows=[
-                (r["person_id"], r["display_name"], r["companies"] or "",
-                 r["hubs"] or "",
-                 float(r["ev_arrears"]), float(r["dues"]),
-                 float(r["ev_arrears"]) + float(r["dues"]))
+                (
+                    r["person_id"],
+                    r["display_name"],
+                    r["companies"] or "",
+                    r["hubs"] or "",
+                    float(r["ev_arrears"]),
+                    float(r["dues"]),
+                    float(r["ev_arrears"]) + float(r["dues"]),
+                )
                 for r in arr_rows
             ],
             numeric_cols=(5, 6, 7),
@@ -1118,82 +1223,122 @@ def dashboard_export(
         )
 
         # 4. Active EVs
-        active_ev_rows = list(conn.execute(
-            f"SELECT ea.ev_id, ea.person_id, pr.display_name AS name, t.company, "
-            f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent, "
-            f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS collected "
-            f"FROM ev_assignments ea "
-            f"JOIN transactions t ON t.person_id=ea.person_id "
-            f"JOIN person_registry pr ON pr.person_id=ea.person_id "
-            f"WHERE ea.returned_date IS NULL AND t.event_type='RENT' {scope} "
-            f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
-            f"ORDER BY rent DESC",
-            scope_params,
-        ))
+        active_ev_rows = list(
+            conn.execute(
+                f"SELECT ea.ev_id, ea.person_id, pr.display_name AS name, t.company, "
+                f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent, "
+                f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS collected "  # noqa: E501
+                f"FROM ev_assignments ea "
+                f"JOIN transactions t ON t.person_id=ea.person_id "
+                f"JOIN person_registry pr ON pr.person_id=ea.person_id "
+                f"WHERE ea.returned_date IS NULL AND t.event_type='RENT' {scope} "
+                f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
+                f"ORDER BY rent DESC",
+                scope_params,
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="Active EVs",
+            wb,
+            sheet_name="Active EVs",
             headers=["EV ID", "Person ID", "Name", "Company", "Rent", "Collected"],
-            rows=[(r["ev_id"], r["person_id"], r["name"], r["company"],
-                   float(r["rent"] or 0), float(r["collected"] or 0))
-                  for r in active_ev_rows],
-            numeric_cols=(5, 6), totals_cols=(5, 6), money_cols=(5, 6), left_align_cols=(3,),
+            rows=[
+                (
+                    r["ev_id"],
+                    r["person_id"],
+                    r["name"],
+                    r["company"],
+                    float(r["rent"] or 0),
+                    float(r["collected"] or 0),
+                )
+                for r in active_ev_rows
+            ],
+            numeric_cols=(5, 6),
+            totals_cols=(5, 6),
+            money_cols=(5, 6),
+            left_align_cols=(3,),
         )
 
         # 5. Inactive EVs
-        inactive_ev_rows = list(conn.execute(
-            f"SELECT ea.ev_id, ea.person_id, pr.display_name AS name, t.company, "
-            f"       SUM(-t.amount) AS missed "
-            f"FROM ev_assignments ea "
-            f"JOIN transactions t ON t.person_id=ea.person_id "
-            f"JOIN person_registry pr ON pr.person_id=ea.person_id "
-            f"WHERE ea.returned_date IS NULL AND t.event_type='RENT_MISSED' {scope} "
-            f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
-            f"ORDER BY missed DESC",
-            scope_params,
-        ))
+        inactive_ev_rows = list(
+            conn.execute(
+                f"SELECT ea.ev_id, ea.person_id, pr.display_name AS name, t.company, "
+                f"       SUM(-t.amount) AS missed "
+                f"FROM ev_assignments ea "
+                f"JOIN transactions t ON t.person_id=ea.person_id "
+                f"JOIN person_registry pr ON pr.person_id=ea.person_id "
+                f"WHERE ea.returned_date IS NULL AND t.event_type='RENT_MISSED' {scope} "
+                f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
+                f"ORDER BY missed DESC",
+                scope_params,
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="Inactive EVs",
+            wb,
+            sheet_name="Inactive EVs",
             headers=["EV ID", "Person ID", "Name", "Company", "Missed"],
-            rows=[(r["ev_id"], r["person_id"], r["name"], r["company"],
-                   float(r["missed"] or 0)) for r in inactive_ev_rows],
-            numeric_cols=(5,), totals_cols=(5,), money_cols=(5,), left_align_cols=(3,),
+            rows=[
+                (r["ev_id"], r["person_id"], r["name"], r["company"], float(r["missed"] or 0))
+                for r in inactive_ev_rows
+            ],
+            numeric_cols=(5,),
+            totals_cols=(5,),
+            money_cols=(5,),
+            left_align_cols=(3,),
         )
 
         # 6. Money flow per rider
-        money_rows = list(conn.execute(
-            f"SELECT t.person_id, pr.display_name AS name, t.company, "
-            f" SUM(CASE WHEN t.event_type='PAYOUT'  THEN t.amount ELSE 0 END) AS gross, "
-            f" SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
-            f" SUM(CASE WHEN t.event_type='RENT'    THEN -t.amount ELSE 0 END) AS rent, "
-            f" SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
-            f"          THEN t.amount ELSE 0 END) AS recovered, "
-            f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
-            f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
-            f"          THEN t.amount ELSE 0 END) AS manual_rent "
-            f"FROM transactions t "
-            f"JOIN person_registry pr ON pr.person_id=t.person_id "
-            f"WHERE t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_RECOVERED', "
-            f"                       'XC_RENT_RECOVERED','RENT_COLLECTED') {scope} "
-            f"GROUP BY t.person_id, pr.display_name, t.company "
-            f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > 0 "
-            f"    OR SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > 0 "
-            f"    OR SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') THEN t.amount ELSE 0 END) > 0 "
-            f"    OR SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) THEN t.amount ELSE 0 END) > 0 "
-            f"ORDER BY gross DESC",
-            scope_params,
-        ))
+        money_rows = list(
+            conn.execute(
+                f"SELECT t.person_id, pr.display_name AS name, t.company, "
+                f" SUM(CASE WHEN t.event_type='PAYOUT'  THEN t.amount ELSE 0 END) AS gross, "
+                f" SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
+                f" SUM(CASE WHEN t.event_type='RENT'    THEN -t.amount ELSE 0 END) AS rent, "
+                f" SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+                f"          THEN t.amount ELSE 0 END) AS recovered, "
+                f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
+                f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
+                f"          THEN t.amount ELSE 0 END) AS manual_rent "
+                f"FROM transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"WHERE t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_RECOVERED', "
+                f"                       'XC_RENT_RECOVERED','RENT_COLLECTED') {scope} "
+                f"GROUP BY t.person_id, pr.display_name, t.company "
+                f"HAVING SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) > 0 "
+                f"    OR SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > 0 "
+                f"    OR SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') THEN t.amount ELSE 0 END) > 0 "  # noqa: E501
+                f"    OR SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) THEN t.amount ELSE 0 END) > 0 "  # noqa: E501
+                f"ORDER BY gross DESC",
+                scope_params,
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="Money Flow",
-            headers=["Person ID", "Name", "Company",
-                     "Gross Payout", "Released", "Held",
-                     "Rent Charged", "Arrears Recovered", "Manual Rent"],
-            rows=[(
-                r["person_id"], r["name"], r["company"],
-                float(r["gross"] or 0), float(r["released"] or 0),
-                max(0.0, float(r["gross"] or 0) - float(r["released"] or 0)),
-                float(r["rent"] or 0), float(r["recovered"] or 0),
-                float(r["manual_rent"] or 0),
-            ) for r in money_rows],
+            wb,
+            sheet_name="Money Flow",
+            headers=[
+                "Person ID",
+                "Name",
+                "Company",
+                "Gross Payout",
+                "Released",
+                "Held",
+                "Rent Charged",
+                "Arrears Recovered",
+                "Manual Rent",
+            ],
+            rows=[
+                (
+                    r["person_id"],
+                    r["name"],
+                    r["company"],
+                    float(r["gross"] or 0),
+                    float(r["released"] or 0),
+                    max(0.0, float(r["gross"] or 0) - float(r["released"] or 0)),
+                    float(r["rent"] or 0),
+                    float(r["recovered"] or 0),
+                    float(r["manual_rent"] or 0),
+                )
+                for r in money_rows
+            ],
             numeric_cols=(4, 5, 6, 7, 8, 9),
             totals_cols=(4, 5, 6, 7, 8, 9),
             money_cols=(4, 5, 6, 7, 8, 9),
@@ -1201,71 +1346,149 @@ def dashboard_export(
         )
 
         # 7. Manual rent payments — useful audit trail
-        manual_rows = list(conn.execute(
-            f"SELECT t.id, t.person_id, pr.display_name AS name, t.company, "
-            f"       t.cycle_start, t.cycle_end, t.amount, t.remarks, "
-            f"       t.created_by, t.created_at "
-            f"FROM transactions t "
-            f"JOIN person_registry pr ON pr.person_id=t.person_id "
-            f"WHERE t.event_type='RENT_COLLECTED' AND t.created_by IS NOT NULL "
-            f"  AND t.created_by NOT IN ('engine','auto') {scope} "
-            f"ORDER BY t.id DESC",
-            scope_params,
-        ))
+        manual_rows = list(
+            conn.execute(
+                f"SELECT t.id, t.person_id, pr.display_name AS name, t.company, "
+                f"       t.cycle_start, t.cycle_end, t.amount, t.remarks, "
+                f"       t.created_by, t.created_at "
+                f"FROM transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"WHERE t.event_type='RENT_COLLECTED' AND t.created_by IS NOT NULL "
+                f"  AND t.created_by NOT IN ('engine','auto') {scope} "
+                f"ORDER BY t.id DESC",
+                scope_params,
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="Manual Rent Payments",
-            headers=["Txn ID", "Person ID", "Name", "Company",
-                     "Cycle Start", "Cycle End", "Amount", "Remarks",
-                     "Logged by", "At"],
-            rows=[(r["id"], r["person_id"], r["name"], r["company"],
-                   r["cycle_start"], r["cycle_end"], float(r["amount"] or 0),
-                   r["remarks"] or "", r["created_by"] or "",
-                   r["created_at"] or "") for r in manual_rows],
-            numeric_cols=(7,), totals_cols=(7,), money_cols=(7,), left_align_cols=(3, 8, 9, 10),
+            wb,
+            sheet_name="Manual Rent Payments",
+            headers=[
+                "Txn ID",
+                "Person ID",
+                "Name",
+                "Company",
+                "Cycle Start",
+                "Cycle End",
+                "Amount",
+                "Remarks",
+                "Logged by",
+                "At",
+            ],
+            rows=[
+                (
+                    r["id"],
+                    r["person_id"],
+                    r["name"],
+                    r["company"],
+                    r["cycle_start"],
+                    r["cycle_end"],
+                    float(r["amount"] or 0),
+                    r["remarks"] or "",
+                    r["created_by"] or "",
+                    r["created_at"] or "",
+                )
+                for r in manual_rows
+            ],
+            numeric_cols=(7,),
+            totals_cols=(7,),
+            money_cols=(7,),
+            left_align_cols=(3, 8, 9, 10),
         )
 
         # 8. COD details
-        cod_rows = list(conn.execute(
-            f"SELECT ch.rider_id, ch.person_id, ch.company, ch.cycle_start, "
-            f"       ch.cycle_end, ch.amount, ch.order_number, ch.payment_mode, "
-            f"       ch.txn_status, ch.cleared_at, ch.cleared_by "
-            f"FROM cod_holds ch WHERE {cod_filter}",
-            cod_params,
-        ))
+        cod_rows = list(
+            conn.execute(
+                f"SELECT ch.rider_id, ch.person_id, ch.company, ch.cycle_start, "
+                f"       ch.cycle_end, ch.amount, ch.order_number, ch.payment_mode, "
+                f"       ch.txn_status, ch.cleared_at, ch.cleared_by "
+                f"FROM cod_holds ch WHERE {cod_filter}",
+                cod_params,
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="COD",
-            headers=["Rider ID", "Person ID", "Company", "Cycle Start",
-                     "Cycle End", "Amount", "Order #", "Mode", "Status",
-                     "Cleared At", "Cleared By"],
-            rows=[(r["rider_id"], r["person_id"], r["company"],
-                   r["cycle_start"], r["cycle_end"], float(r["amount"] or 0),
-                   r["order_number"] or "", r["payment_mode"] or "",
-                   r["txn_status"] or "", r["cleared_at"] or "",
-                   r["cleared_by"] or "") for r in cod_rows],
-            numeric_cols=(6,), totals_cols=(6,), money_cols=(6,), left_align_cols=(7, 8, 9, 11),
+            wb,
+            sheet_name="COD",
+            headers=[
+                "Rider ID",
+                "Person ID",
+                "Company",
+                "Cycle Start",
+                "Cycle End",
+                "Amount",
+                "Order #",
+                "Mode",
+                "Status",
+                "Cleared At",
+                "Cleared By",
+            ],
+            rows=[
+                (
+                    r["rider_id"],
+                    r["person_id"],
+                    r["company"],
+                    r["cycle_start"],
+                    r["cycle_end"],
+                    float(r["amount"] or 0),
+                    r["order_number"] or "",
+                    r["payment_mode"] or "",
+                    r["txn_status"] or "",
+                    r["cleared_at"] or "",
+                    r["cleared_by"] or "",
+                )
+                for r in cod_rows
+            ],
+            numeric_cols=(6,),
+            totals_cols=(6,),
+            money_cols=(6,),
+            left_align_cols=(7, 8, 9, 11),
         )
 
         # 9. Per-company cycle history (full)
-        cyc_history = list(conn.execute(
-            "SELECT company, cycle_start, cycle_end, week_bucket, rider_count, "
-            "       riders_paid, riders_in_dues, total_release, "
-            "       total_rent_charged, total_rent_collected, total_rent_missed, "
-            "       processed_at, processed_by "
-            "FROM company_cycles ORDER BY cycle_end DESC, company"
-        ))
+        cyc_history = list(
+            conn.execute(
+                "SELECT company, cycle_start, cycle_end, week_bucket, rider_count, "
+                "       riders_paid, riders_in_dues, total_release, "
+                "       total_rent_charged, total_rent_collected, total_rent_missed, "
+                "       processed_at, processed_by "
+                "FROM company_cycles ORDER BY cycle_end DESC, company"
+            )
+        )
         add_styled_sheet(
-            wb, sheet_name="Cycle History",
-            headers=["Company", "Cycle Start", "Cycle End", "Week",
-                     "Riders", "Riders Paid", "Riders in Dues",
-                     "Released", "Rent Charged", "Rent Collected",
-                     "Rent Missed", "Processed At", "Processed By"],
-            rows=[(r["company"], r["cycle_start"], r["cycle_end"],
-                   r["week_bucket"], r["rider_count"], r["riders_paid"],
-                   r["riders_in_dues"], float(r["total_release"] or 0),
-                   float(r["total_rent_charged"] or 0),
-                   float(r["total_rent_collected"] or 0),
-                   float(r["total_rent_missed"] or 0),
-                   r["processed_at"], r["processed_by"]) for r in cyc_history],
+            wb,
+            sheet_name="Cycle History",
+            headers=[
+                "Company",
+                "Cycle Start",
+                "Cycle End",
+                "Week",
+                "Riders",
+                "Riders Paid",
+                "Riders in Dues",
+                "Released",
+                "Rent Charged",
+                "Rent Collected",
+                "Rent Missed",
+                "Processed At",
+                "Processed By",
+            ],
+            rows=[
+                (
+                    r["company"],
+                    r["cycle_start"],
+                    r["cycle_end"],
+                    r["week_bucket"],
+                    r["rider_count"],
+                    r["riders_paid"],
+                    r["riders_in_dues"],
+                    float(r["total_release"] or 0),
+                    float(r["total_rent_charged"] or 0),
+                    float(r["total_rent_collected"] or 0),
+                    float(r["total_rent_missed"] or 0),
+                    r["processed_at"],
+                    r["processed_by"],
+                )
+                for r in cyc_history
+            ],
             numeric_cols=(8, 9, 10, 11),
             money_cols=(8, 9, 10, 11),
             left_align_cols=(12, 13),

@@ -49,7 +49,7 @@ def reset_database() -> None:
     else:
         path = os.environ["PAYOUT_DB"]
         for suffix in ("", "-wal", "-shm"):
-            try:
+            try:  # noqa: SIM105
                 Path(path + suffix).unlink()
             except FileNotFoundError:
                 pass
@@ -72,9 +72,7 @@ def db():
 
 
 def make_person(db, name="Rider", *, balance=None, arrears=None) -> int:
-    pid = db.execute(
-        "INSERT INTO person_registry (display_name) VALUES (?)", (name,)
-    ).lastrowid
+    pid = db.execute("INSERT INTO person_registry (display_name) VALUES (?)", (name,)).lastrowid
     if balance is not None:
         db.execute(
             "INSERT INTO balances (person_id, current_balance) VALUES (?, ?)", (pid, balance)
@@ -118,6 +116,7 @@ def assign(
         "rent_charged_through) VALUES (?, ?, ?, ?, ?)",
         (person_id, ev_id, handover, returned, charged_through),
     ).lastrowid
-    db.execute("UPDATE ev_units SET status=? WHERE ev_id=?",
-               ("returned" if returned else "in_use", ev_id))
+    db.execute(
+        "UPDATE ev_units SET status=? WHERE ev_id=?", ("returned" if returned else "in_use", ev_id)
+    )
     return aid

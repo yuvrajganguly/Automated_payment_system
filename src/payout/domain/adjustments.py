@@ -49,8 +49,12 @@ def post_adjustment(
 
 
 def log_maintenance(
-    conn: sqlite3.Connection, ev_id: str, from_date: date, to_date: date,
-    reason: str, created_by: str,
+    conn: sqlite3.Connection,
+    ev_id: str,
+    from_date: date,
+    to_date: date,
+    reason: str,
+    created_by: str,
 ) -> None:
     """Record an EV maintenance window; rent skips chargeable days inside it."""
     fd = from_date.isoformat() if hasattr(from_date, "isoformat") else str(from_date)

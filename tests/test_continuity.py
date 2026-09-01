@@ -18,7 +18,8 @@ def test_contiguous_weeks(db):
     pid = _blive(db)
     r1 = resolve_rent(db, pid, date(2026, 3, 2), date(2026, 3, 8))
     assert r1.days == 7 and r1.rent == 126000.0
-    advance_rent_charged_through(db, pid, date(2026, 3, 8)); db.commit()
+    advance_rent_charged_through(db, pid, date(2026, 3, 8))
+    db.commit()
     r2 = resolve_rent(db, pid, date(2026, 3, 9), date(2026, 3, 15))
     assert r2.rent_from == date(2026, 3, 9) and r2.days == 7 and r2.rent == 126000.0
 
@@ -29,7 +30,8 @@ def test_gap_is_not_caught_up(db):
     handovers are captured as one-time back-rent arrears via the manual flow,
     not silently caught up here.)"""
     pid = _blive(db)
-    advance_rent_charged_through(db, pid, date(2026, 3, 8)); db.commit()
+    advance_rent_charged_through(db, pid, date(2026, 3, 8))
+    db.commit()
     # Cycle skips Mar 9-15; the meter sits behind, but billing is clamped.
     r = resolve_rent(db, pid, date(2026, 3, 16), date(2026, 3, 22))
     assert r.rent_from == date(2026, 3, 16) and r.days == 7 and r.rent == 126000.0
@@ -37,6 +39,7 @@ def test_gap_is_not_caught_up(db):
 
 def test_overlap_not_double_charged(db):
     pid = _blive(db)
-    advance_rent_charged_through(db, pid, date(2026, 3, 8)); db.commit()
+    advance_rent_charged_through(db, pid, date(2026, 3, 8))
+    db.commit()
     r = resolve_rent(db, pid, date(2026, 3, 2), date(2026, 3, 8))  # re-run same cycle
     assert r.days == 0 and r.rent == 0.0

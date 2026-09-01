@@ -10,8 +10,6 @@ out by mistake.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -29,7 +27,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     is_active: bool
-    created_at: Optional[str] = None
+    created_at: str | None = None
 
 
 class UserCreateIn(BaseModel):
@@ -51,8 +49,12 @@ def list_users(_: dict = Depends(get_current_user)) -> list[UserOut]:
             "SELECT email, role, is_active, created_at FROM users ORDER BY email"
         ).fetchall()
     return [
-        UserOut(email=r["email"], role=r["role"],
-                is_active=bool(r["is_active"]), created_at=r["created_at"])
+        UserOut(
+            email=r["email"],
+            role=r["role"],
+            is_active=bool(r["is_active"]),
+            created_at=r["created_at"],
+        )
         for r in rows
     ]
 
@@ -76,8 +78,7 @@ def create_user(body: UserCreateIn, _: dict = Depends(require_creator)) -> UserO
 
 
 @router.patch("/{email}/role")
-def change_role(email: str, body: RoleChangeIn,
-                user: dict = Depends(require_creator)) -> dict:
+def change_role(email: str, body: RoleChangeIn, user: dict = Depends(require_creator)) -> dict:
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
     target = email.strip().lower()

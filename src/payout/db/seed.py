@@ -10,8 +10,8 @@ import sqlite3
 
 # (provider, model_name, weekly_rate). Daily rate is derived as weekly / 7.
 EV_MODELS: list[tuple[str, str, float]] = [
-    ("Raft", "Regular", 125000),   # paise
-    ("Raft", "Blue", 129500),       # paise
+    ("Raft", "Regular", 125000),  # paise
+    ("Raft", "Blue", 129500),  # paise
     ("Blive", "Standard", 126000),  # paise
 ]
 
@@ -76,7 +76,7 @@ COMPANIES: list[dict] = [
         "payout_column": "Final Payout",
         "orders_column": "Total Order Completed",
         "has_hold_sheet": 1,
-        "hold_style": "column",          # inline COD-Pending column
+        "hold_style": "column",  # inline COD-Pending column
         "hold_sheet": None,
         "hold_key_column": None,
         "hold_amount_column": "COD-Pending",
@@ -104,8 +104,7 @@ COMPANIES: list[dict] = [
 
 def seed_ev_models(conn: sqlite3.Connection) -> None:
     conn.executemany(
-        "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate) "
-        "VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate) VALUES (?, ?, ?)",
         EV_MODELS,
     )
 

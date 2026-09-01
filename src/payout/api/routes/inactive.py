@@ -70,25 +70,24 @@ def list_inactive_riders(
             recovered = missed_total - arr
             reasons.append(f"Previously recovered {to_rupees(recovered):,.0f}")
         if absent:
-            reasons.append(
-                f"Not processed since {last_seen}" if last_seen
-                else "Never processed"
-            )
+            reasons.append(f"Not processed since {last_seen}" if last_seen else "Never processed")
         if bal < 0:
             reasons.append(f"Dues {to_rupees(-bal):,.0f}")
-        out.append({
-            "person_id": r["person_id"],
-            "display_name": r["display_name"],
-            "ev_id": r["ev_id"],
-            "handover_date": r["handover_date"],
-            "rent_charged_through": r["rent_charged_through"],
-            "last_seen_cycle": last_seen,
-            "current_balance": bal,
-            "arrears_outstanding": arr,
-            "total_missed": missed_total,
-            "companies": r["companies"] or "",
-            "hubs": r["hubs"] or "",
-            "reason": "; ".join(reasons),
-        })
+        out.append(
+            {
+                "person_id": r["person_id"],
+                "display_name": r["display_name"],
+                "ev_id": r["ev_id"],
+                "handover_date": r["handover_date"],
+                "rent_charged_through": r["rent_charged_through"],
+                "last_seen_cycle": last_seen,
+                "current_balance": bal,
+                "arrears_outstanding": arr,
+                "total_missed": missed_total,
+                "companies": r["companies"] or "",
+                "hubs": r["hubs"] or "",
+                "reason": "; ".join(reasons),
+            }
+        )
     out.sort(key=lambda x: (-x["arrears_outstanding"], x["last_seen_cycle"] or ""))
     return out

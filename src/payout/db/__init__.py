@@ -17,6 +17,7 @@ def _legacy_sqlite_migrate(conn) -> None:
     Postgres database can never predate the baseline, so it is a no-op there.
     """
     from payout.config import DB_URL
+
     if DB_URL:
         return
     # ev_arrears: add COD columns (v0.1 → v0.2)
@@ -37,9 +38,9 @@ def _legacy_sqlite_migrate(conn) -> None:
         # the column without needing the Settings UI tour.
         _backfill = (
             ("Spencer's", "Delivered Orders"),
-            ("Myntra",    "Total Order Completed"),
+            ("Myntra", "Total Order Completed"),
             ("Dealshare", "total orders"),
-            ("Blitz",     "total_del"),
+            ("Blitz", "total_del"),
         )
         for name, col in _backfill:
             conn.execute(
@@ -57,18 +58,11 @@ def _legacy_sqlite_migrate(conn) -> None:
     # Default any missing rider vehicle to BIKE — the runtime display already
     # derives EV/BIKE from EV assignment status, but normalising the raw column
     # keeps reports/exports consistent.
-    conn.execute(
-        "UPDATE rider_master SET vehicle='BIKE' "
-        "WHERE vehicle IS NULL OR TRIM(vehicle)=''"
-    )
+    conn.execute("UPDATE rider_master SET vehicle='BIKE' WHERE vehicle IS NULL OR TRIM(vehicle)=''")
     # v0.8 — rename ev_daily_ledger.raft_cost → provider_cost (provider-agnostic).
-    daily_cols = {
-        r[1] for r in conn.execute("PRAGMA table_info(ev_daily_ledger)")
-    }
+    daily_cols = {r[1] for r in conn.execute("PRAGMA table_info(ev_daily_ledger)")}
     if "raft_cost" in daily_cols and "provider_cost" not in daily_cols:
-        conn.execute(
-            "ALTER TABLE ev_daily_ledger RENAME COLUMN raft_cost TO provider_cost"
-        )
+        conn.execute("ALTER TABLE ev_daily_ledger RENAME COLUMN raft_cost TO provider_cost")
     # balances: cross-company rent slot (v0.4)
     bal_cols = {r[1] for r in conn.execute("PRAGMA table_info(balances)")}
     if "pending_xc_rent" not in bal_cols:
@@ -119,9 +113,7 @@ def initialize_database() -> list[str]:
     with get_connection() as conn:
         fresh = not table_exists(conn, "person_registry")
         apply_schema(conn)
-        applied = run_migrations(
-            conn, fresh_database=fresh, legacy_hook=_legacy_sqlite_migrate
-        )
+        applied = run_migrations(conn, fresh_database=fresh, legacy_hook=_legacy_sqlite_migrate)
         seed_all(conn)
         conn.commit()
     return applied

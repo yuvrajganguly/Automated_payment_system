@@ -7,6 +7,7 @@ Every test here is a "this used to be possible" case:
 - a deactivated user's token kept working for 12 hours;
 - a wrong OTP guess did not consume the code, so it could be brute-forced.
 """
+
 from __future__ import annotations
 
 import io
@@ -70,10 +71,19 @@ def test_plain_user_cannot_run_a_cycle(client):
     r = client.post(
         "/api/cycles/run",
         headers={"Authorization": f"Bearer {tok}"},
-        data={"company": "Blitz", "cycle_start": "2026-06-01",
-              "cycle_end": "2026-06-07", "commit": "true"},
-        files={"file": ("blitz.xlsx", _tiny_xlsx(),
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={
+            "company": "Blitz",
+            "cycle_start": "2026-06-01",
+            "cycle_end": "2026-06-07",
+            "commit": "true",
+        },
+        files={
+            "file": (
+                "blitz.xlsx",
+                _tiny_xlsx(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert r.status_code == 403
     with get_connection() as c:
@@ -85,10 +95,19 @@ def test_admin_can_preview_a_cycle(client):
     r = client.post(
         "/api/cycles/run",
         headers={"Authorization": f"Bearer {tok}"},
-        data={"company": "Blitz", "cycle_start": "2026-06-01",
-              "cycle_end": "2026-06-07", "commit": "false"},
-        files={"file": ("blitz.xlsx", _tiny_xlsx(),
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={
+            "company": "Blitz",
+            "cycle_start": "2026-06-01",
+            "cycle_end": "2026-06-07",
+            "commit": "false",
+        },
+        files={
+            "file": (
+                "blitz.xlsx",
+                _tiny_xlsx(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert r.status_code == 200, r.text
 
@@ -96,8 +115,12 @@ def test_admin_can_preview_a_cycle(client):
 def test_every_mutating_route_requires_auth(client):
     """No POST/PATCH/PUT/DELETE may answer anything but 401 to an anonymous caller
     (except the auth entry points themselves)."""
-    anon_ok = {"/api/auth/login", "/api/auth/logout", "/api/auth/forgot-password",
-               "/api/auth/reset-password"}
+    anon_ok = {
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
+    }
     offenders = []
     for path, methods in app.openapi()["paths"].items():
         for method in ("post", "patch", "put", "delete"):
@@ -143,16 +166,12 @@ def test_scrub_handles_json_and_form_bodies():
 def test_demo_users_are_not_created_when_real_users_exist(db):
     _add_users(db, _ADMIN)
     assert _seed_demo_users() is False
-    assert db.execute(
-        "SELECT COUNT(*) FROM users WHERE email LIKE '%@demo.com'"
-    ).fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM users WHERE email LIKE '%@demo.com'").fetchone()[0] == 0
 
 
 def test_demo_users_are_created_on_an_empty_user_table(db):
     assert _seed_demo_users() is True
-    assert db.execute(
-        "SELECT COUNT(*) FROM users WHERE email LIKE '%@demo.com'"
-    ).fetchone()[0] == 2
+    assert db.execute("SELECT COUNT(*) FROM users WHERE email LIKE '%@demo.com'").fetchone()[0] == 2
 
 
 def test_demo_mode_is_opt_in(monkeypatch):
@@ -202,7 +221,8 @@ def test_otp_is_locked_after_five_wrong_guesses(client, monkeypatch):
 
     captured = {}
     monkeypatch.setattr(
-        auth_routes, "send_email",
+        auth_routes,
+        "send_email",
         lambda to, subject, body: captured.setdefault("body", body) or True,
     )
     r = client.post("/api/auth/forgot-password", json={"email": _USER[0]})
@@ -211,19 +231,29 @@ def test_otp_is_locked_after_five_wrong_guesses(client, monkeypatch):
 
     wrong = "000000" if real_otp != "000000" else "111111"
     for i in range(4):
-        r = client.post("/api/auth/reset-password",
-                        json={"email": _USER[0], "otp": wrong, "new_password": "New-pass-99"})
+        r = client.post(
+            "/api/auth/reset-password",
+            json={"email": _USER[0], "otp": wrong, "new_password": "New-pass-99"},
+        )
         assert r.status_code == 401 and "Incorrect" in r.text, (i, r.text)
-    r = client.post("/api/auth/reset-password",
-                    json={"email": _USER[0], "otp": wrong, "new_password": "New-pass-99"})
+    r = client.post(
+        "/api/auth/reset-password",
+        json={"email": _USER[0], "otp": wrong, "new_password": "New-pass-99"},
+    )
     assert r.status_code == 401 and "Too many" in r.text
     # Even the right code is dead now.
-    r = client.post("/api/auth/reset-password",
-                    json={"email": _USER[0], "otp": real_otp, "new_password": "New-pass-99"})
+    r = client.post(
+        "/api/auth/reset-password",
+        json={"email": _USER[0], "otp": real_otp, "new_password": "New-pass-99"},
+    )
     assert r.status_code == 400
     # and the password did not change
-    assert client.post("/api/auth/login",
-                       data={"username": _USER[0], "password": _USER[1]}).status_code == 200
+    assert (
+        client.post(
+            "/api/auth/login", data={"username": _USER[0], "password": _USER[1]}
+        ).status_code
+        == 200
+    )
 
 
 def test_forgot_password_refuses_when_email_is_not_configured(client, monkeypatch):

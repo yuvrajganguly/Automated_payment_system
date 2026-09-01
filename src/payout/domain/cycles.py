@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, timedelta
-from typing import Optional
 
 # Companies with a vanilla 7-day cycle: next_start = last_end + 1 day,
 # next_end = next_start + 6 days. Membership covers what's currently active.
@@ -43,7 +42,7 @@ def next_spencers_cycle(last_end: date) -> tuple[date, date]:
     return start, start + timedelta(days=span - 1)
 
 
-def next_cycle_for(company: str, last_end: Optional[date]) -> tuple[date, date]:
+def next_cycle_for(company: str, last_end: date | None) -> tuple[date, date]:
     """Return (next_start, next_end). If no history, anchor on most recent
     Monday for weekly companies, or the current slot for Spencer's."""
     if last_end is None:

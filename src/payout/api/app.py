@@ -13,20 +13,50 @@ from fastapi.staticfiles import StaticFiles
 from payout.api.config import CORS_ORIGINS, DEMO_MODE
 from payout.api.routes import (
     arrears as arrears_routes,
+)
+from payout.api.routes import (
     auth as auth_routes,
+)
+from payout.api.routes import (
     cod as cod_routes,
-    creator as creator_routes,
-    dashboard as dashboard_routes,
+)
+from payout.api.routes import (
     companies as company_routes,
+)
+from payout.api.routes import (
+    creator as creator_routes,
+)
+from payout.api.routes import (
     cycle as cycle_routes,
+)
+from payout.api.routes import (
+    dashboard as dashboard_routes,
+)
+from payout.api.routes import (
     ev_rent as ev_rent_routes,
+)
+from payout.api.routes import (
     evs as evs_routes,
+)
+from payout.api.routes import (
     inactive as inactive_routes,
+)
+from payout.api.routes import (
     ledger as ledger_routes,
+)
+from payout.api.routes import (
     payments as payments_routes,
+)
+from payout.api.routes import (
     persons as persons_routes,
+)
+from payout.api.routes import (
     providers as providers_routes,
+)
+from payout.api.routes import (
     riders as riders_routes,
+)
+from payout.api.routes import (
     users as users_routes,
 )
 
@@ -110,21 +140,22 @@ app.add_middleware(
 )
 
 from payout.api.middleware import AuditLogMiddleware, RupeeizeMiddleware  # noqa: E402
+
 app.add_middleware(AuditLogMiddleware)
 app.add_middleware(RupeeizeMiddleware)
 
-app.include_router(auth_routes.router,    prefix="/api/auth",      tags=["auth"])
+app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
-app.include_router(cycle_routes.router,   prefix="/api/cycles",    tags=["cycles"])
-app.include_router(riders_routes.router,  prefix="/api/riders",    tags=["riders"])
-app.include_router(persons_routes.router, prefix="/api/persons",   tags=["persons"])
-app.include_router(evs_routes.router,     prefix="/api/evs",       tags=["evs"])
-app.include_router(ledger_routes.router,  prefix="/api/ledger",    tags=["ledger"])
+app.include_router(cycle_routes.router, prefix="/api/cycles", tags=["cycles"])
+app.include_router(riders_routes.router, prefix="/api/riders", tags=["riders"])
+app.include_router(persons_routes.router, prefix="/api/persons", tags=["persons"])
+app.include_router(evs_routes.router, prefix="/api/evs", tags=["evs"])
+app.include_router(ledger_routes.router, prefix="/api/ledger", tags=["ledger"])
 app.include_router(providers_routes.router, prefix="/api/providers", tags=["providers"])
-app.include_router(arrears_routes.router, prefix="/api/arrears",   tags=["arrears"])
+app.include_router(arrears_routes.router, prefix="/api/arrears", tags=["arrears"])
 app.include_router(inactive_routes.router, prefix="/api/inactive", tags=["inactive"])
-app.include_router(cod_routes.router,     prefix="/api/cod",       tags=["cod"])
-app.include_router(ev_rent_routes.router, prefix="/api/ev-rent",   tags=["ev-rent"])
+app.include_router(cod_routes.router, prefix="/api/cod", tags=["cod"])
+app.include_router(ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"])
 app.include_router(payments_routes.router, prefix="/api/payments", tags=["payments"])
 app.include_router(dashboard_routes.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])

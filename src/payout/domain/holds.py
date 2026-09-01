@@ -35,7 +35,7 @@ class HoldLine:
 @dataclass
 class HoldResult:
     per_rider: dict = field(default_factory=dict)  # rider_id -> total pending COD
-    lines: list = field(default_factory=list)      # list[HoldLine] to persist
+    lines: list = field(default_factory=list)  # list[HoldLine] to persist
     skipped_nonpending: int = 0
 
     @property
@@ -80,7 +80,9 @@ def compute_holds(parse_result: ParseResult, pending_statuses=_PENDING) -> HoldR
     for rec in parse_result.records:
         if rec.cod_pending and rec.cod_pending > 0:
             per_rider[rec.rider_id] = per_rider.get(rec.rider_id, 0.0) + rec.cod_pending
-            lines.append(HoldLine(rider_id=rec.rider_id, amount=rec.cod_pending, source="myntra_column"))
+            lines.append(
+                HoldLine(rider_id=rec.rider_id, amount=rec.cod_pending, source="myntra_column")
+            )
 
     return HoldResult(per_rider=per_rider, lines=lines, skipped_nonpending=skipped)
 
@@ -111,6 +113,17 @@ def persist_holds(
             "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, "
             "person_id, worker_code, order_number, amount, payment_mode, txn_status, source) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (cs, ce, company, ln.rider_id, pr["person_id"] if pr else None,
-             ln.rider_id, ln.order_number, ln.amount, ln.payment_mode, ln.txn_status, ln.source),
+            (
+                cs,
+                ce,
+                company,
+                ln.rider_id,
+                pr["person_id"] if pr else None,
+                ln.rider_id,
+                ln.order_number,
+                ln.amount,
+                ln.payment_mode,
+                ln.txn_status,
+                ln.source,
+            ),
         )

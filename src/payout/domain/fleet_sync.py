@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 # Default weekly rate when we have nothing to copy from. Flagged for review
 # in the response so operators don't silently bill at the wrong amount.
-_FALLBACK_WEEKLY_RATE = 125000   # paise
+_FALLBACK_WEEKLY_RATE = 125000  # paise
 
 
 def normalize_model_name(name: str | None) -> str | None:
@@ -53,7 +53,9 @@ class ResolveResult:
 
 
 def resolve_or_create_model(
-    conn: sqlite3.Connection, provider: str, model_name: str | None,
+    conn: sqlite3.Connection,
+    provider: str,
+    model_name: str | None,
 ) -> ResolveResult:
     """Find a model_id for (provider, model_name); create if missing.
 
@@ -62,7 +64,7 @@ def resolve_or_create_model(
     use _FALLBACK_WEEKLY_RATE and set flagged_rate=True so the caller
     can surface a "needs review" warning.
     """
-    prov  = (provider or "").strip()
+    prov = (provider or "").strip()
     model = normalize_model_name(model_name)
     if not prov or not model:
         raise ValueError("provider and model_name are both required.")
@@ -73,9 +75,12 @@ def resolve_or_create_model(
         (prov, model),
     ).fetchone()
     if row:
-        return ResolveResult(model_id=row["model_id"], created=False,
-                             weekly_rate=float(row["weekly_rate"]),
-                             flagged_rate=False)
+        return ResolveResult(
+            model_id=row["model_id"],
+            created=False,
+            weekly_rate=float(row["weekly_rate"]),
+            flagged_rate=False,
+        )
 
     # Copy rate from the provider's most-used existing model.
     sib = conn.execute(
@@ -95,8 +100,7 @@ def resolve_or_create_model(
         "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES (?,?,?)",
         (prov, model, rate),
     ).lastrowid
-    return ResolveResult(model_id=mid, created=True,
-                         weekly_rate=rate, flagged_rate=flagged)
+    return ResolveResult(model_id=mid, created=True, weekly_rate=rate, flagged_rate=flagged)
 
 
 @dataclass
@@ -108,7 +112,7 @@ class IngestRow:
 @dataclass
 class IngestReport:
     units_added: int = 0
-    units_updated: int = 0      # existing units that had their model corrected
+    units_updated: int = 0  # existing units that had their model corrected
     units_unchanged: int = 0
     skipped: list[dict] = field(default_factory=list)  # {row, reason}
     models_created: list[dict] = field(default_factory=list)
@@ -117,17 +121,19 @@ class IngestReport:
 
     def as_dict(self) -> dict:
         return {
-            "units_added":      self.units_added,
-            "units_updated":    self.units_updated,
-            "units_unchanged":  self.units_unchanged,
-            "skipped":          self.skipped,
-            "models_created":   self.models_created,
+            "units_added": self.units_added,
+            "units_updated": self.units_updated,
+            "units_unchanged": self.units_unchanged,
+            "skipped": self.skipped,
+            "models_created": self.models_created,
             "rate_review_needed": self.rate_review_needed,
         }
 
 
 def ingest_master_rows(
-    conn: sqlite3.Connection, provider: str, rows: list[IngestRow],
+    conn: sqlite3.Connection,
+    provider: str,
+    rows: list[IngestRow],
 ) -> IngestReport:
     """Upsert ev_units for a provider's fleet, auto-creating ev_models.
 
@@ -154,17 +160,21 @@ def ingest_master_rows(
                 rep.skipped.append({"row": r.__dict__, "reason": str(exc)})
                 continue
             if seen_models[model].created:
-                rep.models_created.append({
-                    "provider": provider, "model_name": model,
-                    "weekly_rate": seen_models[model].weekly_rate,
-                    "needs_rate_review": seen_models[model].flagged_rate,
-                })
+                rep.models_created.append(
+                    {
+                        "provider": provider,
+                        "model_name": model,
+                        "weekly_rate": seen_models[model].weekly_rate,
+                        "needs_rate_review": seen_models[model].flagged_rate,
+                    }
+                )
                 if seen_models[model].flagged_rate:
                     rep.rate_review_needed.append(model)
 
         mid = seen_models[model].model_id
         existing = conn.execute(
-            "SELECT model_id FROM ev_units WHERE ev_id=?", (ev_id,),
+            "SELECT model_id FROM ev_units WHERE ev_id=?",
+            (ev_id,),
         ).fetchone()
         if existing is None:
             conn.execute(
@@ -174,7 +184,8 @@ def ingest_master_rows(
             rep.units_added += 1
         elif existing["model_id"] != mid:
             conn.execute(
-                "UPDATE ev_units SET model_id=? WHERE ev_id=?", (mid, ev_id),
+                "UPDATE ev_units SET model_id=? WHERE ev_id=?",
+                (mid, ev_id),
             )
             rep.units_updated += 1
         else:

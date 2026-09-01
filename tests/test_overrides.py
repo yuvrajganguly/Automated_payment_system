@@ -13,7 +13,10 @@ def _blive_rider(db, handover=None):
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
     mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Blive'").fetchone()["model_id"]
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('B1',?,'in_use')", (mid,))
-    db.execute("INSERT INTO ev_assignments (person_id,ev_id,handover_date) VALUES (?, 'B1', ?)", (pid, handover))
+    db.execute(
+        "INSERT INTO ev_assignments (person_id,ev_id,handover_date) VALUES (?, 'B1', ?)",
+        (pid, handover),
+    )
     db.commit()
     return pid
 
@@ -50,7 +53,10 @@ def test_post_adjustment(db):
     db.commit()
     assert post_adjustment(db, pid, -300, "penalty", "t") == -300.0
     assert post_adjustment(db, pid, 100, "goodwill", "t") == -200.0
-    assert db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='ADJUSTMENT'").fetchone()[0] == 2
+    assert (
+        db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='ADJUSTMENT'").fetchone()[0]
+        == 2
+    )
 
 
 def test_adjustment_requires_reason(db):

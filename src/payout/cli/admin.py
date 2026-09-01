@@ -71,7 +71,9 @@ def cmd_reset_password(args) -> None:
         if not conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
             print(f"User '{email}' not found.")
             return
-        conn.execute("UPDATE users SET password_hash=? WHERE email=?", (hash_password(password), email))
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE email=?", (hash_password(password), email)
+        )
         conn.commit()
     print(f"Password reset for '{email}'.")
 
@@ -93,7 +95,9 @@ def cmd_list_companies(args) -> None:
         style = r["hold_style"] or "-"
         payout = r["payout_column"] or ""
         shared = f"  ids=@{r['rider_ids_shared_with']}" if r["rider_ids_shared_with"] else ""
-        print(f"{r['company_name']:12} {r['parser_type']:10} {payout:24} {hold:6} {style:8} {active}{shared}")
+        print(
+            f"{r['company_name']:12} {r['parser_type']:10} {payout:24} {hold:6} {style:8} {active}{shared}"  # noqa: E501
+        )
 
 
 def cmd_add_company(args) -> None:
@@ -109,9 +113,20 @@ def cmd_add_company(args) -> None:
             "rider_id_column, payout_column, has_hold_sheet, hold_style, hold_sheet, "
             "hold_key_column, hold_amount_column, hold_status_column, is_active) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (args.name, args.parser_type, args.payout_sheet, args.rider_col,
-             args.payout_col, 1 if args.hold else 0, args.hold_style, args.hold_sheet,
-             args.hold_key, args.hold_amount, args.hold_status, 1 if args.active else 0),
+            (
+                args.name,
+                args.parser_type,
+                args.payout_sheet,
+                args.rider_col,
+                args.payout_col,
+                1 if args.hold else 0,
+                args.hold_style,
+                args.hold_sheet,
+                args.hold_key,
+                args.hold_amount,
+                args.hold_status,
+                1 if args.active else 0,
+            ),
         )
         conn.commit()
     print(f"Company '{args.name}' added (active={bool(args.active)}).")
@@ -119,7 +134,9 @@ def cmd_add_company(args) -> None:
 
 def cmd_update_company(args) -> None:
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM companies WHERE company_name=?", (args.name,)).fetchone():
+        if not conn.execute(
+            "SELECT 1 FROM companies WHERE company_name=?", (args.name,)
+        ).fetchone():
             print(f"Company '{args.name}' not found.")
             return
         fields = {}
@@ -139,7 +156,9 @@ def cmd_update_company(args) -> None:
             print("Nothing to update.")
             return
         sets = ", ".join(f"{k}=?" for k in fields)
-        conn.execute(f"UPDATE companies SET {sets} WHERE company_name=?", (*fields.values(), args.name))
+        conn.execute(
+            f"UPDATE companies SET {sets} WHERE company_name=?", (*fields.values(), args.name)
+        )
         conn.commit()
     print(f"Company '{args.name}' updated: {list(fields)}")
 
@@ -164,36 +183,56 @@ def main() -> None:
     sub = p.add_subparsers(dest="command")
 
     pu = sub.add_parser("add-user")
-    pu.add_argument("--email"); pu.add_argument("--password"); pu.add_argument("--role")
+    pu.add_argument("--email")
+    pu.add_argument("--password")
+    pu.add_argument("--role")
     sub.add_parser("list-users")
-    pd_ = sub.add_parser("deactivate-user"); pd_.add_argument("--email")
-    pr = sub.add_parser("reset-password"); pr.add_argument("--email"); pr.add_argument("--password")
+    pd_ = sub.add_parser("deactivate-user")
+    pd_.add_argument("--email")
+    pr = sub.add_parser("reset-password")
+    pr.add_argument("--email")
+    pr.add_argument("--password")
     psr = sub.add_parser("set-role", help="Promote/demote a user (user|admin|creator)")
-    psr.add_argument("--email"); psr.add_argument("--role", required=True)
+    psr.add_argument("--email")
+    psr.add_argument("--role", required=True)
 
     sub.add_parser("list-companies")
     pc = sub.add_parser("add-company")
-    pc.add_argument("--name"); pc.add_argument("--parser-type", dest="parser_type", default="generic")
+    pc.add_argument("--name")
+    pc.add_argument("--parser-type", dest="parser_type", default="generic")
     pc.add_argument("--payout-sheet", dest="payout_sheet", default="0")
-    pc.add_argument("--rider-col", dest="rider_col"); pc.add_argument("--payout-col", dest="payout_col")
-    pc.add_argument("--hold", action="store_true"); pc.add_argument("--hold-style", dest="hold_style")
-    pc.add_argument("--hold-sheet", dest="hold_sheet"); pc.add_argument("--hold-key", dest="hold_key")
-    pc.add_argument("--hold-amount", dest="hold_amount"); pc.add_argument("--hold-status", dest="hold_status")
+    pc.add_argument("--rider-col", dest="rider_col")
+    pc.add_argument("--payout-col", dest="payout_col")
+    pc.add_argument("--hold", action="store_true")
+    pc.add_argument("--hold-style", dest="hold_style")
+    pc.add_argument("--hold-sheet", dest="hold_sheet")
+    pc.add_argument("--hold-key", dest="hold_key")
+    pc.add_argument("--hold-amount", dest="hold_amount")
+    pc.add_argument("--hold-status", dest="hold_status")
     pc.add_argument("--active", action="store_true")
     pcu = sub.add_parser("update-company")
-    pcu.add_argument("--name", required=True); pcu.add_argument("--active", choices=["yes", "no"])
-    pcu.add_argument("--payout-col", dest="payout_col"); pcu.add_argument("--rider-col", dest="rider_col")
+    pcu.add_argument("--name", required=True)
+    pcu.add_argument("--active", choices=["yes", "no"])
+    pcu.add_argument("--payout-col", dest="payout_col")
+    pcu.add_argument("--rider-col", dest="rider_col")
     pcu.add_argument("--payout-sheet", dest="payout_sheet")
-    pcu.add_argument("--orders-col", dest="orders_col",
-                     help="orders/deliveries column ('' to clear)")
-    pcu.add_argument("--shares-rider-ids-with", dest="shares_rider_ids_with",
-                     help="company whose rider IDs this one reuses, e.g. Blitz ('' to clear)")
+    pcu.add_argument(
+        "--orders-col", dest="orders_col", help="orders/deliveries column ('' to clear)"
+    )
+    pcu.add_argument(
+        "--shares-rider-ids-with",
+        dest="shares_rider_ids_with",
+        help="company whose rider IDs this one reuses, e.g. Blitz ('' to clear)",
+    )
 
     args = p.parse_args()
     dispatch = {
-        "add-user": cmd_add_user, "list-users": cmd_list_users,
-        "deactivate-user": cmd_deactivate_user, "reset-password": cmd_reset_password,
-        "list-companies": cmd_list_companies, "add-company": cmd_add_company,
+        "add-user": cmd_add_user,
+        "list-users": cmd_list_users,
+        "deactivate-user": cmd_deactivate_user,
+        "reset-password": cmd_reset_password,
+        "list-companies": cmd_list_companies,
+        "add-company": cmd_add_company,
         "update-company": cmd_update_company,
         "set-role": cmd_set_role,
     }

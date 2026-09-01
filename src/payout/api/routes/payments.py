@@ -18,7 +18,6 @@ Operator workflow:
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -31,11 +30,11 @@ from payout.parsers.bank_mis import parse_bank_mis
 router = APIRouter()
 
 
-def _norm_name(s: Optional[str]) -> str:
+def _norm_name(s: str | None) -> str:
     return " ".join((s or "").strip().lower().split())
 
 
-def _match_line(conn, acct: str, ifsc: str, name: str) -> tuple[Optional[int], Optional[str], str]:
+def _match_line(conn, acct: str, ifsc: str, name: str) -> tuple[int | None, str | None, str]:
     """Return (person_id, matched_display_name, match_status).
     Primary: account_no+ifsc → rider_master.person_id.
     Secondary: account_no alone → rider_master.person_id.
@@ -54,7 +53,8 @@ def _match_line(conn, acct: str, ifsc: str, name: str) -> tuple[Optional[int], O
         row = conn.execute(
             "SELECT DISTINCT rm.person_id, pr.display_name FROM rider_master rm "
             "JOIN person_registry pr ON pr.person_id = rm.person_id "
-            "WHERE rm.account_no = ? LIMIT 1", (acct,),
+            "WHERE rm.account_no = ? LIMIT 1",
+            (acct,),
         ).fetchone()
         if row:
             return row["person_id"], row["display_name"], "matched"
@@ -63,7 +63,8 @@ def _match_line(conn, acct: str, ifsc: str, name: str) -> tuple[Optional[int], O
     if nm:
         row = conn.execute(
             "SELECT person_id, display_name FROM person_registry "
-            "WHERE LOWER(display_name) = ? LIMIT 1", (nm,),
+            "WHERE LOWER(display_name) = ? LIMIT 1",
+            (nm,),
         ).fetchone()
         if row:
             return row["person_id"], row["display_name"], "name_matched"
@@ -80,27 +81,30 @@ async def upload_mis(
     try:
         lines = parse_bank_mis(pdf_bytes)
     except Exception as e:
-        raise HTTPException(400, f"Couldn't parse PDF: {e}")
+        raise HTTPException(400, f"Couldn't parse PDF: {e}")  # noqa: B904
     if not lines:
         raise HTTPException(400, "No beneficiary lines found in this PDF.")
 
     success_count = failed_count = unmatched_count = 0
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO payment_uploads (file_name, uploaded_by, line_count) "
-            "VALUES (?,?,0)", (file.filename or "upload.pdf", user["email"]),
+            "INSERT INTO payment_uploads (file_name, uploaded_by, line_count) VALUES (?,?,0)",
+            (file.filename or "upload.pdf", user["email"]),
         )
         upload_id = cur.lastrowid
 
         for ln in lines:
             pid, mname, match = _match_line(
-                conn, ln["bene_account_no"], ln["bene_ifsc"], ln["bene_name"],
+                conn,
+                ln["bene_account_no"],
+                ln["bene_ifsc"],
+                ln["bene_name"],
             )
             bank_status = (ln["bank_status"] or "").strip()
             is_success = bank_status.lower().startswith("success")
             if is_success:
                 success_count += 1
-                resolution = "bank_ok"   # auto-resolved
+                resolution = "bank_ok"  # auto-resolved
                 resolved_at = date.today().isoformat()
                 resolved_by = "auto"
             else:
@@ -117,10 +121,26 @@ async def upload_mis(
                 " customer_ref, person_id, matched_name, match_status, "
                 " resolution_method, resolved_at, resolved_by) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (upload_id, ln["line_no"], ln["pymt_mode"], ln["bene_name"],
-                 ln["bene_account_no"], ln["bene_ifsc"], ln["amount"], ln["remark"],
-                 ln["pymt_date"], bank_status, ln["utr"], ln["customer_ref"],
-                 pid, mname, match, resolution, resolved_at, resolved_by),
+                (
+                    upload_id,
+                    ln["line_no"],
+                    ln["pymt_mode"],
+                    ln["bene_name"],
+                    ln["bene_account_no"],
+                    ln["bene_ifsc"],
+                    ln["amount"],
+                    ln["remark"],
+                    ln["pymt_date"],
+                    bank_status,
+                    ln["utr"],
+                    ln["customer_ref"],
+                    pid,
+                    mname,
+                    match,
+                    resolution,
+                    resolved_at,
+                    resolved_by,
+                ),
             )
         conn.execute(
             "UPDATE payment_uploads SET line_count=?, success_count=?, "
@@ -129,8 +149,10 @@ async def upload_mis(
         )
         conn.commit()
     return {
-        "upload_id": upload_id, "line_count": len(lines),
-        "success_count": success_count, "failed_count": failed_count,
+        "upload_id": upload_id,
+        "line_count": len(lines),
+        "success_count": success_count,
+        "failed_count": failed_count,
         "unmatched_count": unmatched_count,
     }
 
@@ -157,9 +179,7 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
     they need follow-up (UPI / cash / re-attempt).
     """
     with get_connection() as conn:
-        u = conn.execute(
-            "SELECT * FROM payment_uploads WHERE id=?", (upload_id,)
-        ).fetchone()
+        u = conn.execute("SELECT * FROM payment_uploads WHERE id=?", (upload_id,)).fetchone()
         if not u:
             raise HTTPException(404, "Upload not found")
         lines = conn.execute(
@@ -175,8 +195,10 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
         # to look at for "who SHOULD have been paid". pymt_date strings come
         # from the bank file (often DD-MM-YYYY); fall back to upload date.
         pymt_dates = [r["pymt_date"] for r in lines if r["pymt_date"]]
+
         def _to_iso(s: str | None) -> str | None:
-            if not s: return None
+            if not s:
+                return None
             s = s.strip()
             # Try a few common shapes — DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY.
             for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%d %b %Y"):
@@ -185,6 +207,7 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
                 except ValueError:
                     continue
             return None
+
         iso_dates = sorted({d for d in (_to_iso(s) for s in pymt_dates) if d})
         if iso_dates:
             lo, hi = iso_dates[0], iso_dates[-1]
@@ -194,6 +217,7 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
             try:
                 d = datetime.fromisoformat(up_dt).date()
                 from datetime import timedelta
+
                 lo = (d - timedelta(days=5)).isoformat()
                 hi = (d + timedelta(days=5)).isoformat()
             except Exception:
@@ -206,12 +230,10 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
         # upload time (unmatched lines still represent a real payee identity).
         present_accts = {
             (ln["bene_account_no"] or "").strip()
-            for ln in lines if (ln["bene_account_no"] or "").strip()
+            for ln in lines
+            if (ln["bene_account_no"] or "").strip()
         }
-        present_names = {
-            _norm_name(ln["bene_name"])
-            for ln in lines if _norm_name(ln["bene_name"])
-        }
+        present_names = {_norm_name(ln["bene_name"]) for ln in lines if _norm_name(ln["bene_name"])}
 
         # Candidate "should have been paid" pool: every rider with a RELEASE
         # event in a cycle whose dates overlap [lo, hi]. Join rider_master so
@@ -249,15 +271,17 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
             # "Present" if any account or name lines up with the bank file.
             in_file = bool(accts & present_accts) or bool(names & present_names)
             if not in_file:
-                absent.append({
-                    "person_id": c["person_id"],
-                    "display_name": c["display_name"],
-                    "expected_amount": float(c["expected_amount"] or 0),
-                    "earliest_cycle": c["earliest_cycle"],
-                    "latest_cycle": c["latest_cycle"],
-                    "companies": c["companies"] or "",
-                    "accounts": ", ".join(sorted(accts)) or "—",
-                })
+                absent.append(
+                    {
+                        "person_id": c["person_id"],
+                        "display_name": c["display_name"],
+                        "expected_amount": float(c["expected_amount"] or 0),
+                        "earliest_cycle": c["earliest_cycle"],
+                        "latest_cycle": c["latest_cycle"],
+                        "companies": c["companies"] or "",
+                        "accounts": ", ".join(sorted(accts)) or "—",
+                    }
+                )
 
     return {
         "upload": dict(u),
@@ -269,12 +293,11 @@ def get_upload(upload_id: int, _: dict = Depends(get_current_user)) -> dict:
 
 class ResolveIn(BaseModel):
     method: str  # 'upi_paid' or 'credit_ledger'
-    note: Optional[str] = None
+    note: str | None = None
 
 
 @router.post("/lines/{line_id}/resolve")
-def resolve_line(line_id: int, body: ResolveIn,
-                 user: dict = Depends(require_admin)) -> dict:
+def resolve_line(line_id: int, body: ResolveIn, user: dict = Depends(require_admin)) -> dict:
     """Mark a failed/unmatched line as resolved.
 
     * upi_paid       — no ledger movement; just record the resolution. Use
@@ -290,7 +313,8 @@ def resolve_line(line_id: int, body: ResolveIn,
         line = conn.execute(
             "SELECT id, person_id, amount, bene_name, bank_status, "
             "       resolution_method, upload_id "
-            "FROM payment_lines WHERE id=?", (line_id,),
+            "FROM payment_lines WHERE id=?",
+            (line_id,),
         ).fetchone()
         if not line:
             raise HTTPException(404, "Line not found")
@@ -309,12 +333,16 @@ def resolve_line(line_id: int, body: ResolveIn,
                     "or merge them in first.",
                 )
             reason = body.note or (
-                f"Bank transfer failed (status={line['bank_status']!r}); "
-                f"amount carried forward."
+                f"Bank transfer failed (status={line['bank_status']!r}); amount carried forward."
             )
             post_adjustment(
-                conn, line["person_id"], int(line["amount"]),
-                reason, user["email"], rider_id="", company="",
+                conn,
+                line["person_id"],
+                int(line["amount"]),
+                reason,
+                user["email"],
+                rider_id="",
+                company="",
             )
             txn_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
         conn.execute(

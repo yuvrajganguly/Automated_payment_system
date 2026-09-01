@@ -10,13 +10,12 @@ person's general balance.
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
 
-from fastapi import Body, APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
-from payout.api.schemas import ExportSelection
 from payout.api.auth import get_current_user, require_admin
+from payout.api.schemas import ExportSelection
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
 from payout.exports import xlsx_response
@@ -60,35 +59,55 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
 
 
 @router.post("/export")
-def export_cod(body: ExportSelection = Body(default=ExportSelection()),
-              _: dict = Depends(get_current_user)):
+def export_cod(
+    body: ExportSelection = Body(default=ExportSelection()), _: dict = Depends(get_current_user)
+):
     """COD page as a styled .xlsx download."""
     data = list_cod(_)
     if body.ids is not None:
         idset = {str(x) for x in body.ids}
         data = [r for r in data if str(r["person_id"]) in idset]
-    headers = ["Person ID", "Name", "Companies", "Hub", "Pending Total",
-               "Entries", "Earliest Cycle", "Latest Cycle",
-               "Recent Payout", "Recent Cycle"]
+    headers = [
+        "Person ID",
+        "Name",
+        "Companies",
+        "Hub",
+        "Pending Total",
+        "Entries",
+        "Earliest Cycle",
+        "Latest Cycle",
+        "Recent Payout",
+        "Recent Cycle",
+    ]
     rows = [
-        (r["person_id"], r["display_name"], r["companies"] or "",
-         r["hubs"] or "", r["total_pending"], r["entry_count"],
-         r["earliest_cycle_start"] or "", r["latest_cycle_end"] or "",
-         r["recent_payout"] or 0, r["recent_payout_cycle"] or "")
+        (
+            r["person_id"],
+            r["display_name"],
+            r["companies"] or "",
+            r["hubs"] or "",
+            r["total_pending"],
+            r["entry_count"],
+            r["earliest_cycle_start"] or "",
+            r["latest_cycle_end"] or "",
+            r["recent_payout"] or 0,
+            r["recent_payout_cycle"] or "",
+        )
         for r in data
     ]
     return xlsx_response(
-        filename_stem="cod_pending", sheet_name="COD",
-        headers=headers, rows=rows,
-        numeric_cols=(5, 9), totals_cols=(5,),
+        filename_stem="cod_pending",
+        sheet_name="COD",
+        headers=headers,
+        rows=rows,
+        numeric_cols=(5, 9),
+        totals_cols=(5,),
         money_cols=(5, 9),
         left_align_cols=(2, 3, 4),
     )
 
 
 @router.get("/{person_id}/entries")
-def list_cod_entries(person_id: int,
-                     _: dict = Depends(get_current_user)) -> list[dict]:
+def list_cod_entries(person_id: int, _: dict = Depends(get_current_user)) -> list[dict]:
     """Line-item COD entries for one person (pending and cleared)."""
     with get_connection() as conn:
         rows = conn.execute(
@@ -103,9 +122,9 @@ def list_cod_entries(person_id: int,
 
 class CodClearIn(BaseModel):
     person_id: int
-    entry_ids: Optional[list[int]] = None      # default: all pending entries
-    ledger_amount: Optional[float] = None      # > 0 credit, < 0 debit
-    reason: Optional[str] = None
+    entry_ids: list[int] | None = None  # default: all pending entries
+    ledger_amount: float | None = None  # > 0 credit, < 0 debit
+    reason: str | None = None
 
 
 @router.post("/clear")
@@ -137,14 +156,19 @@ def clear_cod(body: CodClearIn, user: dict = Depends(require_admin)) -> dict:
         entries_cleared = cur.rowcount
 
         new_balance = None
-        adj_amount = body.ledger_amount or 0.0        # rupees from the client
+        adj_amount = body.ledger_amount or 0.0  # rupees from the client
         if adj_amount:
             reason = body.reason or f"COD clearance ({entries_cleared} entry/-ies)"
             # Ledger is integer paise; the rupee amount used to be posted as-is
             # (a 100x-too-small credit).
             new_balance = post_adjustment(
-                conn, body.person_id, to_paise(adj_amount), reason, user["email"],
-                rider_id="", company="",
+                conn,
+                body.person_id,
+                to_paise(adj_amount),
+                reason,
+                user["email"],
+                rider_id="",
+                company="",
             )
         conn.commit()
     return {

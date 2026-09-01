@@ -53,9 +53,11 @@ def _parse_overrides(raw: str | None) -> CycleOverrides:
     for item in data.get("per_rider", []) or []:
         ov = RiderOverrideIn.model_validate(item)
         per_rider[ov.rider_id] = RiderOverride(
-            waive_days=ov.waive_days, waive_all=ov.waive_all,
+            waive_days=ov.waive_days,
+            waive_all=ov.waive_all,
             rent_override=(to_paise(ov.rent_override) if ov.rent_override is not None else None),
-            force_hold=ov.force_hold, force_release=ov.force_release,
+            force_hold=ov.force_hold,
+            force_release=ov.force_release,
         )
     return CycleOverrides(per_rider=per_rider, adjustments=data.get("adjustments", []) or [])
 
@@ -87,7 +89,9 @@ async def run_cycle(
     # maintenance fires between now and cycle_end those rows go stale. Allow
     # a 3-day grace so timezone / "the file just landed at 11:59pm" cases
     # work, but refuse anything farther out.
-    from datetime import date as _date_cls, timedelta as _td
+    from datetime import date as _date_cls
+    from datetime import timedelta as _td
+
     today = _date_cls.today()
     if cycle_end > today + _td(days=3):
         raise HTTPException(
@@ -106,9 +110,14 @@ async def run_cycle(
     cycle_overrides = _parse_overrides(overrides)
     try:
         result = process_cycle(
-            company=company, cycle_start=cycle_start, cycle_end=cycle_end,
-            file_bytes=file_bytes, overrides=cycle_overrides,
-            created_by=user["email"], commit=commit, force=force,
+            company=company,
+            cycle_start=cycle_start,
+            cycle_end=cycle_end,
+            file_bytes=file_bytes,
+            overrides=cycle_overrides,
+            created_by=user["email"],
+            commit=commit,
+            force=force,
         )
     except CycleAlreadyCommitted as exc:
         # Guard lives in the engine's transaction now (was a racy pre-check here).
