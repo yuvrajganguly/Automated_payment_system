@@ -49,8 +49,8 @@ COMPANIES: list[dict] = [
     },
     {
         # Provisional (2026-09): no Nykaa sample file yet, so the layout is a
-        # clone of Blitz's. Adjust the columns in Settings once a real file
-        # arrives. Nykaa pays Blitz riders under their BLITZ rider ids — the
+        # clone of Blitz's. Adjust the columns with `payout-admin update-company`
+        # once a real file arrives. Nykaa pays Blitz riders under their BLITZ rider ids — the
         # engine links an unknown Nykaa id to the same id at Blitz automatically
         # (companies.rider_ids_shared_with).
         "company_name": "Nykaa",

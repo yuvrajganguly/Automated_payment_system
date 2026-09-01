@@ -80,7 +80,7 @@ def cmd_list_companies(args) -> None:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT company_name, parser_type, payout_column, has_hold_sheet, "
-            "hold_style, is_active FROM companies ORDER BY company_name"
+            "hold_style, is_active, rider_ids_shared_with FROM companies ORDER BY company_name"
         ).fetchall()
     if not rows:
         print("No companies.")
@@ -92,7 +92,8 @@ def cmd_list_companies(args) -> None:
         active = "yes" if r["is_active"] else "no"
         style = r["hold_style"] or "-"
         payout = r["payout_column"] or ""
-        print(f"{r['company_name']:12} {r['parser_type']:10} {payout:24} {hold:6} {style:8} {active}")
+        shared = f"  ids=@{r['rider_ids_shared_with']}" if r["rider_ids_shared_with"] else ""
+        print(f"{r['company_name']:12} {r['parser_type']:10} {payout:24} {hold:6} {style:8} {active}{shared}")
 
 
 def cmd_add_company(args) -> None:
@@ -130,6 +131,10 @@ def cmd_update_company(args) -> None:
             fields["rider_id_column"] = args.rider_col
         if args.payout_sheet:
             fields["payout_sheet"] = args.payout_sheet
+        if args.orders_col is not None:
+            fields["orders_column"] = args.orders_col or None
+        if args.shares_rider_ids_with is not None:
+            fields["rider_ids_shared_with"] = args.shares_rider_ids_with or None
         if not fields:
             print("Nothing to update.")
             return
@@ -179,6 +184,10 @@ def main() -> None:
     pcu.add_argument("--name", required=True); pcu.add_argument("--active", choices=["yes", "no"])
     pcu.add_argument("--payout-col", dest="payout_col"); pcu.add_argument("--rider-col", dest="rider_col")
     pcu.add_argument("--payout-sheet", dest="payout_sheet")
+    pcu.add_argument("--orders-col", dest="orders_col",
+                     help="orders/deliveries column ('' to clear)")
+    pcu.add_argument("--shares-rider-ids-with", dest="shares_rider_ids_with",
+                     help="company whose rider IDs this one reuses, e.g. Blitz ('' to clear)")
 
     args = p.parse_args()
     dispatch = {

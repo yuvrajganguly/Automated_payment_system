@@ -34,6 +34,8 @@ class CompanyOut(BaseModel):
     has_hold_sheet: bool
     hold_style: Optional[str] = None
     is_active: bool
+    # Another company whose rider IDs this one reuses (Nykaa -> Blitz).
+    rider_ids_shared_with: Optional[str] = None
 
 
 # ── Riders + Persons ────────────────────────────────────────────────────────

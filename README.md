@@ -16,10 +16,11 @@ API and a React UI.
 
 ## What problem does it solve
 
-An operator runs riders across **five delivery companies** (Dealshare, Myntra,
-Jiffy, Zepto, Blitz). Each week brings five separate Excel files of "what we
+An operator runs riders across **six delivery companies** (Dealshare, Myntra,
+Jiffy, Zepto, Blitz, Nykaa). Each week brings separate Excel files of "what we
 owe each rider", but the rider population overlaps (one human can have several
-rider IDs across companies), many riders rent EVs at three different weekly
+rider IDs across companies — Nykaa even reuses Blitz's IDs, which the engine
+links automatically), many riders rent EVs at three different weekly
 rates, EV rent has to be deducted from whichever company's payout will be
 processed first, some riders have pending **Cash-on-Delivery** that should
 freeze their payout, and some riders simply disappear from a company's file
@@ -34,11 +35,12 @@ preview → commit → download**.
 
 ### Continuous EV rent metering
 Every EV assignment carries a `rent_charged_through` marker. Each cycle bills
-from the day **after** it, regardless of whether the entered cycle dates are
-contiguous, overlapping, or have a gap. **Gaps get caught up automatically;
-overlaps never double-charge.** The meter advances whether a day was actually
-charged (rider present) or missed to arrears (rider absent), so every day an
-EV is held is accounted for exactly once.
+from the day **after** it up to the cycle end, clamped to the cycle itself —
+**overlaps and re-runs never double-charge, and a behind meter never reaches
+back** (backdated handovers are settled once via the back-rent flow). The meter
+advances per assignment, forward only, whether a day was actually charged
+(rider present) or missed to arrears (rider absent), so every day an EV is
+held is accounted for exactly once.
 
 ### Config-driven parsers
 The five payout files have wildly different shapes — Dealshare's payout sits
@@ -110,16 +112,15 @@ Postgres URL and nothing else in the app needs to change. A one-shot migrator
 | **INACTIVE**  | EV holders absent this cycle, flagged for missed rent / dues / unreturned EV. |
 | **AUDIT**     | Every transaction this cycle, colour-coded by event type. |
 
-A real sample workbook is checked in at
-[`data/sample/`](data/sample/) — generated from the same engine used in
-production.
+(An anonymised sample workbook for `data/sample/` is on the to-do list; real
+data never lives in this repository — see `.gitignore`.)
 
 ## Tech stack
 
 | Layer       | Stack |
 |-------------|-------|
 | Frontend    | React 18 · TypeScript 5 · Vite 5 · Tailwind 3 · React Router 6 |
-| Backend     | Python 3.10+ · FastAPI 0.110 · Pydantic 2 · python-jose (JWT) · bcrypt · psycopg 3 |
+| Backend     | Python 3.10+ · FastAPI 0.110 · Pydantic 2 · python-jose (JWT, httpOnly cookie) · bcrypt · psycopg 3 |
 | Persistence | PostgreSQL 16 (Dockerized) in production · SQLite (WAL) for dev/tests · idempotent schema, FKs |
 | Files       | pandas + openpyxl (Excel I/O) |
 | CLIs        | `payout-manage` (DB + import) · `payout-admin` (users/companies) · `payout-api` (uvicorn) |
@@ -131,7 +132,7 @@ production.
 **Docker (production-style, PostgreSQL):**
 
 ```bash
-cp .env.example .env      # set a strong PAYOUT_JWT_SECRET
+cp .env.example .env      # set a strong PAYOUT_JWT_SECRET (required, >= 32 chars)
 docker compose up -d --build
 # app on http://localhost:8000 — see DOCKER.md for migration + daily commands
 ```
@@ -147,6 +148,9 @@ cd Automated_payment_system
 pip install -e ".[api]"
 
 # initialise the database and create an admin user
+# a JWT secret is required (>= 32 chars); for a throwaway local run you may
+# instead set PAYOUT_ALLOW_DEV_SECRET=1
+cp .env.example .env
 payout-manage init --email you@example.com --password ChangeMe12
 
 # (optional) load a seed workbook (Roster / EV Register / Opening Balances)
@@ -164,7 +168,7 @@ npm install
 npm run dev                            # http://localhost:5173
 ```
 
-Then open `http://localhost:5173`, log in, upload a Jiffy/Dealshare/Myntra/Blitz
+Then open `http://localhost:5173`, log in, upload a Jiffy/Dealshare/Myntra/Blitz/Nykaa
 payout file, preview the dry run, and commit to download the styled workbook.
 Interactive API docs live at <http://127.0.0.1:8000/docs>.
 
@@ -182,7 +186,7 @@ Interactive API docs live at <http://127.0.0.1:8000/docs>.
 ├── src/payout/                   ← Python package
 │   ├── api/                      ← FastAPI app + 16 route modules
 │   ├── cli/                      ← payout-manage / payout-admin / payout-api
-│   ├── db/                       ← schema + seeds + dual-backend connection
+│   ├── db/                       ← schema + versioned migrations + seeds + dual-backend connection
 │   ├── domain/                   ← pure-Python engine
 │   │   ├── engine.py             ← process_cycle orchestrator
 │   │   ├── rent.py               ← handover proration + continuity meter

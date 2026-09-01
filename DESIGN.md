@@ -3,7 +3,7 @@
 > Living document. Captures the agreed data model, business rules, and file
 > formats for the rebuild. Update this whenever a rule changes.
 >
-> Last updated: 2026-05-22 · Status: Step 1 (data model + file structures) locked
+> Last updated: 2026-09-01 · Status: in production (steps 1–7 shipped; see §12)
 
 ---
 
@@ -42,8 +42,18 @@ and ID.
 
 ## 3. Companies
 
-Active: **Dealshare, Myntra, Jiffy, Zepto, Blitz**. (Spencers removed.)
+Active: **Dealshare, Myntra, Jiffy, Zepto, Blitz, Nykaa**. (Spencers removed.)
 Zepto's file format is not yet known — parser deferred until a sample arrives.
+
+**Nykaa** (added 2026-09) pays riders who also work for Blitz, under their
+**Blitz rider IDs**. Its `companies` row sets `rider_ids_shared_with = 'Blitz'`:
+when a Nykaa file contains a rider ID that is unknown for Nykaa but exists at
+Blitz, the engine creates the Nykaa roster row pointing at the same person and
+reports it under `auto_linked` instead of asking the operator to onboard
+someone who already exists. The parser layout is **provisional** — cloned from
+Blitz (`rider_id` / `net_pay` / `total_del`, no COD) until a real Nykaa file is
+available; adjust the row with `payout-admin update-company --name Nykaa
+--payout-col ... --rider-col ...` when it is.
 
 ---
 
@@ -87,6 +97,8 @@ SUM(amount) for that rider in that cycle.
 ### Reshaped tables
 
 **`companies`** — parser config. `company_name` (PK), `parser_type`,
+`rider_ids_shared_with` (another company whose rider IDs this one reuses —
+Nykaa → Blitz — so unknown IDs are auto-linked, see §3),
 `payout_sheet` (sheet selector: index or name pattern), `rider_id_column`,
 `payout_column`, `has_hold_sheet`, `hold_style` (`sheet` | `column`),
 `hold_sheet`, `hold_key_column`, `hold_amount_column`, `hold_status_column`,
@@ -139,9 +151,12 @@ Chargeable days this cycle:
 Rent = `weekly_rate` if full standard (7-day) cycle, else `daily_rate × chargeable_days`.
 
 **Continuity:** rent is billed from the day after `rent_charged_through`
-(the last date billed) up to the cycle end - not just the entered cycle
-window - so gaps are caught up, overlaps/re-runs never double-charge, and the
-meter advances whether a day is charged (present) or missed to arrears (absent).
+(the last date billed) up to the cycle end, **clamped to the cycle**: a meter
+behind `cycle_start` does *not* catch up (that reach-back caused the
+stuck-meter double charges; backdated handovers are handled once by the manual
+back-rent flow). Overlaps and re-runs never double-charge. The meter is
+advanced per assignment leg, to `min(cycle_end, returned_date − 1)`, forward
+only, and never for an EV handed over after the cycle.
 
 ### 6.2 Rent guard
 
@@ -217,6 +232,7 @@ Aadhaar (`kyc_no`) will make this permanent later.
 |-----------|---------------------------------------|-----------------|------------------------|------|
 | Dealshare | 2nd sheet `W## - Computation` (week # varies) | `rider_id` | `Final weekly payout`* | — |
 | Blitz     | only sheet                            | `rider_id`      | `net_pay`              | — |
+| Nykaa     | only sheet *(provisional: same as Blitz)* | `rider_id` (= Blitz ID) | `net_pay`      | — |
 | Myntra    | 1st sheet                             | `Worker Code`   | `Final Payout`         | inline `COD-Pending` |
 | Jiffy     | 1st sheet                             | `Rider id`      | `Total Payable Amount` | 2nd sheet (COD line items) |
 | Zepto     | *to be provided*                      | —               | —                      | — |
@@ -324,12 +340,14 @@ The cycle overview/summary is deferred to the dashboard (Step 7), not the Excel.
 ## 12. Roadmap
 
 1. ✅ Lock data model + file structures.
-2. Restructure into a clean package; fix bugs; bcrypt; drop Spencers / add Blitz; lay down new schema.
-3. Rework EV rent engine (handover proration, multi-provider/model rates).
-4. Rework Hold/COD (Jiffy sheet + Myntra column).
-5. Build missed-rent arrears + auto-recovery.
-6. Build parsers for the 5 companies.
-7. Dashboard — incl. a config-driven parser builder for onboarding new companies.
+2. ✅ Restructure into a clean package; fix bugs; bcrypt; drop Spencers / add Blitz; lay down new schema.
+3. ✅ Rework EV rent engine (handover proration, multi-provider/model rates).
+4. ✅ Rework Hold/COD (Jiffy sheet + Myntra column).
+5. ✅ Build missed-rent arrears + auto-recovery.
+6. ✅ Build parsers for the 5 companies (config-driven).
+7. ✅ Dashboard, payments reconciliation, provider bills, EV rent details.
+8. Versioned migrations on both backends (`payout/db/migrations.py`) — done 2026-09.
+9. Nykaa real file layout (provisional Blitz clone until a sample arrives).
 
 ---
 

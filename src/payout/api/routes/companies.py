@@ -19,7 +19,8 @@ def list_companies(_: dict = Depends(get_current_user)) -> list[CompanyOut]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT company_name, parser_type, payout_column, has_hold_sheet, "
-            "hold_style, is_active FROM companies ORDER BY is_active DESC, company_name"
+            "hold_style, is_active, rider_ids_shared_with FROM companies "
+            "ORDER BY is_active DESC, company_name"
         ).fetchall()
     return [
         CompanyOut(
@@ -29,6 +30,7 @@ def list_companies(_: dict = Depends(get_current_user)) -> list[CompanyOut]:
             has_hold_sheet=bool(r["has_hold_sheet"]),
             hold_style=r["hold_style"],
             is_active=bool(r["is_active"]),
+            rider_ids_shared_with=r["rider_ids_shared_with"],
         )
         for r in rows
     ]
