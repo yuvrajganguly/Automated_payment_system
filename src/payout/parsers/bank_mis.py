@@ -42,13 +42,29 @@ def _normalise(s: Optional[str]) -> str:
 
 
 def _column_indexes(header_row: list[str]) -> dict[str, int]:
-    """Best-effort map: logical name → column index in this table."""
+    """Best-effort map: logical name → column index in this table.
+
+    Two rules keep the substring aliases from colliding: the most specific
+    aliases win first (every alias of every key is tried longest-first), and a
+    column claimed by one key is never handed to another. Without that,
+    ``"beneficia ry"`` (the wrapped account-number header) also matched
+    ``"Beneficia ry Name"`` and the account number was read as the name.
+    """
     out: dict[str, int] = {}
     cells = [(_normalise(c) or "").lower() for c in header_row]
-    for key, aliases in _HEADERS.items():
+    claimed: set[int] = set()
+    candidates = sorted(
+        ((len(alias), key, alias) for key, aliases in _HEADERS.items() for alias in aliases),
+        reverse=True,
+    )
+    for _, key, alias in candidates:
+        if key in out:
+            continue
         for i, cell in enumerate(cells):
-            if any(alias in cell for alias in aliases):
-                out[key] = i; break
+            if i not in claimed and alias in cell:
+                out[key] = i
+                claimed.add(i)
+                break
     return out
 
 
@@ -75,9 +91,13 @@ def _stitch(rows: list[list[Optional[str]]]) -> list[list[str]]:
     return stitched
 
 
-def _to_amount(s: str) -> float:
+def _to_amount(s: str) -> int:
+    """Amount cell -> integer paise (every other parser returns paise; this one
+    returned rupee floats, which were then stored in the paise column)."""
+    from payout.money import to_paise
+
     m = re.search(r"-?\d[\d,]*\.?\d*", s.replace(",", ""))
-    return float(m.group(0)) if m else 0.0
+    return to_paise(float(m.group(0))) if m else 0
 
 
 def parse_bank_mis(pdf_bytes: bytes) -> list[dict]:

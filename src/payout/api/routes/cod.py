@@ -20,6 +20,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
 from payout.exports import xlsx_response
+from payout.money import to_paise
 
 router = APIRouter()
 
@@ -136,11 +137,13 @@ def clear_cod(body: CodClearIn, user: dict = Depends(require_admin)) -> dict:
         entries_cleared = cur.rowcount
 
         new_balance = None
-        adj_amount = body.ledger_amount or 0.0
+        adj_amount = body.ledger_amount or 0.0        # rupees from the client
         if adj_amount:
             reason = body.reason or f"COD clearance ({entries_cleared} entry/-ies)"
+            # Ledger is integer paise; the rupee amount used to be posted as-is
+            # (a 100x-too-small credit).
             new_balance = post_adjustment(
-                conn, body.person_id, adj_amount, reason, user["email"],
+                conn, body.person_id, to_paise(adj_amount), reason, user["email"],
                 rider_id="", company="",
             )
         conn.commit()

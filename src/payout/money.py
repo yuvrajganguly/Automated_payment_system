@@ -93,6 +93,12 @@ MONEY_KEYS = frozenset({
     "total_pending", "recent_payout", "expected_amount",
     # Dashboard: partial rent collection (charged minus collected, this window)
     "rent_partial",
+    # Dashboard breakdown drawers: "Owed to providers" (SUM provider_cost) and
+    # "COD held" (SUM cod amount) columns — were missing, rendered 100x.
+    "owed", "held",
+    # EV Rent page cycle rows (ev_rent.py): paise sums that the page adds to
+    # rupee totals — were missing.
+    "collected_current", "rolled_recovered_later", "rolled_forward_net",
 })
 
 

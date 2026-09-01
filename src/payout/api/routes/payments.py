@@ -313,7 +313,7 @@ def resolve_line(line_id: int, body: ResolveIn,
                 f"amount carried forward."
             )
             post_adjustment(
-                conn, line["person_id"], float(line["amount"]),
+                conn, line["person_id"], int(line["amount"]),
                 reason, user["email"], rider_id="", company="",
             )
             txn_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]

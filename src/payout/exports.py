@@ -46,6 +46,21 @@ def _auto_width(ws, min_w: int = 10, max_w: int = 42) -> None:
         ws.column_dimensions[letter].width = width
 
 
+def _rupeeize_rows(rows: list, money_cols: Sequence[int]) -> list:
+    """Convert the 1-based ``money_cols`` of every row from paise to rupees."""
+    if not money_cols:
+        return rows
+    mset = set(money_cols)
+    return [
+        [
+            (to_rupees(v) if (i + 1) in mset and isinstance(v, (int, float))
+             and not isinstance(v, bool) else v)
+            for i, v in enumerate(r)
+        ]
+        for r in rows
+    ]
+
+
 def build_xlsx(
     *,
     sheet_name: str,
@@ -82,12 +97,7 @@ def build_xlsx(
     ws.freeze_panes = "A2"
 
     # Body. Money columns are stored as integer paise internally -> rupees here.
-    rows = list(rows)
-    if money_cols:
-        mset = set(money_cols)
-        rows = [[(to_rupees(v) if (i + 1) in mset and isinstance(v, (int, float))
-                  and not isinstance(v, bool) else v)
-                 for i, v in enumerate(r)] for r in rows]
+    rows = _rupeeize_rows(list(rows), money_cols)
     for i, row in enumerate(rows, 2):
         for col, v in enumerate(row, 1):
             c = ws.cell(row=i, column=col, value=v)
@@ -152,7 +162,10 @@ def add_styled_sheet(
         c.border = _border()
     ws.freeze_panes = "A2"
 
-    rows = list(rows)
+    # Money columns are stored as integer paise internally -> rupees here.
+    # (This parameter was declared and never used: 8 of the dashboard export's
+    # 9 sheets showed paise as if they were rupees.)
+    rows = _rupeeize_rows(list(rows), money_cols)
     for i, row in enumerate(rows, 2):
         for col, v in enumerate(row, 1):
             c = ws.cell(row=i, column=col, value=v)
