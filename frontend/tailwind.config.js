@@ -1,75 +1,73 @@
 /** @type {import('tailwindcss').Config}
  *
- * Midnight design system.
+ * "Obsidian" design system — the app's second-generation identity.
  *
- * The whole app is authored against a small set of semantic anchors:
- *   - `slate` is the NEUTRAL SCALE, dark-inverted: 900..700 are light ink
- *     (headings/body), 600..400 secondary/muted ink, 300..50 fills that get
- *     progressively closer to the surface. Every legacy `text-slate-500` /
- *     `bg-slate-100` in the codebase lands on the right dark value through
- *     this one table — the scale's *semantics* (500 = muted) are unchanged.
+ * Structure: no sidebar; a glass command bar with workspace switching, a
+ * sub-tab rail per workspace, and a ⌘K palette. Identity: violet-black
+ * surfaces, an electric violet→cyan accent, Sora for display, Manrope for
+ * body, JetBrains Mono for figures.
+ *
+ * Semantic anchors (unchanged contract, new values):
+ *   - `slate` is the neutral scale, dark-inverted and hue-shifted violet:
+ *     900..700 light ink, 600..400 muted ink, 300..50 fills near the surface.
  *   - `panel` is the card surface; the page sits on `abyss`.
- *   - `brand` is tuned for dark surfaces: 600 is the button fill, 700 the
- *     *brighter* hover (light emits upward on dark), 300/400 are link/glow.
+ *   - `brand` is the accent: 600 fill, 700 the BRIGHTER hover, 300/400 glow.
+ *   - Chart series colors live in pages/dashboard/charts.tsx (validated data
+ *     palette) and deliberately do NOT follow the UI accent.
  */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
-    // Hairlines by default: a bare `border` class anywhere renders the
-    // system's edge color instead of Tailwind's light gray.
     borderColor: ({ theme }) => ({
       ...theme('colors'),
-      DEFAULT: 'rgba(148, 163, 190, 0.14)',
+      DEFAULT: 'rgba(167, 155, 255, 0.13)',
     }),
     extend: {
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['"Space Grotesk"', 'Inter', 'ui-sans-serif', 'sans-serif'],
+        sans: ['"Manrope Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['"Sora Variable"', '"Manrope Variable"', 'ui-sans-serif', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       colors: {
-        // Page + surface layers (deep, never flat #000).
-        abyss: '#07090f',
-        panel: { DEFAULT: '#0e1220', raised: '#131828', deep: '#0a0d18' },
+        abyss: '#08070e',
+        panel: { DEFAULT: '#100e1c', raised: '#161327', deep: '#0b0a15' },
         edge: {
-          DEFAULT: 'rgba(148,163,190,0.14)',
-          soft: 'rgba(148,163,190,0.08)',
-          strong: 'rgba(148,163,190,0.24)',
+          DEFAULT: 'rgba(167,155,255,0.13)',
+          soft: 'rgba(167,155,255,0.07)',
+          strong: 'rgba(167,155,255,0.25)',
         },
-        // Neutral scale, dark-inverted (see header comment).
         slate: {
-          950: '#f6f8fc', 900: '#eef1f8', 800: '#dde2ee', 700: '#c3cbdc',
-          600: '#98a2b8', 500: '#7d879d', 400: '#5d6780', 300: '#3c4459',
-          200: '#272e40', 100: '#1a2030', 50: '#151a28',
+          950: '#f5f3fd', 900: '#efedfa', 800: '#dfdcf0', 700: '#c6c2dd',
+          600: '#9b96b8', 500: '#807b9d', 400: '#5f5a7d', 300: '#403c58',
+          200: '#2a2740', 100: '#1c1930', 50: '#161327',
         },
-        // Accent — chart-blue family stepped for dark surfaces.
         brand: {
-          DEFAULT: '#3987e5', 50: '#0f1a2e', 100: '#12233f', 200: '#1a2c4d',
-          300: '#7ab2f2', 400: '#549ae9', 500: '#3987e5', 600: '#2f77d0',
-          700: '#4f97ee', 800: '#1d4f8f', 900: '#173c6b',
+          DEFAULT: '#8b5cf6', 50: '#17122b', 100: '#1d1636', 200: '#2a1f52',
+          300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed',
+          700: '#9d71f9', 800: '#5b21b6', 900: '#4c1d95',
         },
         ink: {
-          DEFAULT: '#0a0d16', 950: '#070910', 900: '#0a0d16', 800: '#10141f',
-          700: '#161b29', 600: '#1f2534',
+          DEFAULT: '#0b0a15', 950: '#08070e', 900: '#0b0a15', 800: '#110f1e',
+          700: '#171429', 600: '#201c36',
         },
         midnight: {
-          DEFAULT: '#0a0d16', 950: '#070910', 900: '#0a0d16', 800: '#10141f',
-          700: '#161b29', 600: '#1f2534',
+          DEFAULT: '#0b0a15', 950: '#08070e', 900: '#0b0a15', 800: '#110f1e',
+          700: '#171429', 600: '#201c36',
         },
         silver: {
-          DEFAULT: '#aab2c5', 100: '#eef1f8', 200: '#dde2ee', 300: '#c3cbdc',
-          400: '#98a2b8', 500: '#7d879d',
+          DEFAULT: '#aca7c6', 100: '#efedfa', 200: '#dfdcf0', 300: '#c6c2dd',
+          400: '#9b96b8', 500: '#807b9d',
         },
-        surface: { DEFAULT: '#07090f', card: '#0e1220', sunken: '#0a0d18' },
+        surface: { DEFAULT: '#08070e', card: '#100e1c', sunken: '#0b0a15' },
         good: '#34d399',
-        critical: '#e66767',
+        critical: '#f87171',
       },
       boxShadow: {
-        // Depth on dark = darker below + a whisper of light on the top edge.
-        card: '0 1px 0 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,.5), 0 8px 24px -8px rgba(0,0,0,.6)',
-        pop: '0 1px 0 0 rgba(255,255,255,0.05) inset, 0 12px 32px rgba(0,0,0,.55), 0 32px 80px -16px rgba(0,0,0,.6)',
-        'glow-brand': '0 0 0 1px rgba(57,135,229,.35), 0 0 24px -6px rgba(57,135,229,.45)',
-        glass: '0 8px 40px rgba(0,0,0,.5)',
-        glow: '0 0 0 1px rgba(255,255,255,.06), 0 14px 50px rgba(0,0,0,.6)',
+        card: '0 1px 0 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,.5), 0 8px 24px -8px rgba(0,0,0,.65)',
+        pop: '0 1px 0 0 rgba(255,255,255,0.05) inset, 0 12px 32px rgba(0,0,0,.6), 0 32px 80px -16px rgba(0,0,0,.65)',
+        'glow-brand': '0 0 0 1px rgba(139,92,246,.4), 0 0 24px -6px rgba(139,92,246,.5)',
+        glass: '0 8px 40px rgba(0,0,0,.55)',
+        glow: '0 0 0 1px rgba(255,255,255,.06), 0 14px 50px rgba(0,0,0,.65)',
       },
       keyframes: {
         'fade-up': {
@@ -81,14 +79,20 @@ export default {
           '100%': { backgroundPosition: '200% 0' },
         },
         'scale-in': {
-          '0%': { opacity: '0', transform: 'scale(.97)' },
-          '100%': { opacity: '1', transform: 'scale(1)' },
+          '0%': { opacity: '0', transform: 'scale(.97) translateY(-4px)' },
+          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        aurora: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '33%': { transform: 'translate(40px, -30px) scale(1.08)' },
+          '66%': { transform: 'translate(-30px, 25px) scale(0.95)' },
         },
       },
       animation: {
-        'fade-up': 'fade-up .4s cubic-bezier(.21,1.02,.73,1) both',
+        'fade-up': 'fade-up .35s cubic-bezier(.21,1.02,.73,1) both',
         shimmer: 'shimmer 1.8s linear infinite',
-        'scale-in': 'scale-in .18s cubic-bezier(.21,1.02,.73,1) both',
+        'scale-in': 'scale-in .16s cubic-bezier(.21,1.02,.73,1) both',
+        aurora: 'aurora 36s ease-in-out infinite',
       },
     },
   },
