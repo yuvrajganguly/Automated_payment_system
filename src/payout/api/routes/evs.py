@@ -187,13 +187,22 @@ def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone():
             raise HTTPException(404, "EV not found")
-        rm = conn.execute(
-            "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
-            (body.rider_id, body.company),
-        ).fetchone()
-        if not rm:
-            raise HTTPException(404, "Rider not found")
-        pid = rm["person_id"]
+        if body.person_id is not None:
+            if not conn.execute(
+                "SELECT 1 FROM person_registry WHERE person_id=?", (body.person_id,)
+            ).fetchone():
+                raise HTTPException(404, f"Person {body.person_id} not found")
+            pid = body.person_id
+        elif body.rider_id and body.company:
+            rm = conn.execute(
+                "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
+                (body.rider_id, body.company),
+            ).fetchone()
+            if not rm:
+                raise HTTPException(404, "Rider not found")
+            pid = rm["person_id"]
+        else:
+            raise HTTPException(400, "Provide person_id, or (rider_id + company)")
         if conn.execute(
             "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL", (pid,)
         ).fetchone():

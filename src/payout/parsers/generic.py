@@ -97,7 +97,9 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     # Optional name and hub columns. We pull these from the file so the engine
     # can label unknown rider_ids with a real name + hub in the onboarding
     # modal (instead of just "id 8906377190 — who's that?").
-    name_col = match_column(df.columns, "rider_name", "rider name", "name")
+    name_col = match_column(
+        df.columns, "rider_name", "rider name", "name", "worker name", "worker_name"
+    )
     hub_col = match_column(
         df.columns,
         "store",

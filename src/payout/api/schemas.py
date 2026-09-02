@@ -179,9 +179,14 @@ class EvUnitOut(BaseModel):
 
 
 class EvAssignIn(BaseModel):
+    """Assign an EV to a person — either directly by ``person_id`` or via a
+    (rider_id, company) pair. Person ID is the unambiguous handle (a person
+    can ride for several companies; names and rider IDs collide)."""
+
     ev_id: str
-    rider_id: str
-    company: str
+    person_id: int | None = None
+    rider_id: str | None = None
+    company: str | None = None
     handover_date: date | None = None
 
 

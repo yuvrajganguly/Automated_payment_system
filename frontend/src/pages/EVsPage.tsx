@@ -259,26 +259,33 @@ function AddEvCard({ models, onAdded }: { models: EvModelOut[]; onAdded: () => v
 }
 
 function AssignEvCard({ onChanged }: { onChanged: () => void }) {
-  const empty = { ev_id: '', rider_id: '', company: '', handover_date: '' }
+  const empty = { ev_id: '', person_id: '', rider_id: '', company: '', handover_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const body: Record<string, string> = { ev_id: form.ev_id, rider_id: form.rider_id, company: form.company }
+      const body: Record<string, string | number> = { ev_id: form.ev_id }
+      if (form.person_id) body.person_id = Number(form.person_id)
+      else { body.rider_id = form.rider_id; body.company = form.company }
       if (form.handover_date) body.handover_date = form.handover_date
       await api.post('/evs/assign', body); setMsg('Assigned'); setForm(empty); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
+  const validTarget = !!form.person_id || (!!form.rider_id && !!form.company)
   return <FormCard title="Assign EV">
     <form onSubmit={submit} className="grid grid-cols-2 gap-2 text-sm">
       <Input label="EV ID *" v={form.ev_id} on={(v) => setForm({ ...form, ev_id: v })} />
-      <Input label="Rider ID *" v={form.rider_id} on={(v) => setForm({ ...form, rider_id: v })} />
-      <Input label="Company *" v={form.company} on={(v) => setForm({ ...form, company: v })} />
+      <Input label="Person ID" v={form.person_id} on={(v) => setForm({ ...form, person_id: v })} />
+      <Input label="Rider ID" v={form.rider_id} on={(v) => setForm({ ...form, rider_id: v })} />
+      <Input label="Company" v={form.company} on={(v) => setForm({ ...form, company: v })} />
       <Input label="Handover date" type="date" v={form.handover_date} on={(v) => setForm({ ...form, handover_date: v })} />
+      <div className="col-span-2 text-xs text-slate-500 -mt-1">
+        Give a Person ID (unambiguous — from the rider's profile), or a Rider ID + Company pair.
+      </div>
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
-        disabled={!form.ev_id || !form.rider_id || !form.company} label="Assign" />{msg && <span className="text-xs">{msg}</span>}</div>
+        disabled={!form.ev_id || !validTarget} label="Assign" />{msg && <span className="text-xs">{msg}</span>}</div>
     </form>
   </FormCard>
 }

@@ -171,29 +171,35 @@ function statusColor(s: string) {
 
 function AssignCard({ evId, hasHolder, onChanged }:
   { evId: string; hasHolder: boolean; onChanged: () => void }) {
-  const empty = { rider_id: '', company: '', handover_date: '' }
+  const empty = { person_id: '', rider_id: '', company: '', handover_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const body: Record<string, string> = {
-        ev_id: evId, rider_id: form.rider_id, company: form.company,
-      }
+      const body: Record<string, string | number> = { ev_id: evId }
+      if (form.person_id) body.person_id = Number(form.person_id)
+      else { body.rider_id = form.rider_id; body.company = form.company }
       if (form.handover_date) body.handover_date = form.handover_date
       await api.post('/evs/assign', body); setMsg('Assigned'); setForm(empty); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
+  const validTarget = !!form.person_id || (!!form.rider_id && !!form.company)
   return <Card title={hasHolder ? 'Reassign EV (return first)' : 'Assign EV'}>
     <form onSubmit={submit} className="grid grid-cols-2 gap-2 text-sm">
-      <In v={form.rider_id} on={(v) => setForm({ ...form, rider_id: v })} label="Rider ID *" />
-      <In v={form.company} on={(v) => setForm({ ...form, company: v })} label="Company *" />
+      <In v={form.person_id} on={(v) => setForm({ ...form, person_id: v })} label="Person ID" />
+      <div />
+      <In v={form.rider_id} on={(v) => setForm({ ...form, rider_id: v })} label="Rider ID" />
+      <In v={form.company} on={(v) => setForm({ ...form, company: v })} label="Company" />
       <In v={form.handover_date} on={(v) => setForm({ ...form, handover_date: v })}
           label="Handover date" type="date" />
       <div />
+      <div className="col-span-2 text-xs text-slate-500 -mt-1">
+        Person ID (unambiguous), or Rider ID + Company.
+      </div>
       <button type="submit"
-              disabled={busy || hasHolder || !form.rider_id || !form.company}
+              disabled={busy || hasHolder || !validTarget}
               className="col-span-2 bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
         {busy ? '…' : 'Assign'}
       </button>

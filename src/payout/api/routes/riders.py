@@ -128,29 +128,25 @@ def _insert_rider_into_db(
         if conflict:
             raise HTTPException(409, _conflict_message(conflict, "add"))
     else:
-        pr = conn.execute(
-            "SELECT person_id FROM person_registry WHERE LOWER(display_name)=LOWER(?)", (name,)
-        ).fetchone()
-        if pr:
-            person_id = pr["person_id"]
-            # Same-name match: re-check account ownership against the resolved
-            # person_id (not None) so we don't bind a different person's
-            # account to this name.
-            conflict = _account_owner_elsewhere(conn, account_no, person_id)
-            if conflict:
-                raise HTTPException(409, _conflict_message(conflict, "add"))
-        else:
-            # Brand-new person — any existing holder of this account is a conflict.
-            conflict = _account_owner_elsewhere(conn, account_no, None)
-            if conflict:
-                raise HTTPException(409, _conflict_message(conflict, "create"))
-            cur = conn.execute(
-                "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
-                "VALUES (?,?,?)",
-                (name, company, rider_id),
-            )
-            person_id = cur.lastrowid
-            _init_person(conn, person_id)
+        # NEVER link on name alone. Rider names collide constantly ("Amit
+        # Naskar" exists at two companies as two different people) and a
+        # silent merge corrupts both ledgers — this used to attach any new
+        # rider to the first person with the same display_name. A new rider
+        # without an explicit person_id gets a NEW person; attaching to an
+        # existing one is a deliberate act (pass person_id, or use the
+        # onboarding "link" action). Any existing holder of this bank
+        # account is still a conflict, and the 409 names the owner so the
+        # operator can link explicitly if it really is the same person.
+        conflict = _account_owner_elsewhere(conn, account_no, None)
+        if conflict:
+            raise HTTPException(409, _conflict_message(conflict, "create"))
+        cur = conn.execute(
+            "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
+            "VALUES (?,?,?)",
+            (name, company, rider_id),
+        )
+        person_id = cur.lastrowid
+        _init_person(conn, person_id)
     # Default to BIKE when nothing was supplied — that's the safe assumption
     # for any rider not on an EV. (The runtime display value is still derived
     # from EV-assignment status in list/lookup queries, so this is mostly for
