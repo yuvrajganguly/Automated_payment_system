@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react'
+import emblem from '../assets/qwikserve-emblem.png'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useApi } from '../hooks/useApi'
@@ -41,11 +42,12 @@ export function LoginPage() {
   return (
     <div className="auth-bg min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm animate-fade-up">
-        <div className="flex items-center gap-2.5 mb-6 justify-center">
-          <div className="h-10 w-10 rounded-xl grid place-items-center font-display font-bold text-white text-lg
-                          bg-gradient-to-br from-brand-400 to-brand-800
-                          shadow-[0_0_0_1px_rgba(122,178,242,0.35),0_2px_16px_-2px_rgba(57,135,229,0.7)]">P</div>
-          <span className="text-xl font-display font-semibold tracking-tight text-white">Payout System</span>
+        <div className="flex flex-col items-center gap-3 mb-6">
+          <img src={emblem} alt="QwikServe"
+               className="h-16 w-auto drop-shadow-[0_0_24px_rgba(220,38,38,0.5)]" />
+          <span className="text-xl font-display font-semibold tracking-tight text-white">
+            QwikServe <span className="text-slate-500 font-normal">Payout</span>
+          </span>
         </div>
         <form onSubmit={onSubmit}
               className="rounded-2xl bg-white/[0.06] backdrop-blur-2xl border border-white/10 shadow-glow p-8">

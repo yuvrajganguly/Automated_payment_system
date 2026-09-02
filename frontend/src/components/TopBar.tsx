@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { WORKSPACES, workspaceFor, workspaceUrl } from './workspaces'
+import emblem from '../assets/qwikserve-emblem.png'
 
 /** The command bar: brand mark · workspace switcher · ⌘K · identity.
  *  Fixed, glass, and the only chrome above the content. */
@@ -14,13 +15,15 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   return (
     <header className="glass-bar fixed top-0 inset-x-0 z-40 h-14 flex items-center gap-4 px-4">
       <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
-        <div className="brand-mark h-8 w-8 rounded-[10px] text-sm transition-transform
-                        group-hover:scale-105 group-hover:rotate-[-3deg]">
-          P
-        </div>
+        <img
+          src={emblem}
+          alt="QwikServe"
+          className="h-8 w-auto drop-shadow-[0_0_10px_rgba(220,38,38,0.45)]
+                     transition-transform group-hover:scale-105"
+        />
         <span className="font-display font-semibold tracking-tight text-white text-[15px]
                          hidden md:block">
-          Payout
+          QwikServe
         </span>
       </Link>
 
