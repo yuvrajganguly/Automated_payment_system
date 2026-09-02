@@ -12,6 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from payout.api.config import CORS_ORIGINS, DEMO_MODE
 from payout.api.routes import (
+    analytics as analytics_routes,
+)
+from payout.api.routes import (
     arrears as arrears_routes,
 )
 from payout.api.routes import (
@@ -158,6 +161,7 @@ app.include_router(cod_routes.router, prefix="/api/cod", tags=["cod"])
 app.include_router(ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"])
 app.include_router(payments_routes.router, prefix="/api/payments", tags=["payments"])
 app.include_router(dashboard_routes.router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(analytics_routes.router, prefix="/api/dashboard", tags=["analytics"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
 

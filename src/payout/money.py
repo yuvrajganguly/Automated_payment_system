@@ -156,6 +156,10 @@ MONEY_KEYS = frozenset(
         # "COD held" (SUM cod amount) columns — were missing, rendered 100x.
         "owed",
         "held",
+        # Analytics endpoints (routes/analytics.py): weekly series + fleet P&L
+        "dues_delta",
+        "earned",
+        "margin",
         # Ledger-credit auto-settlement against EV arrears (routes report it)
         "arrears_settled_from_credit",
         # EV Rent page cycle rows (ev_rent.py): paise sums that the page adds to
