@@ -18,6 +18,7 @@ Grouping into ISO weeks happens in Python so both backends behave identically.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -473,3 +474,270 @@ def rider_analytics(
             }
         )
     return {"weekly": series, "top_earners": top_earners, "sliding_into_dues": sliding}
+
+
+# ─────────────────────────── the money story ─────────────────────────────
+#
+# Everything below feeds the numbers-first dashboard: one windowed "story"
+# of how money flowed (in → withheld → out; rent charged → collected /
+# missed → later recovered / written off / still owed) plus the same story
+# grouped by company, rider, or EV. Written for a reader who is not an
+# accountant: every figure is one SQL aggregate with a plain meaning.
+
+_TXN_WINDOW = "date(t.created_at) BETWEEN ? AND ?"
+# Correction rows (heal refunds, write-offs, credit offsets) are written with
+# company='' — attribute them to the person's deduction company so company
+# filters and groupings still see them.
+_CO_EXPR = "COALESCE(NULLIF(t.company, ''), pr.deduction_company, '?')"
+
+
+def _flow_sums(conn, wf: str, wt: str, cos: list[str]) -> dict:
+    co_sql, co_args = _co_clause(cos, _CO_EXPR)
+    row = conn.execute(
+        "SELECT "
+        " SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS gross_payout, "
+        " SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
+        " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
+        " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected, "
+        " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) AS rent_missed, "
+        " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+        "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
+        " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) AS written_off, "
+        " SUM(CASE WHEN t.event_type='ADJUSTMENT' "
+        "      AND t.remarks LIKE 'Credit balance applied%' THEN -t.amount ELSE 0 END) "
+        "   AS credit_offset, "
+        " SUM(CASE WHEN t.event_type='ADJUSTMENT' "
+        "      AND t.remarks LIKE 'Refund — EV%' THEN t.amount ELSE 0 END) AS refunded "
+        "FROM transactions t "
+        "JOIN person_registry pr ON pr.person_id = t.person_id "
+        f"WHERE {_TXN_WINDOW}{co_sql}",
+        [wf, wt, *co_args],
+    ).fetchone()
+    out = {k: int(row[k] or 0) for k in row.keys()}  # noqa: SIM118 (sqlite3.Row)
+    cod_co_sql, cod_co_args = _co_clause(cos, "company")
+    out["cod_held"] = int(
+        conn.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM cod_holds "
+            f"WHERE date(created_at) BETWEEN ? AND ?{cod_co_sql}",
+            [wf, wt, *cod_co_args],
+        ).fetchone()[0]
+    )
+    return out
+
+
+@router.get("/story")
+def money_story(
+    companies: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """The window's money flow in plain terms, plus today's debt position.
+
+    ``flow`` is scoped to the window (by when rows were written, matching
+    /summary); ``position`` is live — where the debt stands right now,
+    including the dormant split (EV returned, debt kept silently).
+    """
+    wf, wt = _window(date_from, date_to)
+    days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
+    cos = _split_companies(companies)
+    with get_connection() as conn:
+        flow = _flow_sums(conn, wf, wt, cos)
+        pos = conn.execute(
+            "SELECT "
+            " COALESCE(SUM(CASE WHEN ea.outstanding > 0 THEN ea.outstanding END), 0) "
+            "   AS ev_arrears, "
+            " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NOT NULL "
+            "     THEN ea.outstanding END), 0) AS ev_arrears_active, "
+            " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NULL "
+            "     THEN ea.outstanding END), 0) AS ev_arrears_dormant, "
+            " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NULL "
+            "     THEN 1 ELSE 0 END), 0) AS dormant_riders "
+            "FROM ev_arrears ea "
+            "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+            "           WHERE returned_date IS NULL) a ON a.person_id = ea.person_id"
+        ).fetchone()
+        bal = conn.execute(
+            "SELECT "
+            " COALESCE(SUM(CASE WHEN current_balance < 0 THEN -current_balance END), 0) AS dues, "
+            " COALESCE(SUM(CASE WHEN current_balance > 0 THEN current_balance END), 0) AS credit "
+            "FROM balances"
+        ).fetchone()
+        cod = conn.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM cod_holds WHERE cleared_at IS NULL"
+        ).fetchone()[0]
+    return {
+        "window": {"from": wf, "to": wt, "days": days},
+        "flow": flow,
+        "position": {
+            "ev_arrears": pos["ev_arrears"],
+            "ev_arrears_active": pos["ev_arrears_active"],
+            "ev_arrears_dormant": pos["ev_arrears_dormant"],
+            "dormant_riders": pos["dormant_riders"],
+            "dues": bal["dues"],
+            "credit": bal["credit"],
+            "cod_uncleared": int(cod),
+        },
+    }
+
+
+@router.get("/story/by")
+def money_story_by(
+    dim: str,
+    companies: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 300,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """The same story grouped by ``dim``: 'company', 'rider', or 'ev'.
+
+    company/rider come from the transactions trail (corrections attributed
+    via the person's deduction company). 'ev' comes from the day-ledger —
+    per-EV charged/collected/missed for the window, provider cost, margin —
+    with write-offs attributed from RENT_REVERSAL remarks (the heal writes
+    'EV <id> returned' machine-formatted).
+    """
+    wf, wt = _window(date_from, date_to)
+    days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
+    cos = _split_companies(companies)
+    limit = max(1, min(int(limit), 1000))
+    with get_connection() as conn:
+        if dim == "company":
+            co_sql, co_args = _co_clause(cos, _CO_EXPR)
+            rows = conn.execute(
+                f"SELECT {_CO_EXPR} AS company, "
+                " SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS gross_payout, "
+                " SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
+                " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
+                " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
+                "   AS rent_collected, "
+                " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) "
+                "   AS rent_missed, "
+                " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+                "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
+                " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) "
+                "   AS written_off, "
+                " COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS riders "
+                "FROM transactions t "
+                "JOIN person_registry pr ON pr.person_id = t.person_id "
+                f"WHERE {_TXN_WINDOW}{co_sql} "
+                f"GROUP BY {_CO_EXPR} ORDER BY rent_charged DESC",
+                [wf, wt, *co_args],
+            ).fetchall()
+            out = [dict(r) for r in rows if r["company"]]
+            # live outstanding per company (person's deduction company)
+            live = {
+                r["co"]: (int(r["out"] or 0), int(r["dues"] or 0))
+                for r in conn.execute(
+                    "SELECT pr.deduction_company AS co, "
+                    "  SUM(COALESCE(ea.outstanding, 0)) AS out, "
+                    "  SUM(CASE WHEN COALESCE(b.current_balance,0) < 0 "
+                    "      THEN -b.current_balance ELSE 0 END) AS dues "
+                    "FROM person_registry pr "
+                    "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
+                    "LEFT JOIN balances b ON b.person_id = pr.person_id "
+                    "GROUP BY pr.deduction_company"
+                )
+            }
+            for r in out:
+                o = live.get(r["company"], (0, 0))
+                r["outstanding"] = o[0]
+                r["dues"] = o[1]
+            return {"window": {"from": wf, "to": wt, "days": days}, "dim": dim, "rows": out}
+
+        if dim == "rider":
+            co_sql, co_args = _co_clause(cos, _CO_EXPR)
+            rows = conn.execute(
+                "SELECT t.person_id, pr.display_name, "
+                f" MAX({_CO_EXPR}) AS company, "
+                " SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS gross_payout, "
+                " SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
+                " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
+                " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
+                "   AS rent_collected, "
+                " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) "
+                "   AS rent_missed, "
+                " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+                "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
+                " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) "
+                "   AS written_off, "
+                " COALESCE(MAX(ea.outstanding), 0) AS outstanding, "
+                " COALESCE(MAX(b.current_balance), 0) AS balance "
+                "FROM transactions t "
+                "JOIN person_registry pr ON pr.person_id = t.person_id "
+                "LEFT JOIN ev_arrears ea ON ea.person_id = t.person_id "
+                "LEFT JOIN balances b ON b.person_id = t.person_id "
+                f"WHERE {_TXN_WINDOW}{co_sql} "
+                "GROUP BY t.person_id, pr.display_name "
+                "ORDER BY 6 DESC LIMIT ?",  # 6 = rent_charged (PG: no aliases in ORDER BY exprs)
+                [wf, wt, *co_args, limit],
+            ).fetchall()
+            return {
+                "window": {"from": wf, "to": wt, "days": days},
+                "dim": dim,
+                "rows": [dict(r) for r in rows],
+            }
+
+        if dim == "ev":
+            rows = conn.execute(
+                "SELECT l.ev_id, m.provider, m.model_name AS model, u.status, "
+                " SUM(CASE WHEN l.billing_status IN ('billed','missed','recovered') "
+                "     THEN l.daily_cost ELSE 0 END) AS charged, "
+                " SUM(CASE WHEN l.billing_status IN ('billed','recovered') "
+                "     THEN l.daily_cost ELSE 0 END) AS collected, "
+                " SUM(CASE WHEN l.billing_status='missed' THEN l.daily_cost ELSE 0 END) "
+                "   AS missed, "
+                " SUM(l.provider_cost) AS provider_cost, "
+                " COUNT(*) AS ledger_days, "
+                " MAX(CASE WHEN a.person_id IS NOT NULL THEN pr.display_name END) AS holder, "
+                " MAX(a.person_id) AS holder_person_id "
+                "FROM ev_daily_ledger l "
+                "JOIN ev_units u ON u.ev_id = l.ev_id "
+                "JOIN ev_models m ON m.model_id = u.model_id "
+                "LEFT JOIN ev_assignments a "
+                "  ON a.ev_id = l.ev_id AND a.returned_date IS NULL "
+                "LEFT JOIN person_registry pr ON pr.person_id = a.person_id "
+                "WHERE l.day BETWEEN ? AND ? "
+                "GROUP BY l.ev_id, m.provider, m.model_name, u.status "
+                "ORDER BY charged DESC LIMIT ?",
+                [wf, wt, limit],
+            ).fetchall()
+            out = [dict(r) for r in rows]
+            # Write-offs per EV, from the heal's machine-formatted remarks.
+            wo: dict[str, int] = {}
+            for r in conn.execute(
+                "SELECT t.amount, t.remarks FROM transactions t "
+                "WHERE t.event_type='RENT_REVERSAL' AND date(t.created_at) BETWEEN ? AND ?",
+                [wf, wt],
+            ):
+                m = re.search(r"EV (\S+) returned", r["remarks"] or "")
+                if m:
+                    wo[m.group(1)] = wo.get(m.group(1), 0) + int(r["amount"])
+            known = {r["ev_id"] for r in out}
+            for r in out:
+                r["written_off"] = wo.get(r["ev_id"], 0)
+                r["margin"] = int(r["collected"] or 0) - int(r["provider_cost"] or 0)
+            # An EV healed out of the ledger entirely still deserves a row.
+            for ev_id, amount in wo.items():
+                if ev_id not in known:
+                    out.append(
+                        {
+                            "ev_id": ev_id,
+                            "provider": None,
+                            "model": None,
+                            "status": "returned",
+                            "charged": 0,
+                            "collected": 0,
+                            "missed": 0,
+                            "provider_cost": 0,
+                            "ledger_days": 0,
+                            "holder": None,
+                            "holder_person_id": None,
+                            "written_off": amount,
+                            "margin": 0,
+                        }
+                    )
+            return {"window": {"from": wf, "to": wt, "days": days}, "dim": dim, "rows": out}
+
+    raise HTTPException(400, "dim must be 'company', 'rider', or 'ev'")

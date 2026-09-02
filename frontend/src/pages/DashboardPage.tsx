@@ -1,93 +1,183 @@
 /**
- * Dashboard — KPI strip + four analytics tabs.
+ * Dashboard, third generation — the money story, numbers first.
  *
- *   Overview → weekly money-flow trends + secondary metrics + recent cycles
- *   Rent     → collection efficiency, arrears aging, recovery velocity, COD
- *   Fleet    → per-EV / per-provider economics (earned vs provider cost)
- *   Riders   → movement (paid / new / churned), top earners, growing dues
+ * A statistician's summary written for a layman: what came in, what we kept
+ * and why, what went out; what rent was charged, how much was collected on
+ * the spot, how much was missed, and what later happened to the missed part
+ * (clawed back · written off because the EV was returned · still owed).
+ * Charts are deliberately secondary — two compact weekly trends at the
+ * bottom of the Story tab.
  *
- * The KPI strip is scoped by the company chips + date range and every card
- * opens a drawer with the underlying rows (GET /dashboard/breakdown/*).
- * The weekly tabs use the "Weeks" selector; Fleet uses the date range.
+ * Tabs: Story · Companies · EVs · Riders — the same numbers grouped by who
+ * / what / where, as sortable tables with inline proportion bars.
  */
-import { useState } from 'react'
 import { useUrlList, useUrlString } from '../state/useUrlState'
-import { api, saveBlob } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import { Spinner } from '../components/Spinner'
-import { integer, money, moneyWhole } from '../lib/format'
+import { moneyWhole } from '../lib/format'
 import { addDaysISO, startOfWeekISO, todayISO } from '../lib/dates'
 import { Link } from 'react-router-dom'
-import { FleetTab, OverviewTab, Panel, RentTab, RidersTab } from './dashboard/analyticsTabs'
+import { SortableTh, useSort } from '../components/Sortable'
+import { C, LineChart } from './dashboard/charts'
 
-// ── /summary types (KPI strip) ───────────────────────────────────────────
-interface WeekOption {
-  week_bucket: string
-  companies: string
-  earliest_start: string
-  latest_end: string
-}
-interface Stats {
-  active_riders: number
-  inactive_riders: number
-  active_evs: number
-  inactive_evs: number
-  untouched_evs: number
-  rent_expected: number
+// ── API shapes (rupees at the edge) ──────────────────────────────────────
+interface Flow {
+  gross_payout: number
+  released: number
+  rent_charged: number
   rent_collected: number
   rent_missed: number
-  rent_pending: number
-  rent_partial: number
   arrears_recovered: number
-  total_arrears: number
-  manual_rent: number
-  cod: number
-  hold: number
-  payout: number
-  provider_owed: number
+  written_off: number
+  credit_offset: number
+  refunded: number
+  cod_held: number
 }
-interface Summary {
-  filter: {
-    company: string | null
-    companies: string[]
-    date_from: string
-    date_to: string
-    available_companies: string[]
-    available_weeks: WeekOption[]
-  }
+interface Position {
+  ev_arrears: number
+  ev_arrears_active: number
+  ev_arrears_dormant: number
+  dormant_riders: number
+  dues: number
+  credit: number
+  cod_uncleared: number
+}
+interface Story {
   window: { from: string; to: string; days: number }
-  stats: Stats
-  lifetime: { total_riders: number; total_evs: number; total_payout: number }
-  recent_cycle_per_company: {
-    company: string
-    cycle_start: string
-    cycle_end: string
-    week_bucket: string
-    rider_count: number
-    total_release: number
-    total_rent_charged: number
-    total_rent_collected: number
-    total_rent_missed: number
-    processed_at: string
-  }[]
+  flow: Flow
+  position: Position
 }
-interface Breakdown {
-  metric: string
-  title: string
-  columns: string[]
-  rows: Record<string, unknown>[]
+interface TrendWeek {
+  week: string
+  week_start: string
+  gross_payout: number
+  released: number
+  rent_charged: number
+  rent_collected: number
+  rent_missed: number
+  arrears_recovered: number
+}
+interface AgingBucket {
+  bucket: string
+  riders: number
+  outstanding: number
+}
+interface CompanyRow {
+  company: string
+  riders: number
+  gross_payout: number
+  released: number
+  rent_charged: number
+  rent_collected: number
+  rent_missed: number
+  arrears_recovered: number
+  written_off: number
+  outstanding: number
+  dues: number
+}
+interface RiderRow {
+  person_id: number
+  display_name: string
+  company: string | null
+  gross_payout: number
+  released: number
+  rent_charged: number
+  rent_collected: number
+  rent_missed: number
+  arrears_recovered: number
+  written_off: number
+  outstanding: number
+  balance: number
+}
+interface EvRow {
+  ev_id: string
+  provider: string | null
+  model: string | null
+  status: string
+  charged: number
+  collected: number
+  missed: number
+  written_off: number
+  provider_cost: number
+  margin: number
+  ledger_days: number
+  holder: string | null
+  holder_person_id: number | null
 }
 
 const TABS = [
-  ['overview', 'Overview'],
-  ['rent', 'Rent'],
-  ['fleet', 'Fleet'],
+  ['story', 'Story'],
+  ['companies', 'Companies'],
+  ['evs', 'EVs'],
   ['riders', 'Riders'],
 ] as const
 
-// ── page ─────────────────────────────────────────────────────────────────
-/** "Needs attention" — suspected EV returns surface here, linking to the
- *  Corrections fix-it desk. Renders nothing when all is well. */
+// ── tiny building blocks (numbers first) ─────────────────────────────────
+
+const r0 = (n: number | null | undefined) => '₹' + moneyWhole(n ?? 0)
+const pct = (part: number, whole: number) =>
+  whole > 0 ? Math.round((part / whole) * 100) : 0
+
+function Big({ label, value, sub, tone }: {
+  label: string
+  value: string
+  sub?: React.ReactNode
+  tone?: 'good' | 'bad' | 'plain'
+}) {
+  return (
+    <div className="panel p-4 flex-1 min-w-[180px]">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={'text-2xl font-bold font-display mt-1 tracking-tight ' +
+        (tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-red-300' : 'text-slate-900')}>
+        {value}
+      </p>
+      {sub && <div className="text-xs text-slate-500 mt-1.5 leading-5">{sub}</div>}
+    </div>
+  )
+}
+
+/** A one-line proportion bar (chart second — it sits UNDER the numbers). */
+function Ratio({ parts }: { parts: { value: number; color: string; label: string }[] }) {
+  const total = parts.reduce((a, p) => a + p.value, 0)
+  if (total <= 0) return null
+  return (
+    <div className="flex h-1.5 rounded-full overflow-hidden bg-white/[0.05] mt-2.5">
+      {parts.map((p) => (
+        <div
+          key={p.label}
+          title={`${p.label}: ${r0(p.value)}`}
+          style={{ width: `${(p.value / total) * 100}%`, background: p.color }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function MicroBar({ frac, color = C.aqua }: { frac: number; color?: string }) {
+  return (
+    <div className="w-14 h-1 rounded-full bg-white/[0.06] inline-block align-middle ml-2">
+      <div className="h-1 rounded-full" style={{ width: `${Math.min(100, Math.max(0, frac * 100))}%`, background: color }} />
+    </div>
+  )
+}
+
+function Chip({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+}) {
+  return (
+    <button onClick={onClick}
+      className={'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ' +
+        (active
+          ? 'bg-brand-500/25 text-white shadow-[0_0_0_1px_rgba(139,92,246,0.4)]'
+          : 'bg-white/[0.04] text-slate-500 hover:text-slate-800 hover:bg-white/[0.07]')}>
+      {children}
+    </button>
+  )
+}
+
+// ── the page ─────────────────────────────────────────────────────────────
+
+/** Suspected EV returns — the fix that recovers money by closing EVs. */
 function AttentionStrip() {
   const { data } = useApi<{ ev_id: string; missed_amount: number }[]>('/evs/suspected-returns')
   if (!data?.length) return null
@@ -101,655 +191,505 @@ function AttentionStrip() {
       <span className="pill bg-amber-400/20 text-amber-200">{data.length}</span>
       <span className="text-sm">
         <span className="font-semibold">Suspected EV return{data.length > 1 ? 's' : ''}</span>
-        {' — '}rent worth ₹{moneyWhole(total)} kept accruing for EV
-        {data.length > 1 ? 's' : ''} {data.slice(0, 4).map((s) => s.ev_id).join(', ')}
-        {data.length > 4 ? '…' : ''} whose holders vanished from payouts. Review in Corrections →
+        {' — '}₹{moneyWhole(total)} of rent is accruing for {data.slice(0, 4).map((s) => s.ev_id).join(', ')}
+        {data.length > 4 ? '…' : ''} whose holders vanished. Confirm the return and the charges reverse. →
       </span>
     </Link>
   )
 }
 
 export function DashboardPage() {
-  // Default KPI window: the previous complete Mon–Sun week.
   const thisMon = startOfWeekISO(todayISO())
   const prevWeek = { from: addDaysISO(thisMon, -7), to: addDaysISO(thisMon, -1) }
 
   const [companies, setCompanies] = useUrlList('companies')
   const [dateFrom, setDateFrom] = useUrlString('from', prevWeek.from)
   const [dateTo, setDateTo] = useUrlString('to', prevWeek.to)
-  const [tab, setTab] = useUrlString('tab', 'overview')
-  const [weeksStr, setWeeks] = useUrlString('weeks', '12')
-  const weeks = Math.max(1, Math.min(53, parseInt(weeksStr, 10) || 12))
-  const [drawerMetric, setDrawerMetric] = useState<string | null>(null)
+  const [tab, setTab] = useUrlString('tab', 'story')
 
-  const params = new URLSearchParams()
-  if (companies.length) params.set('companies', companies.join(','))
-  if (dateFrom) params.set('date_from', dateFrom)
-  if (dateTo) params.set('date_to', dateTo)
-  const {
-    data,
-    error,
-    loading: busy,
-  } = useApi<Summary>('/dashboard/summary' + (params.toString() ? '?' + params : ''))
+  const qs = new URLSearchParams()
+  if (companies.length) qs.set('companies', companies.join(','))
+  if (dateFrom) qs.set('date_from', dateFrom)
+  if (dateTo) qs.set('date_to', dateTo)
+  const suffix = qs.toString() ? '?' + qs.toString() : ''
+
+  const story = useApi<Story>('/dashboard/story' + suffix)
+  const allCompanies = useApi<{ company_name: string }[]>('/companies')
 
   function setRangeDays(n: number) {
     setDateFrom(addDaysISO(todayISO(), -(n - 1)))
     setDateTo(todayISO())
   }
-  function toggleCompany(c: string) {
+  const toggleCompany = (c: string) =>
     setCompanies((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]))
-  }
 
-  if (busy && !data) return <Spinner label="Loading dashboard…" />
-  if (error || !data) return <p className="text-red-400">{error ?? 'No data'}</p>
-  const s = data.stats
+  if (story.loading && !story.data) return <Spinner label="Reading the books…" />
+  if (story.error || !story.data) return <p className="text-red-400">{story.error ?? 'No data'}</p>
+  const s = story.data
 
   return (
     <div className="max-w-7xl mx-auto pb-12">
-      {/* ── header + filters (one row above everything) ───────────── */}
       <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-slate-500 text-sm">
-            Cards: <span className="font-medium">{data.window.from} → {data.window.to}</span>
-            {' '}({data.window.days}d) · Trends: last {weeks} weeks ·{' '}
+          <h1 className="page-title">Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-0.5">
+            {s.window.from} → {s.window.to} ({s.window.days} days) ·{' '}
             {companies.length ? companies.join(', ') : 'all companies'}
           </p>
         </div>
         <div className="flex flex-col gap-2 items-end">
           <div className="flex flex-wrap gap-1.5 items-center justify-end">
-            <span className="text-xs text-slate-500 mr-1">Companies:</span>
-            <Chip active={companies.length === 0} onClick={() => setCompanies([])}>
-              All
-            </Chip>
-            {data.filter.available_companies.map((c) => (
-              <Chip key={c} active={companies.includes(c)} onClick={() => toggleCompany(c)}>
-                {c}
+            <Chip active={companies.length === 0} onClick={() => setCompanies([])}>All</Chip>
+            {(allCompanies.data ?? []).map((c) => (
+              <Chip key={c.company_name} active={companies.includes(c.company_name)}
+                    onClick={() => toggleCompany(c.company_name)}>
+                {c.company_name}
               </Chip>
             ))}
           </div>
           <div className="flex flex-wrap gap-2 items-end justify-end">
             <label className="block text-sm">
               <span className="block text-xs text-slate-500">From</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                     className="border rounded px-2 py-1 text-sm" />
             </label>
             <label className="block text-sm">
               <span className="block text-xs text-slate-500">To</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                     className="border rounded px-2 py-1 text-sm" />
             </label>
             <div className="flex gap-1 mb-0.5">
-              <Chip
-                active={dateFrom === prevWeek.from && dateTo === prevWeek.to}
-                onClick={() => {
-                  setDateFrom(prevWeek.from)
-                  setDateTo(prevWeek.to)
-                }}
-              >
+              <Chip active={dateFrom === prevWeek.from && dateTo === prevWeek.to}
+                    onClick={() => { setDateFrom(prevWeek.from); setDateTo(prevWeek.to) }}>
                 Last wk
               </Chip>
-              {(
-                [
-                  ['7d', 7],
-                  ['30d', 30],
-                  ['90d', 90],
-                ] as const
-              ).map(([label, n]) => (
-                <Chip key={label} onClick={() => setRangeDays(n)}>
-                  {label}
-                </Chip>
+              {([7, 30, 90] as const).map((n) => (
+                <Chip key={n} active={false} onClick={() => setRangeDays(n)}>{n}d</Chip>
               ))}
             </div>
-            <label className="block text-sm">
-              <span className="block text-xs text-slate-500">Weeks (trends)</span>
-              <select
-                value={String(weeks)}
-                onChange={(e) => setWeeks(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              >
-                {[8, 12, 26, 52].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
         </div>
       </div>
 
       <AttentionStrip />
 
-      {/* ── KPI strip (always visible, clickable → drawer) ─────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
-        <Kpi metric="payout" label="Released" value={moneyWhole(s.payout)} tone="blue"
-             tip="Net cash released to riders during the window." onClick={setDrawerMetric} />
-        <Kpi metric="rent_collected" label="Rent collected" value={moneyWhole(s.rent_collected)} tone="emerald"
-             tip="Daily rent for every billed and recovered day in the window." onClick={setDrawerMetric} />
-        <Kpi metric="rent_missed" label="Rent missed" value={moneyWhole(s.rent_missed)} tone="rose"
-             tip="Rider was absent so rent fell to arrears this window. Click to see who." onClick={setDrawerMetric} />
-        <Kpi metric="rent_pending" label="Rent pending" value={moneyWhole(s.rent_pending)} tone="amber"
-             tip="Billable EV-days no cycle has processed yet — not lost, just not collected." onClick={setDrawerMetric} />
-        <Kpi metric="arrears_recovered" label="Recovered" value={moneyWhole(s.arrears_recovered)} tone="emerald"
-             tip="Old missed rent clawed back in this window." onClick={setDrawerMetric} />
-        <Kpi metric="total_arrears" label="Arrears (live)" value={moneyWhole(s.total_arrears)} tone="rose"
-             tip="Snapshot, not window-scoped: EV arrears + general dues right now." onClick={setDrawerMetric} />
-        <Kpi metric="active_riders" label="Active riders" value={integer(s.active_riders)} tone="slate"
-             tip="Riders with a payout in the window." onClick={setDrawerMetric} />
-        <Kpi metric="active_evs" label="Active EVs" value={integer(s.active_evs)} tone="slate"
-             tip="EVs that earned rent during the window." onClick={setDrawerMetric} />
-      </div>
-
-      {/* ── tab bar ────────────────────────────────────────────────── */}
-      <div className="flex gap-1 border-b border-slate-200 mb-4" role="tablist">
+      <div className="flex gap-1 border-b border-edge-soft mb-5" role="tablist">
         {TABS.map(([key, label]) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={
-              'relative px-4 py-2 text-sm font-medium -mb-px transition-colors ' +
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+            className={'relative px-4 py-2 text-sm font-medium -mb-px transition-colors ' +
               (tab === key
-                ? 'text-slate-900 after:absolute after:left-2 after:right-2 after:-bottom-px ' +
-                  'after:h-[2px] after:rounded-full after:bg-brand-400 ' +
-                  'after:shadow-[0_0_8px_rgba(84,154,233,0.7)]'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-white/[0.03] rounded-t-lg')
-            }
-          >
+                ? 'text-slate-900 after:absolute after:left-2 after:right-2 after:-bottom-px after:h-[2px] ' +
+                  'after:rounded-full after:bg-brand-400 after:shadow-[0_0_8px_rgba(139,92,246,0.7)]'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-white/[0.03] rounded-t-lg')}>
             {label}
           </button>
         ))}
       </div>
 
-      {/* ── tab content ────────────────────────────────────────────── */}
-      {tab === 'overview' && (
-        <>
-          <OverviewTab companies={companies} weeks={weeks} />
-          <SecondaryMetrics s={s} lifetime={data.lifetime} onClick={setDrawerMetric} />
-          <RecentCycles rows={data.recent_cycle_per_company} />
-        </>
-      )}
-      {tab === 'rent' && (
-        <>
-          <RentTab companies={companies} weeks={weeks} />
-          <p className="text-xs text-slate-500 mt-3">
-            Person-level arrears live on the{' '}
-            <Link to="/arrears" className="text-brand underline">
-              Arrears page
-            </Link>{' '}
-            (dormant riders — EV returned, debt kept — are hidden there by default).
-          </p>
-        </>
-      )}
-      {tab === 'fleet' && <FleetTab dateFrom={dateFrom} dateTo={dateTo} />}
-      {tab === 'riders' && <RidersTab companies={companies} weeks={weeks} />}
-
-      {/* ── reports ────────────────────────────────────────────────── */}
-      <ReportPanel
-        availableCompanies={data.filter.available_companies}
-        availableWeeks={data.filter.available_weeks}
-        currentCompanies={companies}
-        currentDateFrom={dateFrom}
-        currentDateTo={dateTo}
-      />
-
-      {drawerMetric && (
-        <BreakdownDrawer
-          metric={drawerMetric}
-          companies={companies}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onClose={() => setDrawerMetric(null)}
-        />
-      )}
+      {tab === 'story' && <StoryTab s={s} suffix={suffix} />}
+      {tab === 'companies' && <CompaniesTab suffix={suffix} />}
+      {tab === 'evs' && <EvsTab suffix={suffix} />}
+      {tab === 'riders' && <RidersTab suffix={suffix} />}
     </div>
   )
 }
 
-// ── building blocks ──────────────────────────────────────────────────────
+// ── Story ────────────────────────────────────────────────────────────────
 
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
+function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
+  const f = s.flow
+  const p = s.position
+  const kept = Math.max(0, f.gross_payout - f.released)
+  const chargedTotal = f.rent_charged + f.rent_missed
+  const stillOwedDelta = f.rent_missed - f.written_off - f.arrears_recovered
+
   return (
-    <button
-      onClick={onClick}
-      className={
-        'text-xs px-2 py-1 rounded ' +
-        (active ? 'bg-brand text-white' : 'bg-slate-200 hover:bg-slate-300')
-      }
-    >
-      {children}
-    </button>
+    <>
+      {/* 1 · money in → held back → money out */}
+      <div className="flex flex-wrap items-stretch gap-3 mb-5">
+        <Big label="Came in from companies" value={r0(f.gross_payout)}
+             sub={<>gross payouts for {`${s.window.days}`} days</>} />
+        <div className="self-center text-slate-400 text-lg px-1 hidden md:block">→</div>
+        <Big label="We held back" value={r0(kept)} sub={
+          <>
+            rent {r0(f.rent_collected)} · old debt {r0(f.arrears_recovered)}
+            {f.cod_held > 0 && <> · COD {r0(f.cod_held)}</>}
+          </>
+        } />
+        <div className="self-center text-slate-400 text-lg px-1 hidden md:block">→</div>
+        <Big label="Paid out to riders" value={r0(f.released)} tone="good"
+             sub={<>{pct(f.released, f.gross_payout)}% of what came in</>} />
+      </div>
+
+      {/* 2 · the rent story */}
+      <div className="panel p-5 mb-5">
+        <h2 className="font-display font-semibold text-slate-900 mb-4">
+          The rent story <span className="text-slate-500 font-sans text-sm font-normal">— this window</span>
+        </h2>
+        <div className="grid md:grid-cols-2 gap-x-10 gap-y-5">
+          <div>
+            <p className="text-sm text-slate-500">Rent we billed riders</p>
+            <p className="text-3xl font-bold font-display text-slate-900 mt-0.5">{r0(chargedTotal)}</p>
+            <div className="mt-3 space-y-1.5 text-sm">
+              <p className="flex justify-between gap-4">
+                <span className="text-slate-600">
+                  <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: C.aqua }} />
+                  Collected on the spot
+                </span>
+                <span className="font-semibold text-slate-900">
+                  {r0(f.rent_collected)} <span className="text-slate-500 font-normal">({pct(f.rent_collected, chargedTotal)}%)</span>
+                </span>
+              </p>
+              <p className="flex justify-between gap-4">
+                <span className="text-slate-600">
+                  <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: C.red }} />
+                  Missed — rider absent, became debt
+                </span>
+                <span className="font-semibold text-slate-900">
+                  {r0(f.rent_missed)} <span className="text-slate-500 font-normal">({pct(f.rent_missed, chargedTotal)}%)</span>
+                </span>
+              </p>
+            </div>
+            <Ratio parts={[
+              { value: f.rent_collected, color: C.aqua, label: 'Collected' },
+              { value: f.rent_missed, color: C.red, label: 'Missed' },
+            ]} />
+          </div>
+          <div>
+            <p className="text-sm text-slate-500">What happened to rent debt in this window</p>
+            <div className="mt-2 space-y-1.5 text-sm">
+              <p className="flex justify-between gap-4">
+                <span className="text-slate-600">
+                  <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: C.aqua }} />
+                  Clawed back from later payouts
+                </span>
+                <span className="font-semibold text-emerald-300">{r0(f.arrears_recovered)}</span>
+              </p>
+              <p className="flex justify-between gap-4">
+                <span className="text-slate-600">
+                  <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: C.blue }} />
+                  Written off — EV was actually returned
+                </span>
+                <span className="font-semibold text-slate-900">{r0(f.written_off)}</span>
+              </p>
+              {f.credit_offset > 0 && (
+                <p className="flex justify-between gap-4">
+                  <span className="text-slate-600 pl-4">…settled from credit balances</span>
+                  <span className="text-slate-700">{r0(f.credit_offset)}</span>
+                </p>
+              )}
+              {f.refunded > 0 && (
+                <p className="flex justify-between gap-4">
+                  <span className="text-slate-600 pl-4">…refunded to riders (over-charged)</span>
+                  <span className="text-slate-700">{r0(f.refunded)}</span>
+                </p>
+              )}
+              <p className="flex justify-between gap-4 pt-1 border-t border-edge-soft">
+                <span className="text-slate-600">Net change in what's owed</span>
+                <span className={'font-semibold ' + (stillOwedDelta > 0 ? 'text-red-300' : 'text-emerald-300')}>
+                  {stillOwedDelta > 0 ? '+' : ''}{r0(stillOwedDelta)}
+                </span>
+              </p>
+            </div>
+            <Ratio parts={[
+              { value: f.arrears_recovered, color: C.aqua, label: 'Recovered' },
+              { value: f.written_off, color: C.blue, label: 'Written off' },
+              { value: Math.max(0, stillOwedDelta), color: C.red, label: 'Still owed' },
+            ]} />
+          </div>
+        </div>
+      </div>
+
+      {/* 3 · where the debt stands TODAY (live, not window-scoped) */}
+      <div className="flex flex-wrap items-stretch gap-3 mb-5">
+        <Big label="Rent debt outstanding (today)" value={r0(p.ev_arrears)}
+             tone={p.ev_arrears > 0 ? 'bad' : 'good'}
+             sub={
+               <>
+                 {r0(p.ev_arrears_active)} owed by current EV holders
+                 {p.ev_arrears_dormant > 0 && (
+                   <> · {r0(p.ev_arrears_dormant)} dormant ({p.dormant_riders} rider
+                   {p.dormant_riders === 1 ? '' : 's'} who returned the EV — future payouts held)</>
+                 )}
+               </>
+             } />
+        <Big label="Other dues owed by riders" value={r0(p.dues)} sub={<>carry-forward balances</>} />
+        <Big label="Credit riders hold with us" value={r0(p.credit)} sub={<>auto-offsets new arrears</>} />
+        <Big label="COD not yet cleared" value={r0(p.cod_uncleared)} sub={<>payouts held until cleared</>} />
+      </div>
+
+      <DebtAging suffix={suffix} />
+      <TrendCharts suffix={suffix} />
+    </>
   )
 }
 
-type Tone = 'emerald' | 'rose' | 'amber' | 'blue' | 'slate'
-// Tone = a quiet 3px rail on the card's left edge (left color only — the
-// panel's hairline stays neutral on the other three sides).
-const TONE_BORDER: Record<Tone, string> = {
-  emerald: 'border-l-[3px] border-l-emerald-400/80',
-  rose: 'border-l-[3px] border-l-rose-400/80',
-  amber: 'border-l-[3px] border-l-amber-400/80',
-  blue: 'border-l-[3px] border-l-brand-400/80',
-  slate: 'border-l-[3px] border-l-slate-300',
-}
-
-function Kpi({
-  metric,
-  label,
-  value,
-  tone,
-  tip,
-  onClick,
-}: {
-  metric?: string
-  label: string
-  value: string
-  tone: Tone
-  tip?: string
-  onClick?: (metric: string) => void
-}) {
-  const interactive = metric && onClick
-  return (
-    <div
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      title={tip}
-      onClick={interactive ? () => onClick(metric) : undefined}
-      onKeyDown={
-        interactive
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onClick(metric)
-              }
-            }
-          : undefined
-      }
-      className={`panel p-3 ${TONE_BORDER[tone]} ${
-        interactive
-          ? 'cursor-pointer transition hover:-translate-y-0.5 hover:shadow-pop'
-          : ''
-      }`}
-    >
-      <p className="text-xs text-slate-500 truncate">{label}</p>
-      <p className="text-lg font-bold mt-1">{value}</p>
-    </div>
+function DebtAging({ suffix }: { suffix: string }) {
+  const { data } = useApi<{ aging: AgingBucket[] }>(
+    '/dashboard/collection' + (suffix ? suffix + '&weeks=12' : '?weeks=12'),
   )
-}
-
-function SecondaryMetrics({
-  s,
-  lifetime,
-  onClick,
-}: {
-  s: Stats
-  lifetime: { total_riders: number; total_evs: number; total_payout: number }
-  onClick: (metric: string) => void
-}) {
-  const items: [string, string, string, string][] = [
-    // [metric, label, value, tip]
-    ['rent_expected', 'Rent expected', moneyWhole(s.rent_expected), 'Every billable EV-day at its daily rate.'],
-    ['rent_partial', 'Partial rent', moneyWhole(s.rent_partial), 'Charged minus collected per rider — the shortfall that rolled to dues.'],
-    ['manual_rent', 'Manual rent', moneyWhole(s.manual_rent), 'Manual rent payments logged in the window.'],
-    ['hold', 'Held', moneyWhole(s.hold), 'Money held back from payouts (gross − released).'],
-    ['cod', 'COD', moneyWhole(s.cod), 'COD held in the window.'],
-    ['provider_owed', 'Owed to providers', moneyWhole(s.provider_owed), 'Daily provider cost across every EV with ledger rows.'],
-    ['inactive_riders', 'Inactive riders', integer(s.inactive_riders), 'Active roster but no payout anywhere in the window.'],
-    ['inactive_evs', 'Inactive EVs', integer(s.inactive_evs), 'EVs with at least one missed day in the window.'],
-    ['untouched_evs', 'Untouched EVs', integer(s.untouched_evs), 'In-use EVs with no ledger activity in the window.'],
-  ]
+  const buckets = data?.aging ?? []
+  const max = Math.max(...buckets.map((b) => b.outstanding), 1)
+  if (!buckets.some((b) => b.riders > 0)) return null
   return (
-    <Panel
-      title="More metrics"
-      subtitle="same window as the cards — click any to see rows"
-      className="mt-4"
-    >
-      <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
-        {items.map(([metric, label, value, tip]) => (
-          <button
-            key={metric}
-            title={tip}
-            onClick={() => onClick(metric)}
-            className="text-left rounded-lg border border-slate-200 px-2.5 py-2 hover:bg-slate-50 hover:border-slate-300 transition"
-          >
-            <p className="text-[11px] text-slate-500 truncate">{label}</p>
-            <p className="text-sm font-semibold mt-0.5">{value}</p>
-          </button>
+    <div className="panel p-5 mb-5">
+      <h2 className="font-display font-semibold text-slate-900 mb-1">How old is the debt?</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        Money in the 60d+ bucket rarely comes back on its own — chase those first.
+      </p>
+      <div className="space-y-2 max-w-xl">
+        {buckets.map((b) => (
+          <div key={b.bucket} className="flex items-center gap-3 text-sm">
+            <span className="w-14 shrink-0 text-slate-500">{b.bucket}</span>
+            <div className="flex-1 h-3.5 bg-white/[0.05] rounded overflow-hidden">
+              <div className="h-full rounded" style={{
+                width: `${(b.outstanding / max) * 100}%`,
+                background: b.bucket === '60d+' ? C.red : C.blue,
+              }} />
+            </div>
+            <span className="w-24 text-right font-mono text-slate-800">{r0(b.outstanding)}</span>
+            <span className="w-16 text-right text-xs text-slate-500">
+              {b.riders} rider{b.riders === 1 ? '' : 's'}
+            </span>
+          </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-3">
-        Lifetime: {integer(lifetime.total_riders)} riders · {integer(lifetime.total_evs)} EVs ·
-        ₹{moneyWhole(lifetime.total_payout)} paid out all-time.
-      </p>
-    </Panel>
+    </div>
   )
 }
 
-function RecentCycles({ rows }: { rows: Summary['recent_cycle_per_company'] }) {
+function TrendCharts({ suffix }: { suffix: string }) {
+  const { data } = useApi<{ weeks: TrendWeek[] }>(
+    '/dashboard/trends' + (suffix ? suffix + '&weeks=12' : '?weeks=12'),
+  )
+  const weeks = data?.weeks ?? []
+  const labels = weeks.map((w) => w.week_start.slice(5))
+  if (!weeks.length) return null
   return (
-    <Panel
-      title="Most recent cycle per company"
-      subtitle="where each company is right now"
-      className="mt-4"
-    >
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-100 text-left">
-            <tr>
-              <th className="px-3 py-2 text-xs">Company</th>
-              <th className="px-3 py-2 text-xs">Cycle</th>
-              <th className="px-3 py-2 text-xs text-right">Riders</th>
-              <th className="px-3 py-2 text-xs text-right">Released</th>
-              <th className="px-3 py-2 text-xs text-right">Rent charged</th>
-              <th className="px-3 py-2 text-xs text-right">Collected</th>
-              <th className="px-3 py-2 text-xs text-right">Missed</th>
-              <th className="px-3 py-2 text-xs">Processed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="p-3 text-center text-slate-500 text-sm">
-                  No cycle history yet. Process a payout to populate.
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => (
-              <tr key={r.company} className="border-t hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{r.company}</td>
-                <td className="px-3 py-2 text-xs">
-                  {r.cycle_start} → {r.cycle_end}
-                </td>
-                <td className="px-3 py-2 text-right">{integer(r.rider_count)}</td>
-                <td className="px-3 py-2 text-right font-mono">{money(r.total_release)}</td>
-                <td className="px-3 py-2 text-right font-mono">{money(r.total_rent_charged)}</td>
-                <td className="px-3 py-2 text-right font-mono text-emerald-300">
-                  {money(r.total_rent_collected)}
-                </td>
-                <td className="px-3 py-2 text-right font-mono text-rose-300">
-                  {money(r.total_rent_missed)}
-                </td>
-                <td className="px-3 py-2 text-xs text-slate-500">{r.processed_at}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="grid lg:grid-cols-2 gap-4">
+      <div className="panel p-4">
+        <div className="flex items-baseline justify-between mb-1">
+          <h3 className="font-semibold text-slate-900 text-sm">Money to riders, weekly</h3>
+          <span className="text-xs text-slate-500">last 12 weeks</span>
+        </div>
+        <LineChart labels={labels} series={[
+          { key: 'g', label: 'Came in', color: C.blue, values: weeks.map((w) => w.gross_payout) },
+          { key: 'r', label: 'Paid out', color: C.aqua, values: weeks.map((w) => w.released) },
+        ]} height="h-44" />
       </div>
-    </Panel>
-  )
-}
-
-function BreakdownDrawer({
-  metric,
-  companies,
-  dateFrom,
-  dateTo,
-  onClose,
-}: {
-  metric: string
-  companies: string[]
-  dateFrom: string
-  dateTo: string
-  onClose: () => void
-}) {
-  const params = new URLSearchParams()
-  if (companies.length) params.set('companies', companies.join(','))
-  if (dateFrom) params.set('date_from', dateFrom)
-  if (dateTo) params.set('date_to', dateTo)
-  const { data, loading: busy, error } = useApi<Breakdown>(
-    '/dashboard/breakdown/' + metric + (params.toString() ? '?' + params : ''),
-  )
-  return (
-    <div className="fixed inset-0 z-50 flex" onClick={onClose}>
-      <div className="flex-1 bg-black/60 backdrop-blur-[2px]" />
-      <div
-        className="bg-panel w-full max-w-4xl shadow-2xl overflow-y-auto flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-5 py-3 border-b flex items-center justify-between sticky top-0 bg-panel z-10">
-          <div>
-            <h3 className="font-semibold">{data?.title ?? metric}</h3>
-            <p className="text-xs text-slate-500">
-              {(dateFrom || dateTo) && (
-                <>
-                  {dateFrom} → {dateTo} ·{' '}
-                </>
-              )}
-              {companies.length ? companies.join(', ') : 'all companies'}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-700">
-            ✕
-          </button>
+      <div className="panel p-4">
+        <div className="flex items-baseline justify-between mb-1">
+          <h3 className="font-semibold text-slate-900 text-sm">Rent collected vs missed, weekly</h3>
+          <span className="text-xs text-slate-500">last 12 weeks</span>
         </div>
-        <div className="flex-1 p-4">
-          {busy && <Spinner />}
-          {error && !busy && (
-            <p role="alert" className="text-center text-rose-400 p-8">
-              {error}
-            </p>
-          )}
-          {data && !busy && !error && (
-            data.rows.length === 0 ? (
-              <p className="text-center text-slate-400 p-8">No rows.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-100 text-left sticky top-0">
-                    <tr>
-                      {data.columns.map((c) => (
-                        <th key={c} className="px-3 py-2 text-xs font-medium">
-                          {c.replace(/_/g, ' ')}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.rows.map((r, i) => (
-                      <tr key={i} className="border-t hover:bg-slate-50">
-                        {data.columns.map((c) => (
-                          <td key={c} className="px-3 py-2 text-xs">
-                            {renderCell(c, r[c])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          )}
-        </div>
+        <LineChart labels={labels} series={[
+          { key: 'c', label: 'Collected', color: C.aqua, values: weeks.map((w) => w.rent_collected) },
+          { key: 'm', label: 'Missed', color: C.red, values: weeks.map((w) => w.rent_missed) },
+        ]} height="h-44" />
       </div>
     </div>
   )
 }
 
-function ReportPanel({
-  availableCompanies,
-  availableWeeks,
-  currentCompanies,
-  currentDateFrom,
-  currentDateTo,
-}: {
-  availableCompanies: string[]
-  availableWeeks: WeekOption[]
-  currentCompanies: string[]
-  currentDateFrom: string
-  currentDateTo: string
-}) {
-  type Mode = 'current' | 'range' | 'specific'
-  const [mode, setMode] = useState<Mode>('current')
-  const [from, setFrom] = useState<string>('')
-  const [to, setTo] = useState<string>('')
-  const [cycleEnd, setCycleEnd] = useState<string>('')
-  const [cycleCompany, setCycleCompany] = useState<string>('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+// ── dimension tables (numbers first, sortable) ───────────────────────────
 
-  async function go() {
-    setBusy(true)
-    setErr(null)
-    try {
-      const params = new URLSearchParams({ mode })
-      if (currentCompanies.length) params.set('companies', currentCompanies.join(','))
-      if (mode === 'current') {
-        if (currentDateFrom) params.set('from_date', currentDateFrom)
-        if (currentDateTo) params.set('to_date', currentDateTo)
-      }
-      if (mode === 'range') {
-        if (!from || !to) throw new Error('Pick both From and To dates.')
-        params.set('from_date', from)
-        params.set('to_date', to)
-      }
-      if (mode === 'specific') {
-        if (!cycleEnd || !cycleCompany) throw new Error('Pick a cycle.')
-        params.set('cycle_end', cycleEnd)
-        params.set('cycle_company', cycleCompany)
-      }
-      saveBlob(
-        await api.download('/dashboard/export?' + params, {
-          fallbackName: `dashboard_${mode}.xlsx`,
-        }),
-      )
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setBusy(false)
-    }
-  }
+const cell = 'px-3 py-2 text-right tabular-nums whitespace-nowrap'
+const cellL = 'px-3 py-2 whitespace-nowrap'
 
+function TableShell({ children }: { children: React.ReactNode }) {
   return (
-    <Panel
-      title="Reports"
-      subtitle="multi-sheet styled .xlsx — same look as the cycle workbook"
-      className="mt-4"
-    >
-      <div className="flex flex-wrap gap-3 items-end">
-        <label className="text-sm">
-          <span className="block text-xs text-slate-500">Scope</span>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as Mode)}
-            className="border rounded px-2 py-1 text-sm"
-          >
-            <option value="current">Current view (filter)</option>
-            <option value="range">Custom date range</option>
-            <option value="specific">Specific payout</option>
-          </select>
-        </label>
-        {mode === 'range' && (
-          <>
-            <label className="text-sm">
-              <span className="block text-xs text-slate-500">From</span>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="text-sm">
-              <span className="block text-xs text-slate-500">To</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
-            </label>
-          </>
-        )}
-        {mode === 'specific' && (
-          <>
-            <label className="text-sm">
-              <span className="block text-xs text-slate-500">Company</span>
-              <select
-                value={cycleCompany}
-                onChange={(e) => setCycleCompany(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              >
-                <option value="">(pick one)</option>
-                {availableCompanies.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="block text-xs text-slate-500">Cycle end</span>
-              <select
-                value={cycleEnd}
-                onChange={(e) => setCycleEnd(e.target.value)}
-                className="border rounded px-2 py-1 text-sm min-w-[160px]"
-              >
-                <option value="">(pick one)</option>
-                {availableWeeks.map((w) => (
-                  <option key={w.latest_end} value={w.latest_end}>
-                    {w.latest_end} ({w.week_bucket})
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-        <button
-          onClick={go}
-          disabled={busy}
-          className="text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded inline-flex items-center gap-1 disabled:opacity-50"
-        >
-          <span>⬇</span>
-          {busy ? 'Generating…' : 'Download report'}
-        </button>
-        {err && <span className="text-xs text-red-400">{err}</span>}
-      </div>
-      <p className="text-xs text-slate-500 mt-3">
-        Sheets included: Overview · <b>EV Rent vs Expected</b> · <b>Riders in Arrears</b> · Active
-        EVs · Inactive EVs · Money Flow · Manual Rent Payments · COD · Cycle History. Current-view
-        scope respects the company chips and date range above. Specific-payout scope ignores them
-        and uses just the (company, cycle_end) you pick here.
-      </p>
-    </Panel>
+    <div className="panel overflow-x-auto">
+      <table className="w-full text-sm">{children}</table>
+    </div>
   )
 }
 
-function renderCell(col: string, value: unknown): React.ReactNode {
-  if (value === null || value === undefined) return <span className="text-slate-300">—</span>
-  if (col === 'person_id' && typeof value === 'number') {
-    return (
-      <Link to={'/persons/' + value} className="text-brand underline">
-        #{value}
-      </Link>
-    )
-  }
-  if (col === 'ev_id' && typeof value === 'string') {
-    return (
-      <Link to={'/evs/' + encodeURIComponent(value)} className="text-brand underline">
-        {value}
-      </Link>
-    )
-  }
-  if (typeof value === 'number') {
-    return <span className="font-mono">{money(value)}</span>
-  }
-  return String(value)
+function CompaniesTab({ suffix }: { suffix: string }) {
+  const { data, loading, error } = useApi<{ rows: CompanyRow[] }>(
+    '/dashboard/story/by' + (suffix ? suffix + '&dim=company' : '?dim=company'),
+  )
+  const { sorted, sortKey, sortDir, toggleSort } = useSort(data?.rows ?? [], { urlKey: 'csort' })
+  if (loading && !data) return <Spinner />
+  if (error) return <p className="text-red-400">{error}</p>
+  return (
+    <>
+      <p className="text-sm text-slate-500 mb-3">
+        Each company's window: what they sent, what riders got, and how their rent behaved.
+        <span className="text-slate-400"> "Owed now" is live, not window-scoped.</span>
+      </p>
+      <TableShell>
+        <thead className="text-left border-b border-edge-soft">
+          <tr>
+            <SortableTh tag="company" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Company</SortableTh>
+            <SortableTh tag="riders" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Riders paid</SortableTh>
+            <SortableTh tag="gross_payout" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Came in</SortableTh>
+            <SortableTh tag="released" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Paid out</SortableTh>
+            <SortableTh tag="rent_collected" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent collected</SortableTh>
+            <SortableTh tag="rent_missed" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent missed</SortableTh>
+            <SortableTh tag="arrears_recovered" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Clawed back</SortableTh>
+            <SortableTh tag="written_off" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Written off</SortableTh>
+            <SortableTh tag="outstanding" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Owed now</SortableTh>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => {
+            const charged = r.rent_collected + r.rent_missed
+            return (
+              <tr key={r.company} className="border-t border-edge-soft hover:bg-white/[0.02]">
+                <td className={cellL + ' font-medium text-slate-900'}>{r.company}</td>
+                <td className={cell}>{r.riders}</td>
+                <td className={cell}>{r0(r.gross_payout)}</td>
+                <td className={cell}>{r0(r.released)}</td>
+                <td className={cell + ' text-emerald-300'}>
+                  {r0(r.rent_collected)}
+                  <MicroBar frac={charged > 0 ? r.rent_collected / charged : 0} />
+                </td>
+                <td className={cell + (r.rent_missed > 0 ? ' text-red-300' : '')}>{r0(r.rent_missed)}</td>
+                <td className={cell}>{r0(r.arrears_recovered)}</td>
+                <td className={cell}>{r0(r.written_off)}</td>
+                <td className={cell + ((r.outstanding + r.dues) > 0 ? ' text-red-300' : '')}>
+                  {r0(r.outstanding + r.dues)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </TableShell>
+    </>
+  )
+}
+
+function EvsTab({ suffix }: { suffix: string }) {
+  const { data, loading, error } = useApi<{ rows: EvRow[] }>(
+    '/dashboard/story/by' + (suffix ? suffix + '&dim=ev' : '?dim=ev'),
+  )
+  const { sorted, sortKey, sortDir, toggleSort } = useSort(data?.rows ?? [], { urlKey: 'esort' })
+  if (loading && !data) return <Spinner />
+  if (error) return <p className="text-red-400">{error}</p>
+  return (
+    <>
+      <p className="text-sm text-slate-500 mb-3">
+        Per EV for the window: rent it earned vs what the provider charges us. Negative margin =
+        the EV cost more than it brought in.
+      </p>
+      <TableShell>
+        <thead className="text-left border-b border-edge-soft">
+          <tr>
+            <SortableTh tag="ev_id" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>EV</SortableTh>
+            <SortableTh tag="holder" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Holder</SortableTh>
+            <SortableTh tag="charged" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Billed</SortableTh>
+            <SortableTh tag="collected" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Collected</SortableTh>
+            <SortableTh tag="missed" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Missed</SortableTh>
+            <SortableTh tag="written_off" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Written off</SortableTh>
+            <SortableTh tag="provider_cost" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>We owe provider</SortableTh>
+            <SortableTh tag="margin" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Margin</SortableTh>
+            <SortableTh tag="status" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Status</SortableTh>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => (
+            <tr key={r.ev_id} className="border-t border-edge-soft hover:bg-white/[0.02]">
+              <td className={cellL}>
+                <Link to={'/evs/' + encodeURIComponent(r.ev_id)} className="text-brand-300 hover:underline">
+                  {r.ev_id}
+                </Link>
+                <span className="text-xs text-slate-500 ml-2">{r.provider} {r.model}</span>
+              </td>
+              <td className={cellL}>
+                {r.holder_person_id
+                  ? <Link to={'/persons/' + r.holder_person_id} className="text-slate-800 hover:text-brand-300">{r.holder}</Link>
+                  : <span className="text-slate-500">—</span>}
+              </td>
+              <td className={cell}>{r0(r.charged)}</td>
+              <td className={cell + ' text-emerald-300'}>
+                {r0(r.collected)}
+                <MicroBar frac={r.charged > 0 ? r.collected / r.charged : 0} />
+              </td>
+              <td className={cell + (r.missed > 0 ? ' text-red-300' : '')}>{r0(r.missed)}</td>
+              <td className={cell}>{r0(r.written_off)}</td>
+              <td className={cell}>{r0(r.provider_cost)}</td>
+              <td className={cell + ' font-semibold ' + (r.margin < 0 ? 'text-red-300' : 'text-emerald-300')}>
+                {r.margin < 0 ? '−' : ''}{r0(Math.abs(r.margin))}
+              </td>
+              <td className={cellL}>
+                <span className={'pill ' + (r.status === 'in_use' ? 'bg-emerald-500/15 text-emerald-300'
+                  : r.status === 'returned' ? 'bg-white/[0.06] text-slate-500'
+                  : 'bg-amber-500/15 text-amber-300')}>
+                  {r.status}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </TableShell>
+    </>
+  )
+}
+
+function RidersTab({ suffix }: { suffix: string }) {
+  const { data, loading, error } = useApi<{ rows: RiderRow[] }>(
+    '/dashboard/story/by' + (suffix ? suffix + '&dim=rider' : '?dim=rider'),
+  )
+  const [q, setQ] = useUrlStringSafe('rq')
+  const rows = (data?.rows ?? []).filter((r) =>
+    !q.trim() || (r.display_name + ' ' + (r.company ?? '') + ' ' + r.person_id)
+      .toLowerCase().includes(q.trim().toLowerCase()),
+  )
+  const { sorted, sortKey, sortDir, toggleSort } = useSort(rows, { urlKey: 'rsort' })
+  if (loading && !data) return <Spinner />
+  if (error) return <p className="text-red-400">{error}</p>
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <p className="text-sm text-slate-500">
+          Per rider for the window. <span className="text-slate-400">"Owes now" = live EV debt + dues.</span>
+        </p>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter riders…"
+               className="border rounded-lg px-3 py-1.5 text-sm w-56" />
+      </div>
+      <TableShell>
+        <thead className="text-left border-b border-edge-soft">
+          <tr>
+            <SortableTh tag="display_name" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Rider</SortableTh>
+            <SortableTh tag="gross_payout" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Earned</SortableTh>
+            <SortableTh tag="released" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Took home</SortableTh>
+            <SortableTh tag="rent_collected" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent paid</SortableTh>
+            <SortableTh tag="rent_missed" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent missed</SortableTh>
+            <SortableTh tag="arrears_recovered" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Clawed back</SortableTh>
+            <SortableTh tag="written_off" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Written off</SortableTh>
+            <SortableTh tag="outstanding" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Owes now</SortableTh>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => {
+            const owes = r.outstanding + Math.max(0, -r.balance)
+            return (
+              <tr key={r.person_id} className="border-t border-edge-soft hover:bg-white/[0.02]">
+                <td className={cellL}>
+                  <Link to={'/persons/' + r.person_id} className="text-slate-900 hover:text-brand-300 font-medium">
+                    {r.display_name}
+                  </Link>
+                  <span className="text-xs text-slate-500 ml-2">{r.company}</span>
+                </td>
+                <td className={cell}>{r0(r.gross_payout)}</td>
+                <td className={cell + ' text-emerald-300'}>{r0(r.released)}</td>
+                <td className={cell}>{r0(r.rent_collected)}</td>
+                <td className={cell + (r.rent_missed > 0 ? ' text-red-300' : '')}>{r0(r.rent_missed)}</td>
+                <td className={cell}>{r0(r.arrears_recovered)}</td>
+                <td className={cell}>{r0(r.written_off)}</td>
+                <td className={cell + ' font-semibold ' + (owes > 0 ? 'text-red-300' : 'text-slate-500')}>
+                  {r0(owes)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </TableShell>
+    </>
+  )
+}
+
+// Local alias so the riders filter lives in the URL like everything else.
+function useUrlStringSafe(key: string) {
+  return useUrlString(key)
 }

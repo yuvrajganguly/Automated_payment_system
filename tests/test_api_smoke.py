@@ -51,6 +51,7 @@ _BREAKDOWN_METRICS = [
 # Required query strings, per OpenAPI path.
 _QUERY = {
     "/api/riders/{rider_id}": "company={rider_company}",
+    "/api/dashboard/story/by": "dim=company",
     "/api/providers/{provider}/period": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/providers/{provider}/reconciliation": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/providers/{provider}/reconciliation/export": "date_from=2026-08-10&date_to=2026-08-30",
