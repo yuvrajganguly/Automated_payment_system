@@ -50,6 +50,7 @@ interface Correction {
 }
 
 const EVENT_TONE: Record<string, string> = {
+  DEPOSIT_APPLIED: 'bg-teal-500/15 text-teal-300',
   ADJUSTMENT: 'bg-brand-50 text-brand-700',
   RENT_REVERSAL: 'bg-amber-500/10 text-amber-300',
   OPENING: 'bg-slate-100 text-slate-600',
@@ -164,6 +165,7 @@ export function CorrectionsPage() {
             <option value="">All types</option>
             <option value="ADJUSTMENT">Adjustments</option>
             <option value="RENT_REVERSAL">Arrears reversals</option>
+            <option value="DEPOSIT_APPLIED">Deposit applied</option>
             <option value="RENT_RECOVERED">Manual rent — arrears</option>
             <option value="RENT_COLLECTED">Manual rent — current</option>
             <option value="OPENING">Opening balances</option>

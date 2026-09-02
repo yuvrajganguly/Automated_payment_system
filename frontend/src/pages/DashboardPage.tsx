@@ -29,6 +29,7 @@ interface Flow {
   rent_missed: number
   arrears_recovered: number
   written_off: number
+  deposit_applied: number
   credit_offset: number
   refunded: number
   cod_held: number
@@ -301,7 +302,8 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
   const p = s.position
   const kept = Math.max(0, f.gross_payout - f.released)
   const chargedTotal = f.rent_charged + f.rent_missed
-  const stillOwedDelta = f.rent_missed - f.written_off - f.arrears_recovered
+  const stillOwedDelta =
+    f.rent_missed - f.written_off - f.arrears_recovered - f.deposit_applied
 
   return (
     <>
@@ -323,9 +325,14 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
 
       {/* 2 · the rent story */}
       <div className="panel p-5 mb-5">
-        <h2 className="font-display font-semibold text-slate-900 mb-4">
+        <h2 className="font-display font-semibold text-slate-900 mb-1">
           The rent story <span className="text-slate-500 font-sans text-sm font-normal">— this window</span>
         </h2>
+        <p className="text-sm text-slate-500 mb-4">
+          Of every ₹100 of rent billed, <span className="text-emerald-300 font-semibold">
+          ₹{pct(f.rent_collected, chargedTotal)}</span> was collected on the spot and{' '}
+          <span className="text-red-300 font-semibold">₹{pct(f.rent_missed, chargedTotal)}</span> became debt.
+        </p>
         <div className="grid md:grid-cols-2 gap-x-10 gap-y-5">
           <div>
             <p className="text-sm text-slate-500">Rent we billed riders</p>
@@ -372,6 +379,13 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
                 </span>
                 <span className="font-semibold text-slate-900">{r0(f.written_off)}</span>
               </p>
+              <p className="flex justify-between gap-4">
+                <span className="text-slate-600">
+                  <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: '#a78bfa' }} />
+                  Covered by security deposits (EV closed)
+                </span>
+                <span className="font-semibold text-slate-900">{r0(f.deposit_applied)}</span>
+              </p>
               {f.credit_offset > 0 && (
                 <p className="flex justify-between gap-4">
                   <span className="text-slate-600 pl-4">…settled from credit balances</span>
@@ -394,6 +408,7 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
             <Ratio parts={[
               { value: f.arrears_recovered, color: C.aqua, label: 'Recovered' },
               { value: f.written_off, color: C.blue, label: 'Written off' },
+              { value: f.deposit_applied, color: '#a78bfa', label: 'Deposit' },
               { value: Math.max(0, stillOwedDelta), color: C.red, label: 'Still owed' },
             ]} />
           </div>
@@ -496,6 +511,21 @@ function TrendCharts({ suffix }: { suffix: string }) {
 const cell = 'px-3 py-2 text-right tabular-nums whitespace-nowrap'
 const cellL = 'px-3 py-2 whitespace-nowrap'
 
+function SkeletonTable({ cols = 8 }: { cols?: number }) {
+  return (
+    <div className="panel p-4 space-y-2.5">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="flex gap-3">
+          <div className="skeleton h-4 w-40" />
+          {Array.from({ length: cols - 1 }).map((_, j) => (
+            <div key={j} className="skeleton h-4 flex-1" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function TableShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="panel overflow-x-auto">
@@ -509,7 +539,7 @@ function CompaniesTab({ suffix }: { suffix: string }) {
     '/dashboard/story/by' + (suffix ? suffix + '&dim=company' : '?dim=company'),
   )
   const { sorted, sortKey, sortDir, toggleSort } = useSort(data?.rows ?? [], { urlKey: 'csort' })
-  if (loading && !data) return <Spinner />
+  if (loading && !data) return <SkeletonTable cols={9} />
   if (error) return <p className="text-red-400">{error}</p>
   return (
     <>
@@ -554,6 +584,19 @@ function CompaniesTab({ suffix }: { suffix: string }) {
             )
           })}
         </tbody>
+        <tfoot>
+          <tr className="border-t border-edge text-slate-900 font-semibold bg-white/[0.02]">
+            <td className={cellL}>Total</td>
+            <td className={cell}>{sorted.reduce((a, r) => a + r.riders, 0)}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.gross_payout, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.released, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_collected, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_missed, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.outstanding + r.dues, 0))}</td>
+          </tr>
+        </tfoot>
       </TableShell>
     </>
   )
@@ -564,7 +607,7 @@ function EvsTab({ suffix }: { suffix: string }) {
     '/dashboard/story/by' + (suffix ? suffix + '&dim=ev' : '?dim=ev'),
   )
   const { sorted, sortKey, sortDir, toggleSort } = useSort(data?.rows ?? [], { urlKey: 'esort' })
-  if (loading && !data) return <Spinner />
+  if (loading && !data) return <SkeletonTable cols={9} />
   if (error) return <p className="text-red-400">{error}</p>
   return (
     <>
@@ -621,6 +664,18 @@ function EvsTab({ suffix }: { suffix: string }) {
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="border-t border-edge text-slate-900 font-semibold bg-white/[0.02]">
+            <td className={cellL} colSpan={2}>Total ({sorted.length} EVs)</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.charged, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.collected, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.missed, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.provider_cost, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.margin, 0))}</td>
+            <td className={cellL} />
+          </tr>
+        </tfoot>
       </TableShell>
     </>
   )
@@ -636,7 +691,7 @@ function RidersTab({ suffix }: { suffix: string }) {
       .toLowerCase().includes(q.trim().toLowerCase()),
   )
   const { sorted, sortKey, sortDir, toggleSort } = useSort(rows, { urlKey: 'rsort' })
-  if (loading && !data) return <Spinner />
+  if (loading && !data) return <SkeletonTable cols={8} />
   if (error) return <p className="text-red-400">{error}</p>
   return (
     <>
@@ -684,6 +739,20 @@ function RidersTab({ suffix }: { suffix: string }) {
             )
           })}
         </tbody>
+        <tfoot>
+          <tr className="border-t border-edge text-slate-900 font-semibold bg-white/[0.02]">
+            <td className={cellL}>Total ({sorted.length} riders)</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.gross_payout, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.released, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_collected, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_missed, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
+            <td className={cell}>
+              {r0(sorted.reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))}
+            </td>
+          </tr>
+        </tfoot>
       </TableShell>
     </>
   )

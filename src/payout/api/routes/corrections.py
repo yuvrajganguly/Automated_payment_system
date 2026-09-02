@@ -43,7 +43,7 @@ def corrections_feed(
         "       t.days, t.remarks, t.created_at, t.created_by "
         "FROM transactions t "
         "JOIN person_registry pr ON pr.person_id = t.person_id "
-        "WHERE (t.event_type IN ('ADJUSTMENT', 'RENT_REVERSAL', 'OPENING') "
+        "WHERE (t.event_type IN ('ADJUSTMENT', 'RENT_REVERSAL', 'DEPOSIT_APPLIED', 'OPENING') "
         "       OR t.remarks LIKE 'manual rent%') "
         "  AND COALESCE(t.created_by, '') NOT LIKE 'migration:%' "
     )

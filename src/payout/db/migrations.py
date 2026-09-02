@@ -113,11 +113,32 @@ def _0004_offset_credit_vs_arrears(conn: Any) -> None:
         settle_arrears_from_credit(conn, r[0], created_by="migration:0004_offset_credit_vs_arrears")
 
 
+def _0005_deposit_for_closed_evs(conn: Any) -> None:
+    """Every EV rider placed a security deposit. Riders who already CLOSED
+    their EV (no open assignment) with debt still on the books never had it
+    applied — sweep them once: up to the deposit cap comes off EV back-rent,
+    then carried dues. New closures apply it at return time in the routes."""
+    from payout.domain.arrears import settle_from_deposit
+
+    rows = conn.execute(
+        "SELECT DISTINCT a.person_id FROM ev_assignments a "
+        "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+        "           WHERE returned_date IS NULL) o ON o.person_id = a.person_id "
+        "LEFT JOIN ev_arrears ea ON ea.person_id = a.person_id "
+        "LEFT JOIN balances b ON b.person_id = a.person_id "
+        "WHERE a.returned_date IS NOT NULL AND o.person_id IS NULL "
+        "  AND (COALESCE(ea.outstanding, 0) > 0 OR COALESCE(b.current_balance, 0) < 0)"
+    ).fetchall()
+    for r in rows:
+        settle_from_deposit(conn, r[0], created_by="migration:0005_deposit_for_closed_evs")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
     ("0003_companies_shared_rider_ids", _0003_companies_shared_rider_ids),
     ("0004_offset_credit_vs_arrears", _0004_offset_credit_vs_arrears),
+    ("0005_deposit_for_closed_evs", _0005_deposit_for_closed_evs),
 ]
 
 _TRACKING_DDL = (

@@ -26,3 +26,9 @@ DB_URL: str | None = os.environ.get("PAYOUT_DB_URL") or None
 
 # A standard pay cycle is one week. Used to decide weekly-vs-daily EV rent.
 STANDARD_CYCLE_DAYS: int = 7
+
+# Security deposit every EV rider places (rupees -> paise). When an EV is
+# CLOSED (returned/retired/spared), up to this much is knocked off what the
+# rider still owes — EV back-rent first, then general dues. Damage charges
+# against the remaining deposit are handled manually for now (future feature).
+EV_DEPOSIT_PAISE: int = int(os.environ.get("PAYOUT_EV_DEPOSIT_RUPEES", "2700")) * 100

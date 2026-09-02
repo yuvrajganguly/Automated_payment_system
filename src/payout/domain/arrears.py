@@ -340,3 +340,92 @@ def record_cod_recovery(
         ),
     )
     return amount
+
+
+def settle_from_deposit(conn, person_id, *, created_by, ev_id=None, cap=None):
+    """Apply the rider's security deposit against what they owe, when their
+    EV is closed (returned / retired / taken back as spare).
+
+    Up to ``cap`` paise (default ``config.EV_DEPOSIT_PAISE``, ₹2,700) is
+    removed from the rider's debt — EV back-rent arrears first, then general
+    dues (negative balance). Nothing beyond the debt is credited: whatever is
+    left of the deposit stays outside the books until damage charges are
+    specified (future feature — settle manually for now).
+
+    Every rupee applied gets a DEPOSIT_APPLIED transaction, and recovered
+    arrears heal the day-ledger's missed days like any other recovery.
+    Returns the total paise applied.
+    """
+    from payout.config import EV_DEPOSIT_PAISE
+    from payout.domain.ev_daily import attribute_recovery
+
+    remaining = int(EV_DEPOSIT_PAISE if cap is None else cap)
+    if remaining <= 0:
+        return 0
+    today = date.today().isoformat()
+    tag = f" after closing EV {ev_id}" if ev_id else " after closing EV"
+    applied = 0
+
+    # 1) EV back-rent arrears.
+    row = conn.execute(
+        "SELECT outstanding FROM ev_arrears WHERE person_id=?", (person_id,)
+    ).fetchone()
+    out = int(row["outstanding"]) if row else 0
+    take = min(remaining, max(0, out))
+    if take > 0:
+        conn.execute(
+            "UPDATE ev_arrears SET outstanding = outstanding - ?, "
+            "total_recovered = total_recovered + ?, last_updated=? WHERE person_id=?",
+            (take, take, today, person_id),
+        )
+        cur = conn.execute(
+            "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
+            "event_type, amount, balance_after, remarks, created_by) "
+            "VALUES (?,?,?,?,?,'DEPOSIT_APPLIED',?,?,?,?)",
+            (
+                person_id,
+                "",
+                "",
+                today,
+                today,
+                take,
+                _gen_balance(conn, person_id),
+                f"Security deposit applied to EV rent dues{tag}",
+                created_by,
+            ),
+        )
+        attribute_recovery(conn, person_id=person_id, recovery_event_id=cur.lastrowid, amount=take)
+        remaining -= take
+        applied += take
+
+    # 2) General dues (negative balance).
+    if remaining > 0:
+        brow = conn.execute(
+            "SELECT current_balance FROM balances WHERE person_id=?", (person_id,)
+        ).fetchone()
+        bal = int(brow["current_balance"]) if brow else 0
+        take2 = min(remaining, max(0, -bal))
+        if take2 > 0:
+            new_bal = bal + take2
+            conn.execute(
+                "UPDATE balances SET current_balance=?, last_updated=? WHERE person_id=?",
+                (new_bal, today, person_id),
+            )
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
+                "event_type, amount, balance_after, remarks, created_by) "
+                "VALUES (?,?,?,?,?,'DEPOSIT_APPLIED',?,?,?,?)",
+                (
+                    person_id,
+                    "",
+                    "",
+                    today,
+                    today,
+                    take2,
+                    new_bal,
+                    f"Security deposit applied to carried dues{tag}",
+                    created_by,
+                ),
+            )
+            applied += take2
+    return applied

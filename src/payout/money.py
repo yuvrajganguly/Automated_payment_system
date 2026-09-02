@@ -106,6 +106,7 @@ MONEY_KEYS = frozenset(
         "refunded",
         "arrears_written_off",
         "written_off",
+        "deposit_applied",
         "credit_offset",
         "cod_held",
         "cod_uncleared",

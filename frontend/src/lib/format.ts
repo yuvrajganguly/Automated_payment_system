@@ -39,13 +39,20 @@ export interface HealSummary {
   arrears_written_off: number
   days_reversed: number
   offset_applied: number
+  deposit_applied?: number
 }
 
 /** Human note for a backdated return's automatic book-healing ('' if none). */
 export function healNote(h: HealSummary | undefined | null): string {
-  if (!h || !h.days_reversed) return ''
+  if (!h) return ''
   const parts: string[] = []
   if (h.arrears_written_off > 0) parts.push(rupees(h.arrears_written_off) + ' arrears written off')
   if (h.refunded > 0) parts.push(rupees(h.refunded) + ' refunded to balance')
-  return ` — ${h.days_reversed} wrongly-charged day(s) reversed` + (parts.length ? ': ' + parts.join(', ') : '')
+  const rev = h.days_reversed
+    ? ` — ${h.days_reversed} wrongly-charged day(s) reversed` + (parts.length ? ': ' + parts.join(', ') : '')
+    : ''
+  const dep = (h.deposit_applied ?? 0) > 0
+    ? ` — security deposit covered ${rupees(h.deposit_applied)} of dues`
+    : ''
+  return rev + dep
 }

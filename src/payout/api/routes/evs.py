@@ -22,6 +22,7 @@ from payout.api.schemas import (
 )
 from payout.db import get_connection
 from payout.domain.adjustments import log_maintenance
+from payout.domain.arrears import settle_from_deposit
 from payout.domain.backrent import apply_backrent, compute_backrent, latest_cycle_end_for
 from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
@@ -315,6 +316,11 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
                 retire=True,
                 created_by=_["email"],
             )
+            # EV closed -> the security deposit knocks up to ₹2,700 off what
+            # the rider still owes (damage charges: manual, for now).
+            heal["deposit_applied"] = settle_from_deposit(
+                conn, person_id, created_by=_["email"], ev_id=ev_id
+            )
         else:
             # Spare: no open assignment. The unit itself must exist.
             ev_id, person_id = body.ev_id, None
@@ -356,6 +362,9 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
             assignment_id=a["assignment_id"],
             retire=False,
             created_by=_["email"],
+        )
+        heal["deposit_applied"] = settle_from_deposit(
+            conn, a["person_id"], created_by=_["email"], ev_id=a["ev_id"]
         )
         conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (a["ev_id"],))
         _close_open_maintenance(conn, a["ev_id"], today)
@@ -475,6 +484,8 @@ def amend_return(body: EvAmendReturnIn, _: dict = Depends(require_admin)) -> dic
             retire=(u is not None and u["status"] == "returned"),
             created_by=_["email"],
         )
+        # The amend may free NEW debt below the deposit line; the deposit was
+        # already applied once at the original return, so do NOT re-apply.
         conn.commit()
     return {
         "amended": True,
