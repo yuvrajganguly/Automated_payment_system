@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import (
     BackrentIn,
+    EvAmendReturnIn,
     EvAssignIn,
     EvModelOut,
     EvReturnIn,
@@ -22,6 +23,7 @@ from payout.api.schemas import (
 from payout.db import get_connection
 from payout.domain.adjustments import log_maintenance
 from payout.domain.backrent import apply_backrent, compute_backrent, latest_cycle_end_for
+from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
 from payout.money import to_paise
 
@@ -287,6 +289,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
     (rider_id, company) pair.
     """
     today = (body.returned_date or date.today()).isoformat()
+    heal = None
     with get_connection() as conn:
         a = _find_open_assignment(conn, body)
         if a:
@@ -294,6 +297,14 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
             conn.execute(
                 "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
                 (today, a["assignment_id"]),
+            )
+            # Backdated? Reverse every rent charge for days the rider no
+            # longer had the EV (see payout/domain/return_heal.py).
+            heal = heal_backdated_return(
+                conn,
+                assignment_id=a["assignment_id"],
+                retire=True,
+                created_by=_["email"],
             )
         else:
             # Spare: no open assignment. The unit itself must exist.
@@ -303,7 +314,10 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
         conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (ev_id,))
         _close_open_maintenance(conn, ev_id, today)
         conn.commit()
-    return {"returned": True, "ev_id": ev_id, "person_id": person_id, "returned_date": today}
+    out = {"returned": True, "ev_id": ev_id, "person_id": person_id, "returned_date": today}
+    if heal:
+        out["heal"] = heal
+    return out
 
 
 @router.post("/to-spare")
@@ -328,10 +342,22 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
             "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
             (today, a["assignment_id"]),
         )
+        heal = heal_backdated_return(
+            conn,
+            assignment_id=a["assignment_id"],
+            retire=False,
+            created_by=_["email"],
+        )
         conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (a["ev_id"],))
         _close_open_maintenance(conn, a["ev_id"], today)
         conn.commit()
-    return {"spare": True, "ev_id": a["ev_id"], "person_id": a["person_id"], "as_of": today}
+    return {
+        "spare": True,
+        "ev_id": a["ev_id"],
+        "person_id": a["person_id"],
+        "as_of": today,
+        "heal": heal,
+    }
 
 
 @router.post("/close")
@@ -339,6 +365,116 @@ def close_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
     """Deprecated alias for /return, which now retires spares as well. Kept so
     older clients / the existing 'Close' button keep working."""
     return return_ev(body, _)
+
+
+@router.get("/suspected-returns")
+def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) -> list[dict]:
+    """EV holders who look like they've returned the vehicle without telling
+    anyone: an open assignment, but no payout for ``min_cycles``+ cycles while
+    rent kept falling to arrears.
+
+    ``suggested_return_date`` is the first missed cycle's start — recording the
+    return with that date reverses the entire missed streak (the return day
+    itself is free).
+    """
+    out: list[dict] = []
+    with get_connection() as conn:
+        holders = conn.execute(
+            "SELECT a.assignment_id, a.ev_id, a.handover_date, pr.person_id, pr.display_name, "
+            "       pr.deduction_company AS company, pr.deduction_rider_id AS rider_id, "
+            "       m.model_name AS model, m.weekly_rate, "
+            "       COALESCE(ea.outstanding, 0) AS arrears_outstanding "
+            "FROM ev_assignments a "
+            "JOIN person_registry pr ON pr.person_id = a.person_id "
+            "JOIN ev_units u  ON u.ev_id = a.ev_id "
+            "JOIN ev_models m ON m.model_id = u.model_id "
+            "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
+            "WHERE a.returned_date IS NULL"
+        ).fetchall()
+        for h in holders:
+            pid = h["person_id"]
+            last_payout = conn.execute(
+                "SELECT MAX(cycle_end) AS m FROM transactions "
+                "WHERE person_id=? AND event_type='PAYOUT'",
+                (pid,),
+            ).fetchone()["m"]
+            streak = conn.execute(
+                "SELECT COUNT(*) AS n, MIN(cycle_start) AS since, "
+                "       COALESCE(SUM(-amount), 0) AS missed_amount "
+                "FROM transactions WHERE person_id=? AND event_type='RENT_MISSED' "
+                "AND cycle_start > ?",
+                (pid, last_payout or "0000-00-00"),
+            ).fetchone()
+            if (streak["n"] or 0) < min_cycles:
+                continue
+            out.append(
+                {
+                    "person_id": pid,
+                    "display_name": h["display_name"],
+                    "rider_id": h["rider_id"],
+                    "company": h["company"],
+                    "ev_id": h["ev_id"],
+                    "model": h["model"],
+                    "weekly_rate": h["weekly_rate"],
+                    "last_payout_end": last_payout,
+                    "missed_cycles": streak["n"],
+                    "missed_since": streak["since"],
+                    "missed_amount": streak["missed_amount"],
+                    "arrears_outstanding": h["arrears_outstanding"],
+                    "suggested_return_date": streak["since"],
+                }
+            )
+    out.sort(key=lambda r: (-(r["missed_cycles"] or 0), -(r["missed_amount"] or 0)))
+    return out
+
+
+@router.post("/amend-return")
+def amend_return(body: EvAmendReturnIn, _: dict = Depends(require_admin)) -> dict:
+    """Move an already-recorded return to an EARLIER date and heal the books.
+
+    For the common ops mistake: the EV actually went back on the 3rd, but
+    nobody clicked Return until the 12th (or clicked it with today's date).
+    Only backdating is allowed — pushing a return *later* would mean charging
+    rent again, which is a deliberate act, not a correction.
+    """
+    new_ret = body.returned_date.isoformat()
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT assignment_id, person_id, returned_date, handover_date "
+            "FROM ev_assignments WHERE ev_id=? AND returned_date IS NOT NULL "
+            "ORDER BY returned_date DESC LIMIT 1",
+            (body.ev_id,),
+        ).fetchone()
+        if not a:
+            raise HTTPException(404, f"EV {body.ev_id!r} has no recorded return to amend")
+        if new_ret >= str(a["returned_date"]):
+            raise HTTPException(
+                400,
+                f"Return is recorded as {a['returned_date']}; the amended date must be "
+                "earlier. To charge rent again, re-assign the EV instead.",
+            )
+        if a["handover_date"] and new_ret < str(a["handover_date"]):
+            raise HTTPException(400, "Return date can't be before the handover date")
+        u = conn.execute("SELECT status FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone()
+        conn.execute(
+            "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
+            (new_ret, a["assignment_id"]),
+        )
+        heal = heal_backdated_return(
+            conn,
+            assignment_id=a["assignment_id"],
+            retire=(u is not None and u["status"] == "returned"),
+            created_by=_["email"],
+        )
+        conn.commit()
+    return {
+        "amended": True,
+        "ev_id": body.ev_id,
+        "person_id": a["person_id"],
+        "previous_date": a["returned_date"],
+        "returned_date": new_ret,
+        "heal": heal,
+    }
 
 
 @router.get("/{ev_id}/backrent")

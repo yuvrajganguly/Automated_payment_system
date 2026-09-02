@@ -106,8 +106,10 @@ CREATE TABLE IF NOT EXISTS ev_arrears (
 -- ── transactions ────────────────────────────────────────────────────────────
 -- Immutable, append-only audit trail. Never UPDATE/DELETE; corrections are new
 -- offsetting rows. amount: positive = credit, negative = debit.
---   event_type: PAYOUT | RENT | RENT_MISSED | RENT_RECOVERED | DUES_CARRY |
---               ADJUSTMENT | DEDUCTION_SWITCH | EV_SWAP | OPENING
+--   event_type: PAYOUT | RENT | RENT_MISSED | RENT_RECOVERED | RENT_REVERSAL |
+--               DUES_CARRY | ADJUSTMENT | DEDUCTION_SWITCH | EV_SWAP | OPENING
+--   (RENT_REVERSAL: arrears written off because a backdated EV return proved
+--   the rent should never have been charged — see domain/return_heal.py)
 CREATE TABLE IF NOT EXISTS transactions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id     INTEGER NOT NULL REFERENCES person_registry(person_id),

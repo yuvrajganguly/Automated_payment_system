@@ -197,6 +197,15 @@ class EvReturnIn(BaseModel):
     returned_date: date | None = None
 
 
+class EvAmendReturnIn(BaseModel):
+    """Correct the return date of an ALREADY-closed assignment to an earlier
+    day (news of a return often arrives after someone clicked Return with
+    today's date). The books heal the same way as a backdated return."""
+
+    ev_id: str
+    returned_date: date
+
+
 class MaintenanceIn(BaseModel):
     ev_id: str
     from_date: date
