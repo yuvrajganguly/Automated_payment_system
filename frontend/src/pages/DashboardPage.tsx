@@ -211,6 +211,14 @@ function cellValue(col: string, v: unknown, i: number) {
   return String(v ?? '—')
 }
 
+const _DRILL_PAGE: Record<string, { to: string; label: string }> = {
+  total_arrears: { to: '/arrears', label: 'Open the full Arrears page' },
+  cod_uncleared: { to: '/cod', label: 'Open the COD page' },
+  payout: { to: '/payments', label: 'Open Payments' },
+  rent_collected: { to: '/ev-rent', label: 'Open the Rent Ledger' },
+  credit_balances: { to: '/riders', label: 'Open Riders' },
+}
+
 /** Click a card → the rows behind the number, in a right-hand sheet. */
 function BreakdownDrawer({ metric, suffix, onClose }: {
   metric: string
@@ -241,6 +249,12 @@ function BreakdownDrawer({ metric, suffix, onClose }: {
         {error && <p className="text-red-400 text-sm">{error}</p>}
         {data && data.rows.length === 0 && (
           <p className="text-sm text-slate-500 py-8 text-center">Nothing behind this number.</p>
+        )}
+        {_DRILL_PAGE[metric] && (
+          <Link to={_DRILL_PAGE[metric].to}
+                className="inline-flex items-center gap-1.5 mb-3 text-sm text-brand-300 hover:underline">
+            {_DRILL_PAGE[metric].label} →
+          </Link>
         )}
         {data && data.rows.length > 0 && (
           <div className="overflow-x-auto">
