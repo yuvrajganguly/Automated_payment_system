@@ -87,7 +87,7 @@ function StatsTab() {
   if (!stats) return <p className="text-red-600">Couldn't load stats{error ? `: ${error}` : '.'}</p>
   return (
     <div className="grid md:grid-cols-2 gap-4">
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
         <h2 className="font-semibold mb-3">Database</h2>
         <dl className="grid grid-cols-2 gap-y-1 text-sm">
           <dt className="text-slate-500">Path</dt>
@@ -101,7 +101,7 @@ function StatsTab() {
           ⬇ Download backup
         </a>
       </div>
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 overflow-x-auto">
         <h2 className="font-semibold mb-3">Table sizes</h2>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs">
@@ -144,7 +144,7 @@ function AuditTab() {
 
   return (
     <div>
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3 mb-3 flex flex-wrap gap-3">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3 mb-3 flex flex-wrap gap-3">
         <label className="text-sm">
           <span className="block text-xs text-slate-500">Email</span>
           <input value={email} onChange={(e) => setEmail(e.target.value)}
@@ -165,7 +165,7 @@ function AuditTab() {
         </button>
       </div>
       {busy && <Spinner />}
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -270,7 +270,7 @@ function EvModelsTab() {
 
   return (
     <div>
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3 mb-3 flex flex-wrap gap-2 items-end">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3 mb-3 flex flex-wrap gap-2 items-end">
         <Field label="Provider" v={form.provider} on={(v) => setForm({ ...form, provider: v })} />
         <Field label="Model name" v={form.model_name} on={(v) => setForm({ ...form, model_name: v })} />
         <Field label="Weekly rate" v={form.weekly_rate} on={(v) => setForm({ ...form, weekly_rate: v })} type="number" />
@@ -281,7 +281,7 @@ function EvModelsTab() {
         </button>
       </div>
       {busy && <Spinner />}
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
         {err && <p role="alert" className="text-sm text-rose-600 mb-2">{err}</p>}
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
@@ -349,7 +349,7 @@ function ForceMergeTab() {
   }
 
   return (
-    <form onSubmit={go} className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 max-w-xl">
+    <form onSubmit={go} className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 max-w-xl">
       <p className="text-xs text-amber-700 mb-3">
         ⚠ Bypasses the regular merge's open-EV check. Secondary's open
         assignment is closed as of today before the move.
@@ -411,7 +411,7 @@ function DeleteCard({ title, prompt, path, warning, force }:
   }
 
   return (
-    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 border-l-4 border-red-400">
+    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 border-l-4 border-red-400">
       <h3 className="font-semibold text-sm mb-1">{title}</h3>
       <p className="text-[11px] text-amber-700 mb-2">{warning}</p>
       <input value={value} onChange={(e) => setValue(e.target.value)}

@@ -39,7 +39,7 @@ export function LoginPage() {
     'focus:border-white/30 transition'
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="auth-bg min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm animate-fade-up">
         <div className="flex items-center gap-2.5 mb-6 justify-center">
           <div className="h-10 w-10 rounded-xl bg-white/10 ring-1 ring-white/15 grid place-items-center

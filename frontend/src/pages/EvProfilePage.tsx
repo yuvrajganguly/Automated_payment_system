@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { DangerZone } from './PersonPage'
+import { healNote, type HealSummary } from '../lib/format'
 
 const fmt = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -99,6 +100,7 @@ export function EvProfilePage() {
           <MaintenanceOpenCard evId={u.ev_id} disabled={!!openMaint} onLogged={load} />
           <MaintenanceCloseCard openRow={openMaint} onClosed={load} />
           <MarkSpareCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
+          <AmendReturnCard evId={u.ev_id} assignments={profile.assignments} onChanged={load} />
         </div>
       )}
 
@@ -210,7 +212,8 @@ function ReturnCard({ evId, status, hasHolder, onChanged }:
     try {
       const body: Record<string, string> = { ev_id: evId }
       if (date) body.returned_date = date
-      await api.post('/evs/return', body); setMsg('Returned'); setDate(''); onChanged()
+      const r = await api.post<{ heal?: HealSummary }>('/evs/return', body)
+      setMsg('Returned' + healNote(r.heal)); setDate(''); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -300,6 +303,39 @@ function MaintenanceCloseCard({ openRow, onClosed }:
   </Card>
 }
 
+function AmendReturnCard({ evId, assignments, onChanged }:
+  { evId: string; assignments: Assignment[]; onChanged: () => void }) {
+  const last = assignments.filter((a) => a.returned_date)
+    .sort((a, b) => (a.returned_date! < b.returned_date! ? 1 : -1))[0]
+  const [date, setDate] = useState('')
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
+  if (!last) return null
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const r = await api.post<{ heal?: HealSummary }>('/evs/amend-return',
+        { ev_id: evId, returned_date: date })
+      setMsg('Amended' + healNote(r.heal)); setDate(''); onChanged()
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  return <Card title="Fix Return Date">
+    <p className="text-xs text-slate-500 mb-2">
+      Return is recorded as <span className="font-medium">{last.returned_date}</span>. If the EV
+      actually went back earlier, set the real date — rent charged for the days in between is
+      reversed automatically (refunds and arrears write-offs, with an audit trail).
+    </p>
+    <form onSubmit={submit} className="text-sm">
+      <In v={date} on={setDate} label="Actual return date" type="date" />
+      <button type="submit" disabled={busy || !date || date >= (last.returned_date ?? '')}
+              className="mt-2 bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded disabled:opacity-50">
+        {busy ? '…' : 'Amend & heal books'}
+      </button>
+      {msg && <span className="ml-2 text-xs">{msg}</span>}
+    </form>
+  </Card>
+}
+
 function MarkSpareCard({ evId, hasHolder, onChanged }:
   { evId: string; hasHolder: boolean; onChanged: () => void }) {
   const [date, setDate] = useState('')
@@ -310,7 +346,8 @@ function MarkSpareCard({ evId, hasHolder, onChanged }:
     try {
       const body: Record<string, string> = { ev_id: evId }
       if (date) body.returned_date = date
-      await api.post('/evs/to-spare', body); setMsg('Marked spare'); setDate(''); onChanged()
+      const r = await api.post<{ heal?: HealSummary }>('/evs/to-spare', body)
+      setMsg('Marked spare' + healNote(r.heal)); setDate(''); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -334,11 +371,11 @@ function MarkSpareCard({ evId, hasHolder, onChanged }:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">{children}</div>
+    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">{children}</div>
   </section>
 }
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4">
+  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
     <h3 className="font-semibold text-sm mb-2">{title}</h3>{children}
   </div>
 }

@@ -43,7 +43,7 @@ export function Panel({
 }) {
   return (
     <div
-      className={`bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 ${className}`}
+      className={`bg-white rounded-xl border border-slate-200/80 shadow-card p-4 ${className}`}
     >
       <div className="flex items-baseline justify-between mb-2 gap-3">
         <h3 className="font-semibold">{title}</h3>

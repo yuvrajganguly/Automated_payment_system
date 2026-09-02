@@ -58,7 +58,7 @@ export function InactivePage() {
         Per-cycle inactive lists in the workbook are scoped to that cycle's company; this view aggregates across all.
       </p>
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4 mb-4 flex flex-wrap gap-4 items-end">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-4 flex flex-wrap gap-4 items-end">
         <div>
           <label className="block text-xs font-medium mb-1">Considered inactive after</label>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}
@@ -90,7 +90,7 @@ export function InactivePage() {
 
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -142,7 +142,7 @@ export function InactivePage() {
 }
 
 function Stat({ label, value, bad }: { label: string; value: string; bad?: boolean }) {
-  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3">
+  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3">
     <p className="text-xs text-slate-500">{label}</p>
     <p className={'text-lg font-semibold ' + (bad ? 'text-red-600' : '')}>{value}</p>
   </div>

@@ -32,3 +32,20 @@ export function integer(n: number | null | undefined): string {
 export function percent(n: number | null | undefined, digits = 1): string {
   return `${(n ?? 0).toFixed(digits)}%`
 }
+
+// ── backdated-return healing ─────────────────────────────────────────────
+export interface HealSummary {
+  refunded: number
+  arrears_written_off: number
+  days_reversed: number
+  offset_applied: number
+}
+
+/** Human note for a backdated return's automatic book-healing ('' if none). */
+export function healNote(h: HealSummary | undefined | null): string {
+  if (!h || !h.days_reversed) return ''
+  const parts: string[] = []
+  if (h.arrears_written_off > 0) parts.push(rupees(h.arrears_written_off) + ' arrears written off')
+  if (h.refunded > 0) parts.push(rupees(h.refunded) + ' refunded to balance')
+  return ` — ${h.days_reversed} wrongly-charged day(s) reversed` + (parts.length ? ': ' + parts.join(', ') : '')
+}

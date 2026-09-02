@@ -8,6 +8,7 @@ import { useUrlRecord, useUrlString, useUrlList } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { EvModelOut, EvUnitOut, MaintenanceOut } from '../api/types'
+import { healNote, type HealSummary } from '../lib/format'
 
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -294,7 +295,8 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
       if (form.rider_id) body.rider_id = form.rider_id
       if (form.company) body.company = form.company
       if (form.returned_date) body.returned_date = form.returned_date
-      await api.post('/evs/return', body); setMsg('Returned'); setForm(empty); onChanged()
+      const r = await api.post<{ heal?: HealSummary }>('/evs/return', body)
+      setMsg('Returned' + healNote(r.heal)); setForm(empty); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -330,7 +332,8 @@ function MarkSpareEvCard({ onChanged }: { onChanged: () => void }) {
       if (form.rider_id) body.rider_id = form.rider_id
       if (form.company) body.company = form.company
       if (form.returned_date) body.returned_date = form.returned_date
-      await api.post('/evs/to-spare', body); setMsg('Marked spare'); setForm(empty); onChanged()
+      const r = await api.post<{ heal?: HealSummary }>('/evs/to-spare', body)
+      setMsg('Marked spare' + healNote(r.heal)); setForm(empty); onChanged()
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -390,11 +393,11 @@ function MaintenanceCard({ onLogged }: { onLogged: () => void }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">{children}</div>
+    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">{children}</div>
   </section>
 }
 function FormCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
+  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return <th className={'px-3 py-2 font-medium text-xs ' + (right ? 'text-right' : '')}>{children}</th>

@@ -86,6 +86,29 @@ const TABS = [
 ] as const
 
 // ── page ─────────────────────────────────────────────────────────────────
+/** "Needs attention" — suspected EV returns surface here, linking to the
+ *  Corrections fix-it desk. Renders nothing when all is well. */
+function AttentionStrip() {
+  const { data } = useApi<{ ev_id: string; missed_amount: number }[]>('/evs/suspected-returns')
+  if (!data?.length) return null
+  const total = data.reduce((a, s) => a + (s.missed_amount || 0), 0)
+  return (
+    <Link
+      to="/corrections"
+      className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-300/70
+                 bg-amber-50 text-amber-900 shadow-card hover:bg-amber-100/70 transition-colors"
+    >
+      <span className="pill bg-amber-200/80 text-amber-900">{data.length}</span>
+      <span className="text-sm">
+        <span className="font-semibold">Suspected EV return{data.length > 1 ? 's' : ''}</span>
+        {' — '}rent worth ₹{moneyWhole(total)} kept accruing for EV
+        {data.length > 1 ? 's' : ''} {data.slice(0, 4).map((s) => s.ev_id).join(', ')}
+        {data.length > 4 ? '…' : ''} whose holders vanished from payouts. Review in Corrections →
+      </span>
+    </Link>
+  )
+}
+
 export function DashboardPage() {
   // Default KPI window: the previous complete Mon–Sun week.
   const thisMon = startOfWeekISO(todayISO())
@@ -203,6 +226,8 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <AttentionStrip />
 
       {/* ── KPI strip (always visible, clickable → drawer) ─────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
@@ -354,7 +379,7 @@ function Kpi({
             }
           : undefined
       }
-      className={`bg-white/80 backdrop-blur-xl rounded-xl shadow-card p-3 ${TONE_BORDER[tone]} ${
+      className={`bg-white rounded-xl border border-slate-200/80 shadow-card p-3 ${TONE_BORDER[tone]} ${
         interactive ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-glass transition' : ''
       }`}
     >

@@ -392,7 +392,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       )}
 
       {/* Per-EV table */}
-      <section className="bg-white/80 backdrop-blur-xl border border-white/60 rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-hidden">
+      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h2 className="font-semibold text-slate-700">Per-EV breakdown</h2>
           <div className="flex items-center gap-3">
@@ -459,7 +459,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       </section>
 
       {/* Per-rider reconciliation (boss report) */}
-      <section className="bg-white/80 backdrop-blur-xl border border-white/60 rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-hidden">
+      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-slate-700">Rider reconciliation — expected vs collected</h2>
@@ -521,7 +521,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       </section>
 
       {/* Bills history */}
-      <section className="bg-white/80 backdrop-blur-xl border border-white/60 rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-hidden">
+      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h2 className="font-semibold text-slate-700">Bills uploaded by {provider}</h2>
           {canUpload && (

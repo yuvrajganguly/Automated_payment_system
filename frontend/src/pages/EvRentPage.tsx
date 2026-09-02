@@ -171,7 +171,7 @@ export function EvRentPage() {
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} cycles.</p>
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -356,7 +356,7 @@ function Stat({ label, value, tone, sub }:
              : tone === 'rolled'   ? 'border-l-4 border-amber-400'
              : tone === 'charged'  ? 'border-l-4 border-emerald-400'
              :                       'border-l-4 border-slate-400'
-  return <div className={'bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-3 ' + ring}>
+  return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-card p-3 ' + ring}>
     <p className="text-xs text-slate-500">{label}</p>
     <p className="text-lg font-bold">{value}</p>
     {sub && <p className="text-[10px] text-emerald-700 mt-0.5">{sub}</p>}

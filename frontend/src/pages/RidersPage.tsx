@@ -73,7 +73,7 @@ export function RidersPage() {
 
       {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -443,7 +443,7 @@ function LinkRidersCard({ onLinked }: { onLinked: () => void }) {
 
 function Card({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
-    <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-4">
+    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold">{title}</h3>
         <button onClick={onToggle} className="text-sm text-brand underline">{open ? 'Close' : 'Open'}</button>

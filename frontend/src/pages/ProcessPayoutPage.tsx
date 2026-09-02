@@ -128,7 +128,7 @@ export function ProcessPayoutPage() {
         Commit writes everything atomically and returns the styled workbook for download.
       </p>
 
-      <form onSubmit={(e) => submit(false, e)} className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-6 mb-6">
+      <form onSubmit={(e) => submit(false, e)} className="bg-white rounded-xl border border-slate-200/80 shadow-card p-6 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Company</label>
@@ -199,7 +199,7 @@ export function ProcessPayoutPage() {
       </form>
 
       {preview && (
-        <div className="bg-white/80 backdrop-blur-xl rounded-xl shadow-card transition-shadow duration-200 hover:shadow-glass p-6">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-6">
           <div className="flex items-baseline gap-3 mb-4 flex-wrap">
             <h2 className="text-xl font-bold">
               {preview.committed ? 'Committed' : 'Preview'} — {preview.company} cycle {preview.cycle_start} → {preview.cycle_end}
@@ -452,7 +452,7 @@ function OnboardUnknownsModal({ company, unknowns, onClose, onDone }: {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-pop w-full max-w-6xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold">Onboard unknown riders — {company}</h3>
