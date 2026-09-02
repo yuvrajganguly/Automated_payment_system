@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { Spinner } from './Spinner'
 import { TopBar } from './TopBar'
 import { SubNav } from './SubNav'
 import { CommandPalette } from './CommandPalette'
@@ -37,12 +38,16 @@ export function Layout() {
     <div className="min-h-screen">
       <TopBar onOpenPalette={() => setPaletteOpen(true)} />
       <div className="pt-14">
-        <div className="sticky top-14 z-30 glass-bar !border-b-0">
+        <div className="sticky top-14 z-30 bg-abyss/95 supports-[backdrop-filter]:bg-abyss/95">
           <SubNav />
         </div>
-        {/* Keyed by pathname so every page ENTERS — a fast, subtle rise. */}
+        {/* Keyed by pathname so every page ENTERS — a fast, subtle rise.
+            The Suspense boundary sits INSIDE the shell: a page chunk still
+            loading swaps only the canvas, never the command bar. */}
         <main key={pathname} className="p-6 md:px-10 md:py-8 animate-fade-up">
-          <Outlet />
+          <Suspense fallback={<div className="p-8"><Spinner /></div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

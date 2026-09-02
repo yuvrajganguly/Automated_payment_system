@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Layout } from './components/Layout'
@@ -7,8 +7,24 @@ import { LoginPage } from './pages/LoginPage'
 
 // Route-level code splitting: the login screen used to download all 20 pages
 // (DashboardPage's SVG charts, the 950-line PersonPage, …) before rendering.
-const page = <T extends object, K extends keyof T>(load: () => Promise<T>, name: K) =>
-  lazy(() => load().then((m) => ({ default: m[name] as unknown as React.ComponentType })))
+const chunkLoaders: (() => Promise<unknown>)[] = []
+const page = <T extends object, K extends keyof T>(load: () => Promise<T>, name: K) => {
+  chunkLoaders.push(load)
+  return lazy(() => load().then((m) => ({ default: m[name] as unknown as React.ComponentType })))
+}
+
+/** Route chunks are code-split so login stays light — but a chunk fetched on
+ *  CLICK reads as a slow page switch. Warm them all shortly after the app is
+ *  interactive; by the time anyone navigates, every page is already local. */
+function usePrefetchRoutes() {
+  useEffect(() => {
+    const warm = () => chunkLoaders.forEach((load) => load().catch(() => {}))
+    const idle = (window as { requestIdleCallback?: (cb: () => void) => number })
+      .requestIdleCallback
+    const t = setTimeout(() => (idle ? idle(warm) : warm()), 1200)
+    return () => clearTimeout(t)
+  }, [])
+}
 
 const ForgotPasswordPage = page(() => import('./pages/ForgotPasswordPage'), 'ForgotPasswordPage')
 const ProcessPayoutPage = page(() => import('./pages/ProcessPayoutPage'), 'ProcessPayoutPage')
@@ -31,6 +47,7 @@ const RaftPage = page(() => import('./pages/RaftPage'), 'RaftPage')
 const BlivePage = page(() => import('./pages/BlivePage'), 'BlivePage')
 
 export default function App() {
+  usePrefetchRoutes()
   return (
     <Suspense fallback={<div className="p-8"><Spinner /></div>}>
       <Routes>

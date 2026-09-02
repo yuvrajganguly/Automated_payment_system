@@ -28,8 +28,10 @@
     position: fixed;
     z-index: -1;
     border-radius: 9999px;
-    filter: blur(90px);
+    filter: blur(70px);
     pointer-events: none;
+    will-change: transform;
+    transform: translate3d(0, 0, 0);
     animation: aurora 36s ease-in-out infinite;
   }
   body::before {
@@ -104,6 +106,7 @@
   /* ── The card ──────────────────────────────────────────────────────────── */
   .panel {
     @apply rounded-xl;
+    position: relative;
     background: linear-gradient(180deg, rgba(255,255,255,0.015) 0%, rgba(255,255,255,0) 100%),
                 theme('colors.panel.DEFAULT');
     border: 1px solid theme('colors.edge.DEFAULT');
@@ -112,6 +115,30 @@
     transition: border-color .18s ease, box-shadow .18s ease;
   }
   .panel:hover { border-color: theme('colors.edge.strong'); }
+  /* Spectrum edge: a 1px violet→cyan→magenta gradient ring that fades in on
+     hover and slowly cycles. Pure compositor work (opacity + background-
+     position on a masked pseudo-element) — no layout, no repaint of content. */
+  .panel::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(120deg,
+      #8b5cf6 0%, #22d3ee 30%, #f472b6 55%, #a78bfa 80%, #8b5cf6 100%);
+    background-size: 300% 300%;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity .25s ease;
+    pointer-events: none;
+  }
+  .panel:hover::before {
+    opacity: 0.9;
+    animation: spectrum 5s linear infinite;
+  }
 
   .panel-pop {
     @apply rounded-2xl;
@@ -143,7 +170,9 @@
   }
   .btn-primary:not(:disabled):hover {
     background: linear-gradient(135deg, #a78bfa 0%, #7c6cf2 60%, #5b8ae2 120%);
-    box-shadow: 0 1px 0 0 rgba(255,255,255,0.2) inset, 0 0 20px -4px rgba(139,92,246,.7);
+    border-color: rgba(34, 211, 238, 0.5);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.2) inset, 0 0 20px -4px rgba(139,92,246,.7),
+                0 0 14px -6px rgba(34,211,238,.6);
   }
   .btn-ghost {
     @apply btn text-slate-700;

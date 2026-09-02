@@ -71,7 +71,7 @@ export default {
       },
       keyframes: {
         'fade-up': {
-          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '0%': { opacity: '0', transform: 'translateY(5px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         shimmer: {
@@ -82,6 +82,10 @@ export default {
           '0%': { opacity: '0', transform: 'scale(.97) translateY(-4px)' },
           '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
         },
+        spectrum: {
+          '0%': { backgroundPosition: '0% 50%' },
+          '100%': { backgroundPosition: '300% 50%' },
+        },
         aurora: {
           '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
           '33%': { transform: 'translate(40px, -30px) scale(1.08)' },
@@ -89,7 +93,7 @@ export default {
         },
       },
       animation: {
-        'fade-up': 'fade-up .35s cubic-bezier(.21,1.02,.73,1) both',
+        'fade-up': 'fade-up .22s cubic-bezier(.21,1.02,.73,1) both',
         shimmer: 'shimmer 1.8s linear infinite',
         'scale-in': 'scale-in .16s cubic-bezier(.21,1.02,.73,1) both',
         aurora: 'aurora 36s ease-in-out infinite',
