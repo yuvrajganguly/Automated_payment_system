@@ -560,6 +560,8 @@ _METRICS = {
     "payout",
     "total_arrears",
     "provider_owed",
+    "cod_uncleared",
+    "credit_balances",
 }
 
 
@@ -964,6 +966,31 @@ def dashboard_breakdown(
                 d = dict(r)
                 d["arrears_total"] = round((d["ev_arrears"] or 0) + (d["dues"] or 0), 2)
                 rows.append(d)
+
+        elif metric == "cod_uncleared":
+            # LIVE, not window-scoped: every COD hold never marked cleared,
+            # however old — exactly what the dashboard's "COD not yet
+            # cleared" card sums, so clicking it shows who and since when.
+            title = "COD held and never cleared (live, all time)"
+            columns = ["rider_id", "person_id", "company", "amount", "cycle_end", "created_at"]
+            sql = (
+                "SELECT ch.rider_id, ch.person_id, ch.company, ch.amount, "
+                "       ch.cycle_end, ch.created_at "
+                "FROM cod_holds ch WHERE ch.cleared_at IS NULL "
+                "ORDER BY ch.created_at ASC LIMIT ?"
+            )
+            rows = [dict(r) for r in conn.execute(sql, [limit])]
+
+        elif metric == "credit_balances":
+            title = "Riders holding credit with us (live)"
+            columns = ["person_id", "name", "credit"]
+            sql = (
+                "SELECT pr.person_id, pr.display_name AS name, "
+                "       b.current_balance AS credit "
+                "FROM balances b JOIN person_registry pr ON pr.person_id = b.person_id "
+                "WHERE b.current_balance > 0 ORDER BY b.current_balance DESC LIMIT ?"
+            )
+            rows = [dict(r) for r in conn.execute(sql, [limit])]
 
         else:
             title = metric

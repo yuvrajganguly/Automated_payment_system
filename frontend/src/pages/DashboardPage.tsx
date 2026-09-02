@@ -11,6 +11,8 @@
  * Tabs: Story · Companies · EVs · Riders — the same numbers grouped by who
  * / what / where, as sortable tables with inline proportion bars.
  */
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useUrlList, useUrlString } from '../state/useUrlState'
 import { useApi } from '../hooks/useApi'
 import { Spinner } from '../components/Spinner'
@@ -119,15 +121,28 @@ const r0 = (n: number | null | undefined) => '₹' + moneyWhole(n ?? 0)
 const pct = (part: number, whole: number) =>
   whole > 0 ? Math.round((part / whole) * 100) : 0
 
-function Big({ label, value, sub, tone }: {
+function Big({ label, value, sub, tone, onClick }: {
   label: string
   value: string
   sub?: React.ReactNode
   tone?: 'good' | 'bad' | 'plain'
+  onClick?: () => void
 }) {
   return (
-    <div className="panel p-4 flex-1 min-w-[180px]">
-      <p className="text-xs text-slate-500">{label}</p>
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      className={'panel p-4 flex-1 min-w-[180px] ' +
+        (onClick ? 'cursor-pointer transition hover:-translate-y-0.5 hover:shadow-pop group/big' : '')}
+    >
+      <p className="text-xs text-slate-500 flex items-center justify-between">
+        {label}
+        {onClick && (
+          <span className="text-slate-400 opacity-0 group-hover/big:opacity-100 transition-opacity">→</span>
+        )}
+      </p>
       <p className={'text-2xl font-bold font-display mt-1 tracking-tight ' +
         (tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-red-300' : 'text-slate-900')}>
         {value}
@@ -173,6 +188,87 @@ function Chip({ active, onClick, children }: {
           : 'bg-white/[0.04] text-slate-500 hover:text-slate-800 hover:bg-white/[0.07]')}>
       {children}
     </button>
+  )
+}
+
+interface BreakdownPayload {
+  metric: string
+  title: string
+  columns: string[]
+  rows: Record<string, unknown>[]
+}
+
+const _PLAIN_COLS = new Set([
+  'person_id', 'rider_id', 'company', 'name', 'cycle_end', 'cycle_start',
+  'created_at', 'order_number', 'txn_status', 'ev_id', 'days', 'riders',
+])
+
+function cellValue(col: string, v: unknown, i: number) {
+  if (col === 'person_id' && typeof v === 'number') {
+    return <Link key={i} to={'/persons/' + v} className="text-brand-300 hover:underline">#{v}</Link>
+  }
+  if (typeof v === 'number' && !_PLAIN_COLS.has(col)) return '₹' + moneyWhole(v)
+  return String(v ?? '—')
+}
+
+/** Click a card → the rows behind the number, in a right-hand sheet. */
+function BreakdownDrawer({ metric, suffix, onClose }: {
+  metric: string
+  suffix: string
+  onClose: () => void
+}) {
+  const { data, loading, error } = useApi<BreakdownPayload>(
+    `/dashboard/breakdown/${metric}${suffix}`,
+  )
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true"
+         onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="flex-1 bg-black/60 backdrop-blur-[2px]" onMouseDown={onClose} />
+      <div className="w-full max-w-2xl h-full overflow-y-auto panel-pop !rounded-none
+                      border-l border-edge-strong animate-fade-up p-5">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-display font-semibold text-slate-900">
+              {data?.title ?? 'Loading…'}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {data ? `${data.rows.length} row${data.rows.length === 1 ? '' : 's'}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="btn-ghost !px-2.5" aria-label="Close">✕</button>
+        </div>
+        {loading && !data && <SkeletonTable cols={4} />}
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+        {data && data.rows.length === 0 && (
+          <p className="text-sm text-slate-500 py-8 text-center">Nothing behind this number.</p>
+        )}
+        {data && data.rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left border-b border-edge-soft">
+                <tr>
+                  {data.columns.map((c) => (
+                    <th key={c} className="px-2.5 py-2 whitespace-nowrap">{c.replace(/_/g, ' ')}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((r, i) => (
+                  <tr key={i} className="border-t border-edge-soft hover:bg-white/[0.02]">
+                    {data.columns.map((c) => (
+                      <td key={c} className={'px-2.5 py-1.5 whitespace-nowrap ' +
+                        (typeof r[c] === 'number' && !_PLAIN_COLS.has(c) ? 'text-right tabular-nums' : '')}>
+                        {cellValue(c, r[c], i)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -287,7 +383,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {tab === 'story' && <StoryTab s={s} suffix={suffix} />}
+      {tab === 'story' && <StoryTab s={s} suffix={suffix} setTab={setTab} />}
       {tab === 'companies' && <CompaniesTab suffix={suffix} />}
       {tab === 'evs' && <EvsTab suffix={suffix} />}
       {tab === 'riders' && <RidersTab suffix={suffix} />}
@@ -297,7 +393,13 @@ export function DashboardPage() {
 
 // ── Story ────────────────────────────────────────────────────────────────
 
-function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
+function StoryTab({ s, suffix, setTab }: {
+  s: Story
+  suffix: string
+  setTab: (t: string) => void
+}) {
+  const navigate = useNavigate()
+  const [drill, setDrill] = useState<string | null>(null)
   const f = s.flow
   const p = s.position
   const kept = Math.max(0, f.gross_payout - f.released)
@@ -310,9 +412,10 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
       {/* 1 · money in → held back → money out */}
       <div className="flex flex-wrap items-stretch gap-3 mb-5">
         <Big label="Came in from companies" value={r0(f.gross_payout)}
-             sub={<>gross payouts for {`${s.window.days}`} days</>} />
+             sub={<>gross payouts for {`${s.window.days}`} days</>}
+             onClick={() => setTab('companies')} />
         <div className="self-center text-slate-400 text-lg px-1 hidden md:block">→</div>
-        <Big label="We held back" value={r0(kept)} sub={
+        <Big label="We held back" value={r0(kept)} onClick={() => setDrill('rent_collected')} sub={
           <>
             rent {r0(f.rent_collected)} · old debt {r0(f.arrears_recovered)}
             {f.cod_held > 0 && <> · COD {r0(f.cod_held)}</>}
@@ -320,7 +423,8 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
         } />
         <div className="self-center text-slate-400 text-lg px-1 hidden md:block">→</div>
         <Big label="Paid out to riders" value={r0(f.released)} tone="good"
-             sub={<>{pct(f.released, f.gross_payout)}% of what came in</>} />
+             sub={<>{pct(f.released, f.gross_payout)}% of what came in</>}
+             onClick={() => setDrill('payout')} />
       </div>
 
       {/* 2 · the rent story */}
@@ -418,6 +522,7 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
       {/* 3 · where the debt stands TODAY (live, not window-scoped) */}
       <div className="flex flex-wrap items-stretch gap-3 mb-5">
         <Big label="Rent debt outstanding (today)" value={r0(p.ev_arrears)}
+             onClick={() => setDrill('total_arrears')}
              tone={p.ev_arrears > 0 ? 'bad' : 'good'}
              sub={
                <>
@@ -428,13 +533,19 @@ function StoryTab({ s, suffix }: { s: Story; suffix: string }) {
                  )}
                </>
              } />
-        <Big label="Other dues owed by riders" value={r0(p.dues)} sub={<>carry-forward balances</>} />
-        <Big label="Credit riders hold with us" value={r0(p.credit)} sub={<>auto-offsets new arrears</>} />
-        <Big label="COD not yet cleared" value={r0(p.cod_uncleared)} sub={<>payouts held until cleared</>} />
+        <Big label="Other dues owed by riders" value={r0(p.dues)} sub={<>carry-forward balances</>}
+             onClick={() => navigate('/arrears?bucket=dues')} />
+        <Big label="Credit riders hold with us" value={r0(p.credit)} sub={<>auto-offsets new arrears</>}
+             onClick={() => setDrill('credit_balances')} />
+        <Big label="COD not yet cleared" value={r0(p.cod_uncleared)} sub={<>payouts held until cleared</>}
+             onClick={() => setDrill('cod_uncleared')} />
       </div>
 
       <DebtAging suffix={suffix} />
       <TrendCharts suffix={suffix} />
+      {drill && (
+        <BreakdownDrawer metric={drill} suffix={suffix} onClose={() => setDrill(null)} />
+      )}
     </>
   )
 }
