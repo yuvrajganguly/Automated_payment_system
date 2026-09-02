@@ -133,12 +133,93 @@ def _0005_deposit_for_closed_evs(conn: Any) -> None:
         settle_from_deposit(conn, r[0], created_by="migration:0005_deposit_for_closed_evs")
 
 
+def _0006_collapse_bluedart(conn: Any) -> None:
+    """Fold the retired Blue Dart module into the central model.
+
+    Blue Dart lived on an unmerged branch as a salaried side-module
+    (bluedart_riders / bluedart_attendance / bluedart_ev) whose riders were
+    never charged EV rent. Decision (2026-09-02): the section is retired;
+    its ACTIVE riders and their EV holdings become ordinary central records
+    and rent is chargeable from 2026-09-01.
+
+    For every active bluedart_rider:
+      * a rider_master row under company 'BlueDart' (their BD code, or a
+        BD-<id> placeholder), reusing the already-linked person;
+      * their person's deduction anchor set to BlueDart ONLY if they have
+        no anchor yet (multi-company riders keep their existing anchor);
+      * their OPEN bluedart_ev holding becomes an ev_assignments row —
+        original handover preserved, rent meter set to 2026-08-31 so
+        billing starts 1 Sept; the bluedart_ev row is closed 2026-08-31
+        with a migration note, and the unit is marked in_use.
+    Rows that would violate the one-open-assignment / one-holder rules are
+    skipped (books already disagree; the operator resolves those by hand).
+    Attendance/payroll history stays in the bluedart_* tables, read-only.
+    Fresh databases (no bluedart tables) skip this entirely.
+    """
+    if not table_exists(conn, "bluedart_riders"):
+        return
+    conn.execute(
+        "INSERT OR IGNORE INTO companies (company_name, parser_type, rider_id_column, "
+        "payout_column) VALUES ('BlueDart', 'generic', 'rider_id', 'net_pay')"
+    )
+    riders = conn.execute(
+        "SELECT id, person_id, bd_rider_id, name, hub, mob_no, account_no, ifsc "
+        "FROM bluedart_riders WHERE is_active = 1"
+    ).fetchall()
+    for r in riders:
+        rid = (r["bd_rider_id"] or f"BD-{r['id']}").strip()
+        if not conn.execute(
+            "SELECT 1 FROM rider_master WHERE rider_id=? AND company='BlueDart'", (rid,)
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO rider_master (rider_id, company, person_id, name, hub, "
+                "vehicle, account_no, ifsc, mob_no, is_active) "
+                "VALUES (?, 'BlueDart', ?, ?, ?, 'EV', ?, ?, ?, 1)",
+                (rid, r["person_id"], r["name"], r["hub"], r["account_no"], r["ifsc"], r["mob_no"]),
+            )
+        conn.execute(
+            "UPDATE person_registry SET deduction_company='BlueDart', deduction_rider_id=? "
+            "WHERE person_id=? AND (deduction_company IS NULL OR deduction_company='')",
+            (rid, r["person_id"]),
+        )
+        holding = conn.execute(
+            "SELECT id, ev_id, handover_date FROM bluedart_ev "
+            "WHERE bd_rider_id=? AND returned_date IS NULL",
+            (r["id"],),
+        ).fetchone()
+        if not holding:
+            continue
+        person_busy = conn.execute(
+            "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL",
+            (r["person_id"],),
+        ).fetchone()
+        ev_busy = conn.execute(
+            "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL",
+            (holding["ev_id"],),
+        ).fetchone()
+        if person_busy or ev_busy:
+            continue  # books already disagree — leave for the operator
+        conn.execute(
+            "INSERT INTO ev_assignments (person_id, ev_id, handover_date, "
+            "rent_charged_through) VALUES (?, ?, ?, '2026-08-31')",
+            (r["person_id"], holding["ev_id"], holding["handover_date"]),
+        )
+        conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (holding["ev_id"],))
+        conn.execute(
+            "UPDATE bluedart_ev SET returned_date='2026-08-31', "
+            "notes=COALESCE(notes,'') || ' [migrated to central ev_assignments 2026-09-01]' "
+            "WHERE id=?",
+            (holding["id"],),
+        )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
     ("0003_companies_shared_rider_ids", _0003_companies_shared_rider_ids),
     ("0004_offset_credit_vs_arrears", _0004_offset_credit_vs_arrears),
     ("0005_deposit_for_closed_evs", _0005_deposit_for_closed_evs),
+    ("0006_collapse_bluedart", _0006_collapse_bluedart),
 ]
 
 _TRACKING_DDL = (
