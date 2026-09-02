@@ -10,9 +10,9 @@ const fmt = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const EVENT_COLOR: Record<string, string> = {
-  PAYOUT: 'bg-green-100', RENT: 'bg-orange-100', RENT_MISSED: 'bg-red-100',
-  RENT_RECOVERED: 'bg-blue-100', DUES_CARRY: 'bg-yellow-100', ADJUSTMENT: 'bg-purple-100',
-  DEDUCTION_SWITCH: 'bg-emerald-100', EV_SWAP: 'bg-indigo-100', OPENING: 'bg-slate-100',
+  PAYOUT: 'bg-emerald-500/15', RENT: 'bg-orange-500/15', RENT_MISSED: 'bg-red-500/15',
+  RENT_RECOVERED: 'bg-blue-500/15', DUES_CARRY: 'bg-yellow-500/15', ADJUSTMENT: 'bg-purple-500/15',
+  DEDUCTION_SWITCH: 'bg-emerald-500/15', EV_SWAP: 'bg-indigo-500/15', OPENING: 'bg-slate-100',
 }
 const EVENT_TYPES = Object.keys(EVENT_COLOR)
 
@@ -52,7 +52,7 @@ export function TransactionsPage() {
         Append-only ledger across all riders. Click a Person ID to open the full per-rider history.
       </p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-4 flex flex-wrap gap-4 items-end">
+      <div className="panel p-4 mb-4 flex flex-wrap gap-4 items-end">
         <div className="flex-1 min-w-[140px]">
           <label className="block text-xs font-medium mb-1">Event type</label>
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}
@@ -82,9 +82,9 @@ export function TransactionsPage() {
         {busy && <Spinner />}
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>

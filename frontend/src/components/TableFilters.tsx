@@ -67,7 +67,7 @@ export function ColumnFilters<T>({
   const anyActive = Object.values(filters).some((v) => v !== '')
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-4">
+    <div className="panel p-4 mb-4">
       <div className="flex flex-wrap gap-3 items-end">
         {columns.map((c) => (
           <div key={c.key} className="flex-1 min-w-[140px]">

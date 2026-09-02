@@ -33,9 +33,9 @@ interface Backrent {
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const EVENT_COLOR: Record<string, string> = {
-  PAYOUT: 'bg-green-100', RENT: 'bg-orange-100', RENT_MISSED: 'bg-red-100',
-  RENT_RECOVERED: 'bg-blue-100', DUES_CARRY: 'bg-yellow-100', ADJUSTMENT: 'bg-purple-100',
-  DEDUCTION_SWITCH: 'bg-emerald-100', EV_SWAP: 'bg-indigo-100', OPENING: 'bg-slate-100',
+  PAYOUT: 'bg-emerald-500/15', RENT: 'bg-orange-500/15', RENT_MISSED: 'bg-red-500/15',
+  RENT_RECOVERED: 'bg-blue-500/15', DUES_CARRY: 'bg-yellow-500/15', ADJUSTMENT: 'bg-purple-500/15',
+  DEDUCTION_SWITCH: 'bg-emerald-500/15', EV_SWAP: 'bg-indigo-500/15', OPENING: 'bg-slate-100',
 }
 
 export function PersonPage() {
@@ -83,7 +83,7 @@ export function PersonPage() {
   useEffect(() => { api.get<CompanyOpt[]>('/companies').then(setCompanies).catch(() => {}) }, [])
 
   if (busy && !person) return <Spinner label="Loading…" />
-  if (error || !person) return <p className="text-red-600">{error ?? 'Not found'}</p>
+  if (error || !person) return <p className="text-red-400">{error ?? 'Not found'}</p>
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -106,7 +106,7 @@ export function PersonPage() {
       </div>
 
       {person.ev && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-6">
+        <div className="panel p-4 mb-6">
           <h3 className="font-semibold mb-2">EV Assignment</h3>
           <dl className="grid grid-cols-2 md:grid-cols-4 text-sm gap-y-1">
             <dt className="text-slate-500">EV ID</dt>
@@ -125,9 +125,9 @@ export function PersonPage() {
       )}
 
       {isAdmin && backrent?.applicable && (
-        <div className="mb-6 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-          <div className="font-medium text-amber-900">Backdated handover — un-billed rent</div>
-          <p className="text-amber-800 text-xs mt-1">
+        <div className="mb-6 rounded border border-amber-300 bg-amber-500/10 p-3 text-sm">
+          <div className="font-medium text-amber-200">Backdated handover — un-billed rent</div>
+          <p className="text-amber-200 text-xs mt-1">
             EV handed over {backrent.handover}. {backrent.days} un-billed day(s)
             ({backrent.from} → {backrent.to}) — about ₹{fmt(backrent.amount ?? 0)} was
             never charged. Add it to this rider's EV arrears?
@@ -153,7 +153,7 @@ export function PersonPage() {
             <tbody>
               {person.ev_history.map((h) => (
                 <tr key={h.assignment_id} className={'border-t ' +
-                    (h.returned_date === null ? 'bg-amber-50' : '')}>
+                    (h.returned_date === null ? 'bg-amber-500/10' : '')}>
                   <Td>
                     <Link to={'/evs/' + encodeURIComponent(h.ev_id)}
                           className="text-brand underline">{h.ev_id}</Link>
@@ -164,7 +164,7 @@ export function PersonPage() {
                   <Td>{h.handover_date ?? '-'}</Td>
                   <Td>
                     {h.returned_date === null
-                      ? <span className="text-amber-700 font-medium">open</span>
+                      ? <span className="text-amber-300 font-medium">open</span>
                       : h.returned_date}
                   </Td>
                   <Td>{h.rent_charged_through ?? '-'}</Td>
@@ -296,7 +296,7 @@ function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: (
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mt-6 border-l-4 border-emerald-400">
+    <div className="panel p-4 mt-6 border-l-[3px] border-l-emerald-400">
       <h3 className="font-semibold mb-1">Log Manual Rent Payment</h3>
       <p className="text-xs text-slate-500 mb-3">
         Use when a rider pays rent in cash / UPI outside the bank reconciliation.
@@ -335,11 +335,11 @@ function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: (
                  className="w-full border rounded px-3 py-1.5" />
         </label>
         <button type="submit" disabled={busy || !amount || !periodValid}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
           {busy ? 'Posting…' : 'Record rent payment'}
         </button>
         {msg && (
-          <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-emerald-700')}>
+          <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>
             {msg}
           </span>
         )}
@@ -367,7 +367,7 @@ function AdjustmentForm({ personId, onPosted }: { personId: number; onPosted: ()
     finally { setBusy(false) }
   }
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mt-6">
+    <div className="panel p-4 mt-6">
       <h3 className="font-semibold mb-2">Post Manual Adjustment</h3>
       <p className="text-xs text-slate-500 mb-3">Positive = credit (reduces dues). Negative = debit (adds dues / penalty).</p>
       <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
@@ -392,12 +392,12 @@ function AdjustmentForm({ personId, onPosted }: { personId: number; onPosted: ()
 function Stat({ label, value, bad, linkTo }:
   { label: string; value: string; bad?: boolean; linkTo?: string }) {
   const inner = (
-    <p className={'text-lg font-semibold ' + (bad ? 'text-red-600' : '')
+    <p className={'text-lg font-semibold ' + (bad ? 'text-red-400' : '')
                    + (linkTo ? ' text-brand underline hover:opacity-80' : '')}>
       {value}
     </p>
   )
-  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3">
+  return <div className="panel p-3">
     <p className="text-xs text-slate-500">{label}</p>
     {linkTo ? <Link to={linkTo}>{inner}</Link> : inner}
   </div>
@@ -405,7 +405,7 @@ function Stat({ label, value, bad, linkTo }:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="mb-6">
     <h3 className="font-semibold mb-2">{title}</h3>
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">{children}</div>
+    <div className="panel overflow-x-auto">{children}</div>
   </div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
@@ -498,7 +498,7 @@ function RiderRow({
     )
   }
   return (
-    <tr className="border-t bg-amber-50">
+    <tr className="border-t bg-amber-500/10">
       <Td><Cell v={form.new_rider_id}
                 on={(v) => setForm({ ...form, new_rider_id: v })} /></Td>
       <Td>
@@ -533,7 +533,7 @@ function RiderRow({
           </button>
           <button onClick={reset} disabled={busy}
                   className="text-xs text-slate-600 underline">Cancel</button>
-          {err && <span className="text-xs text-red-600">{err}</span>}
+          {err && <span className="text-xs text-red-400">{err}</span>}
         </div>
       </Td>
     </tr>
@@ -580,7 +580,7 @@ function AddAtAnotherCompanyCard({
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-6">
+    <div className="panel p-4 mb-6">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold">Add to another company</h3>
         <button onClick={() => setOpen(!open)}
@@ -616,10 +616,10 @@ function AddAtAnotherCompanyCard({
                     className="bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
               {busy ? '…' : 'Add'}
             </button>
-            {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>{msg}</span>}
+            {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
           </div>
           {form.company && usedSet.has(form.company) && (
-            <p className="col-span-2 text-xs text-amber-700">
+            <p className="col-span-2 text-xs text-amber-300">
               This person already has a rider_id at {form.company}. Type a
               different rider_id below to add a second one — leaving it blank
               will fail because the placeholder collides with the existing row.
@@ -688,8 +688,8 @@ function SplitPersonModal({ person, onClose, onSplit }:
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-pop w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+      <div className="panel-pop w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
             <h3 className="font-semibold">Split {person.display_name} into two people</h3>
@@ -716,7 +716,7 @@ function SplitPersonModal({ person, onClose, onSplit }:
               {person.riders.map((r) => {
                 const k = keyOf(r)
                 return (
-                  <tr key={k} className={'border-t ' + (moveSet.has(k) ? 'bg-amber-50' : '')}>
+                  <tr key={k} className={'border-t ' + (moveSet.has(k) ? 'bg-amber-500/10' : '')}>
                     <td className="px-2 py-1">
                       <input type="checkbox" checked={moveSet.has(k)}
                              onChange={(e) => {
@@ -775,7 +775,7 @@ function SplitPersonModal({ person, onClose, onSplit }:
             </p>
           </div>
 
-          {error && <p className="text-red-600 text-xs">{error}</p>}
+          {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
         <div className="px-5 py-3 border-t flex justify-end gap-2">
           <button onClick={onClose} disabled={busy}
@@ -828,7 +828,7 @@ function TxnRow({ t, isCreator, onChanged }:
 
   if (editing) {
     return (
-      <tr className="border-t bg-amber-50">
+      <tr className="border-t bg-amber-500/10">
         <Td>{t.id}</Td>
         <Td className="text-xs">{t.cycle_start} → {t.cycle_end}</Td>
         <Td><span className={'text-xs px-1.5 py-0.5 rounded ' + (EVENT_COLOR[t.event_type] ?? 'bg-slate-100')}>{t.event_type}</span></Td>
@@ -852,7 +852,7 @@ function TxnRow({ t, isCreator, onChanged }:
             </button>
             <button onClick={() => setEditing(false)} disabled={busy}
                     className="text-xs text-slate-600 underline">Cancel</button>
-            {err && <span role="alert" className="text-[11px] text-rose-600">{err}</span>}
+            {err && <span role="alert" className="text-[11px] text-rose-400">{err}</span>}
           </div>
         </Td>
       </tr>
@@ -862,7 +862,7 @@ function TxnRow({ t, isCreator, onChanged }:
     // Void failed on the non-editing row: surface it inline instead of an alert().
     return (
       <tr className="border-t">
-        <td colSpan={9} className="px-3 py-2 text-xs text-rose-600" role="alert">
+        <td colSpan={9} className="px-3 py-2 text-xs text-rose-400" role="alert">
           #{t.id}: {err} <button className="underline ml-2" onClick={() => setErr(null)}>dismiss</button>
         </td>
       </tr>
@@ -882,9 +882,9 @@ function TxnRow({ t, isCreator, onChanged }:
         <Td>
           <div className="flex gap-2">
             <button onClick={() => setEditing(true)}
-                    className="text-xs text-purple-700 underline">edit</button>
+                    className="text-xs text-purple-300 underline">edit</button>
             <button onClick={voidIt}
-                    className="text-xs text-red-600 underline">void</button>
+                    className="text-xs text-red-400 underline">void</button>
           </div>
         </Td>
       )}
@@ -911,21 +911,21 @@ export function DangerZone({ kind, label, deletePath, onDeleted }:
     } finally { setBusy(false) }
   }
   return (
-    <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4">
-      <h3 className="font-semibold text-red-700 text-sm mb-2">Danger Zone — Creator only</h3>
-      <p className="text-xs text-red-800 mb-3">
+    <div className="mt-8 bg-red-500/10 border border-red-400/30 rounded-lg p-4">
+      <h3 className="font-semibold text-red-300 text-sm mb-2">Danger Zone — Creator only</h3>
+      <p className="text-xs text-red-300 mb-3">
         Hard-delete this {kind}. Cascades through every ledger row and balance.
-        Type <code className="bg-white px-1 rounded">DELETE</code> below to confirm.
+        Type <code className="bg-panel px-1 rounded">DELETE</code> below to confirm.
       </p>
       <div className="flex flex-wrap gap-2 items-center">
         <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
                placeholder="type DELETE to enable"
                className="border rounded px-2 py-1 text-sm" />
         <button onClick={go} disabled={busy || confirmText !== 'DELETE'}
-                className="bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
+                className="bg-red-600 hover:bg-red-500 text-white text-sm px-3 py-1.5 rounded disabled:opacity-50">
           {busy ? '…' : `Hard delete ${kind}`}
         </button>
-        {err && <span className="text-xs text-red-700">{err}</span>}
+        {err && <span className="text-xs text-red-300">{err}</span>}
       </div>
     </div>
   )

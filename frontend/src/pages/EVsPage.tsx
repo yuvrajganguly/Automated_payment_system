@@ -58,7 +58,7 @@ export function EVsPage() {
       </div>
       <p className="text-slate-500 text-sm mb-6">Rate card, current units, assignments, and maintenance history.</p>
       {busy && <Spinner />}
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
       <Section title="Rate Card">
         <table className="w-full text-sm">
@@ -138,7 +138,7 @@ export function EVsPage() {
                 <Td right>{fmt(u.weekly_rate)}</Td>
                 <Td>
                   <span className={'px-1.5 py-0.5 rounded text-xs ' +
-                    (u.status === 'in_use' ? 'bg-green-100' : u.status === 'returned' ? 'bg-slate-100' : 'bg-amber-100')}>
+                    (u.status === 'in_use' ? 'bg-emerald-500/15' : u.status === 'returned' ? 'bg-slate-100' : 'bg-amber-500/15')}>
                     {u.status}
                   </span>
                 </Td>
@@ -400,11 +400,11 @@ function MaintenanceCard({ onLogged }: { onLogged: () => void }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">{children}</div>
+    <div className="panel overflow-x-auto">{children}</div>
   </section>
 }
 function FormCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
+  return <div className="panel p-4"><h3 className="font-semibold mb-2 text-sm">{title}</h3>{children}</div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return <th className={'px-3 py-2 font-medium text-xs ' + (right ? 'text-right' : '')}>{children}</th>

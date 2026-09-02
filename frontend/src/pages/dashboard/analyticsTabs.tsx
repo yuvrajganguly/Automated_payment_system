@@ -43,7 +43,7 @@ export function Panel({
 }) {
   return (
     <div
-      className={`bg-white rounded-xl border border-slate-200/80 shadow-card p-4 ${className}`}
+      className={`panel p-4 ${className}`}
     >
       <div className="flex items-baseline justify-between mb-2 gap-3">
         <h3 className="font-semibold">{title}</h3>
@@ -66,7 +66,7 @@ function LoadGuard<T>({
   children: (d: T) => React.ReactNode
 }) {
   if (loading && !data) return <Spinner label="Loading analytics…" />
-  if (error) return <p role="alert" className="text-rose-600 text-sm p-4">{error}</p>
+  if (error) return <p role="alert" className="text-rose-400 text-sm p-4">{error}</p>
   if (!data) return null
   return <>{children(data)}</>
 }
@@ -303,7 +303,7 @@ export function RentTab({ companies, weeks }: { companies: string[]; weeks: numb
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Net</p>
-                  <p className={`text-xl font-bold mt-1 ${net4w >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  <p className={`text-xl font-bold mt-1 ${net4w >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                     {net4w >= 0 ? '−' : '+'}₹{moneyWhole(Math.abs(net4w))}
                   </p>
                   <p className="text-[10px] text-slate-400">
@@ -471,12 +471,12 @@ export function FleetTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: strin
                           {e.billable_days}/{e.missed_days}/{e.idle_days + e.maintenance_days}
                         </td>
                         <td className="px-3 py-2 text-right font-mono">{money(e.earned)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-rose-700">
+                        <td className="px-3 py-2 text-right font-mono text-rose-300">
                           {e.missed ? money(e.missed) : '—'}
                         </td>
                         <td className="px-3 py-2 text-right font-mono">{money(e.provider_owed)}</td>
                         <td
-                          className={`px-3 py-2 text-right font-mono font-semibold ${e.margin < 0 ? 'text-rose-700' : 'text-emerald-700'}`}
+                          className={`px-3 py-2 text-right font-mono font-semibold ${e.margin < 0 ? 'text-rose-300' : 'text-emerald-300'}`}
                         >
                           {money(e.margin)}
                         </td>
@@ -565,7 +565,7 @@ export function RidersTab({ companies, weeks }: { companies: string[]; weeks: nu
                   note: `owes ₹${moneyWhole(r.dues)} now`,
                 }))}
                 valueHeader="Dues added"
-                valueClass="text-rose-700"
+                valueClass="text-rose-300"
                 empty="Nobody's dues grew in this window. Nice."
               />
             </Panel>

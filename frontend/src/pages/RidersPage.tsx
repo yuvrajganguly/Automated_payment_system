@@ -71,9 +71,9 @@ export function RidersPage() {
         Showing {visibleRiders.length} of {riders.length} riders. {busy && <Spinner />}
       </p>
 
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -163,7 +163,7 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
         </div>
         <div className="col-span-2 flex gap-2 items-center mt-1">
           <Submit busy={busy} disabled={!form.company || !form.name} label="Add Rider" />
-          {msg && <span className={'text-xs ' + (msgTone === 'err' ? 'text-red-600' : 'text-green-700')}>{msg}</span>}
+          {msg && <span className={'text-xs ' + (msgTone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
         </div>
       </form>
     </Card>
@@ -223,10 +223,10 @@ function BulkUploadCard({ onUploaded }: { onUploaded: () => void }) {
           {busy === 'commit' ? 'Committing…' : 'Commit'}
         </button>
       </div>
-      {error && <p className="text-red-600 text-xs">{error}</p>}
+      {error && <p className="text-red-400 text-xs">{error}</p>}
       {report && (
         <div className="text-xs space-y-2">
-          <p className={report.committed ? 'text-green-700 font-medium' : 'text-slate-600'}>
+          <p className={report.committed ? 'text-emerald-300 font-medium' : 'text-slate-600'}>
             {report.committed ? '✓ Committed' : 'Dry run'} —
             create {report.summary.would_create},
             duplicates {report.summary.duplicates},
@@ -234,7 +234,7 @@ function BulkUploadCard({ onUploaded }: { onUploaded: () => void }) {
             errors {report.summary.errors}
           </p>
           {report.duplicates.length > 0 && (
-            <details className="bg-amber-50 border border-amber-200 rounded p-2">
+            <details className="bg-amber-500/10 border border-amber-400/30 rounded p-2">
               <summary className="cursor-pointer">Duplicates ({report.duplicates.length})</summary>
               <ul className="mt-1 ml-3 list-disc">
                 {report.duplicates.map((d, i) => (
@@ -252,9 +252,9 @@ function BulkUploadCard({ onUploaded }: { onUploaded: () => void }) {
             </details>
           )}
           {report.errors.length > 0 && (
-            <details className="bg-red-50 border border-red-200 rounded p-2" open>
+            <details className="bg-red-500/10 border border-red-400/30 rounded p-2" open>
               <summary className="cursor-pointer">Errors ({report.errors.length}) — fix and re-preview</summary>
-              <ul className="mt-1 ml-3 list-disc text-red-700">
+              <ul className="mt-1 ml-3 list-disc text-red-300">
                 {report.errors.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
             </details>
@@ -335,10 +335,10 @@ function BulkUpdateCard({ onUpdated }: { onUpdated: () => void }) {
           {busy === 'commit' ? 'Committing…' : 'Commit'}
         </button>
       </div>
-      {error && <p className="text-red-600 text-xs">{error}</p>}
+      {error && <p className="text-red-400 text-xs">{error}</p>}
       {report && (
         <div className="text-xs space-y-2">
-          <p className={report.committed ? 'text-green-700 font-medium' : 'text-slate-600'}>
+          <p className={report.committed ? 'text-emerald-300 font-medium' : 'text-slate-600'}>
             {report.committed ? '✓ Committed' : 'Dry run'} —
             update {report.summary.would_update},
             unchanged {report.summary.unchanged},
@@ -346,7 +346,7 @@ function BulkUpdateCard({ onUpdated }: { onUpdated: () => void }) {
             errors {report.summary.errors}
           </p>
           {report.updated.length > 0 && (
-            <details className="bg-emerald-50 border border-emerald-200 rounded p-2" open={!report.committed}>
+            <details className="bg-emerald-500/10 border border-emerald-400/30 rounded p-2" open={!report.committed}>
               <summary className="cursor-pointer">Updates ({report.updated.length})</summary>
               <ul className="mt-1 ml-3 list-disc max-h-48 overflow-y-auto">
                 {report.updated.slice(0, 200).map((u, i) => (
@@ -362,7 +362,7 @@ function BulkUpdateCard({ onUpdated }: { onUpdated: () => void }) {
             </details>
           )}
           {report.not_found.length > 0 && (
-            <details className="bg-amber-50 border border-amber-200 rounded p-2">
+            <details className="bg-amber-500/10 border border-amber-400/30 rounded p-2">
               <summary className="cursor-pointer">Not found ({report.not_found.length})</summary>
               <ul className="mt-1 ml-3 list-disc">
                 {report.not_found.map((n, i) => (
@@ -372,9 +372,9 @@ function BulkUpdateCard({ onUpdated }: { onUpdated: () => void }) {
             </details>
           )}
           {report.errors.length > 0 && (
-            <details className="bg-red-50 border border-red-200 rounded p-2" open>
+            <details className="bg-red-500/10 border border-red-400/30 rounded p-2" open>
               <summary className="cursor-pointer">Errors ({report.errors.length}) — fix and re-preview</summary>
-              <ul className="mt-1 ml-3 list-disc text-red-700">
+              <ul className="mt-1 ml-3 list-disc text-red-300">
                 {report.errors.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
             </details>
@@ -431,7 +431,7 @@ function LinkRidersCard({ onLinked }: { onLinked: () => void }) {
         <div className="col-span-2 flex gap-2 items-center mt-1">
           <Submit busy={busy} disabled={!valid} label="Merge" />
           {msg && (
-            <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>
+            <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>
               {msg}
             </span>
           )}
@@ -443,7 +443,7 @@ function LinkRidersCard({ onLinked }: { onLinked: () => void }) {
 
 function Card({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
+    <div className="panel p-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold">{title}</h3>
         <button onClick={onToggle} className="text-sm text-brand underline">{open ? 'Close' : 'Open'}</button>

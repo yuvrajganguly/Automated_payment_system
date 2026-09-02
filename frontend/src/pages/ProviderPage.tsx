@@ -320,7 +320,7 @@ export function ProviderPage({ provider, cadence }: Props) {
             <button
               key={c.label}
               onClick={() => { const r = c.fn(); setFrom(r.from); setTo(r.to) }}
-              className="px-2 py-1 text-xs rounded border bg-white hover:bg-slate-50"
+              className="px-2 py-1 text-xs rounded border bg-panel hover:bg-slate-50"
             >{c.label}</button>
           ))}
           <input type="date" value={from} onChange={e => setFrom(e.target.value)}
@@ -332,14 +332,14 @@ export function ProviderPage({ provider, cadence }: Props) {
       </header>
 
       {err && (
-        <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3 py-2 rounded text-sm">
+        <div className="bg-rose-500/10 border border-rose-400/30 text-rose-300 px-3 py-2 rounded text-sm">
           {err}
         </div>
       )}
 
       {/* Empty-state — no rate card for this provider */}
       {t.no_models_registered && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded text-sm">
+        <div className="bg-amber-500/10 border border-amber-400/30 text-amber-200 px-4 py-3 rounded text-sm">
           No EV models registered under <b>{provider}</b> yet. Add at least
           one model on the rate card (Settings → EV models) before any EVs
           can be tagged as {provider}.
@@ -364,9 +364,9 @@ export function ProviderPage({ provider, cadence }: Props) {
 
       {/* Master sync result banner */}
       {masterReport && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm">
+        <div className="bg-emerald-500/10 border border-emerald-400/30 rounded p-3 text-sm">
           <div className="flex items-center justify-between mb-1">
-            <b className="text-emerald-800">Synced from {provider} master</b>
+            <b className="text-emerald-200">Synced from {provider} master</b>
             <button onClick={() => setMasterReport(null)}
                     className="text-slate-400 hover:text-slate-700 text-xs">dismiss</button>
           </div>
@@ -383,7 +383,7 @@ export function ProviderPage({ provider, cadence }: Props) {
             )}
           </div>
           {masterReport.rate_review_needed.length > 0 && (
-            <div className="mt-2 text-amber-800 bg-amber-100 px-2 py-1 rounded text-xs">
+            <div className="mt-2 text-amber-200 bg-amber-500/15 px-2 py-1 rounded text-xs">
               ⚠ Set a real weekly rate for these new models (defaulted to ₹1,250):
               <b className="ml-1">{masterReport.rate_review_needed.join(', ')}</b>
             </div>
@@ -392,13 +392,13 @@ export function ProviderPage({ provider, cadence }: Props) {
       )}
 
       {/* Per-EV table */}
-      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+      <section className="panel overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h2 className="font-semibold text-slate-700">Per-EV breakdown</h2>
           <div className="flex items-center gap-3">
             {loadingPeriod && <Spinner />}
             {canUpload && (
-              <label className="text-xs text-indigo-700 hover:text-indigo-900 cursor-pointer flex items-center gap-1"
+              <label className="text-xs text-indigo-300 hover:text-indigo-200 cursor-pointer flex items-center gap-1"
                      title="Upload the master Excel the provider sent (EV ID + model columns). New EVs get registered as spare; new model variants are auto-added with the provider's existing rate.">
                 <input ref={masterInput} type="file" accept=".xlsx,.xls,.csv,.tsv"
                        onChange={onMasterUpload} className="hidden" />
@@ -432,8 +432,8 @@ export function ProviderPage({ provider, cadence }: Props) {
                   <td className="px-3 py-2">{e.model}</td>
                   <td className="px-3 py-2">
                     <span className={'text-[10px] px-1.5 py-0.5 rounded ' +
-                      (e.status === 'in_use'     ? 'bg-emerald-100 text-emerald-700'
-                       : e.status === 'maintenance' ? 'bg-amber-100 text-amber-700'
+                      (e.status === 'in_use'     ? 'bg-emerald-500/15 text-emerald-300'
+                       : e.status === 'maintenance' ? 'bg-amber-500/15 text-amber-300'
                        :                              'bg-slate-200 text-slate-600')}>
                       {e.status}
                     </span>
@@ -443,7 +443,7 @@ export function ProviderPage({ provider, cadence }: Props) {
                   <td className="px-3 py-2 text-right">₹{fmt(e.provider_owed)}</td>
                   <td className="px-3 py-2 text-right">₹{fmt(e.rider_expected)}</td>
                   <td className="px-3 py-2 text-right">₹{fmt(e.rider_collected)}</td>
-                  <td className={'px-3 py-2 text-right ' + (e.shortfall > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400')}>
+                  <td className={'px-3 py-2 text-right ' + (e.shortfall > 0 ? 'text-rose-400 font-semibold' : 'text-slate-400')}>
                     ₹{fmt(e.shortfall)}
                   </td>
                 </tr>
@@ -459,7 +459,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       </section>
 
       {/* Per-rider reconciliation (boss report) */}
-      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+      <section className="panel overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-slate-700">Rider reconciliation — expected vs collected</h2>
@@ -468,7 +468,7 @@ export function ProviderPage({ provider, cadence }: Props) {
             </p>
           </div>
           <button onClick={downloadRecon}
-                  className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded">
+                  className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded">
             Export for boss (.xlsx)
           </button>
         </div>
@@ -492,9 +492,9 @@ export function ProviderPage({ provider, cadence }: Props) {
                   <td className="px-3 py-2">{r.name}</td>
                   <td className="px-3 py-2 text-xs text-slate-600">{r.ev_ids}</td>
                   <td className="px-3 py-2 text-right">₹{fmt(r.expected)}</td>
-                  <td className="px-3 py-2 text-right text-emerald-700">₹{fmt(r.collected)}</td>
-                  <td className="px-3 py-2 text-right text-red-600">₹{fmt(r.missed)}</td>
-                  <td className="px-3 py-2 text-right text-amber-600">₹{fmt(r.pending)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-300">₹{fmt(r.collected)}</td>
+                  <td className="px-3 py-2 text-right text-red-400">₹{fmt(r.missed)}</td>
+                  <td className="px-3 py-2 text-right text-amber-400">₹{fmt(r.pending)}</td>
                   <td className="px-3 py-2 text-right">{r.collection_pct}%</td>
                   <td className="px-3 py-2 text-xs text-slate-600">{r.settled_via || '—'}</td>
                 </tr>
@@ -503,9 +503,9 @@ export function ProviderPage({ provider, cadence }: Props) {
                 <tr className="border-t bg-slate-50 font-semibold">
                   <td className="px-3 py-2" colSpan={2}>TOTAL ({recon.totals.rider_count})</td>
                   <td className="px-3 py-2 text-right">₹{fmt(recon.totals.expected)}</td>
-                  <td className="px-3 py-2 text-right text-emerald-700">₹{fmt(recon.totals.collected)}</td>
-                  <td className="px-3 py-2 text-right text-red-600">₹{fmt(recon.totals.missed)}</td>
-                  <td className="px-3 py-2 text-right text-amber-600">₹{fmt(recon.totals.pending)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-300">₹{fmt(recon.totals.collected)}</td>
+                  <td className="px-3 py-2 text-right text-red-400">₹{fmt(recon.totals.missed)}</td>
+                  <td className="px-3 py-2 text-right text-amber-400">₹{fmt(recon.totals.pending)}</td>
                   <td className="px-3 py-2 text-right">{recon.totals.collection_pct}%</td>
                   <td className="px-3 py-2"></td>
                 </tr>
@@ -521,7 +521,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       </section>
 
       {/* Bills history */}
-      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+      <section className="panel overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h2 className="font-semibold text-slate-700">Bills uploaded by {provider}</h2>
           {canUpload && (
@@ -574,11 +574,11 @@ export function ProviderPage({ provider, cadence }: Props) {
 
       {/* Tally drawer */}
       {openBill !== null && (
-        <div className="fixed inset-0 bg-black/40 z-40 flex justify-end"
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-40 flex justify-end"
              onClick={() => { setOpenBill(null); setBillDetail(null) }}>
-          <div className="bg-white w-full max-w-3xl h-full overflow-auto shadow-xl"
+          <div className="bg-panel w-full max-w-3xl h-full overflow-auto shadow-xl"
                onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b sticky top-0 bg-white flex items-center justify-between">
+            <div className="p-4 border-b sticky top-0 bg-panel flex items-center justify-between">
               <div>
                 <h3 className="font-semibold">Bill #{openBill}</h3>
                 {billDetail && (
@@ -591,7 +591,7 @@ export function ProviderPage({ provider, cadence }: Props) {
               <div className="flex items-center gap-2">
                 {canUpload && (
                   <button onClick={() => deleteBill(openBill)}
-                          className="text-xs text-rose-600 underline">Delete</button>
+                          className="text-xs text-rose-400 underline">Delete</button>
                 )}
                 <button onClick={() => { setOpenBill(null); setBillDetail(null) }}
                         className="text-slate-400 hover:text-slate-600">✕</button>
@@ -611,14 +611,14 @@ function Card({ label, value, tone, sub }:
               { label: string; value: string; tone: string; sub?: string }) {
   const map: Record<string, string> = {
     slate:   'bg-slate-50 text-slate-700',
-    indigo:  'bg-indigo-50 text-indigo-700',
-    emerald: 'bg-emerald-50 text-emerald-700',
-    amber:   'bg-amber-50 text-amber-700',
-    sky:     'bg-sky-50 text-sky-700',
-    rose:    'bg-rose-50 text-rose-700',
+    indigo:  'bg-indigo-500/10 text-indigo-300',
+    emerald: 'bg-emerald-500/10 text-emerald-300',
+    amber:   'bg-amber-500/10 text-amber-300',
+    sky:     'bg-sky-500/10 text-sky-300',
+    rose:    'bg-rose-500/10 text-rose-300',
   }
   return (
-    <div className={'rounded-lg p-3 border ' + (map[tone] || 'bg-white')}>
+    <div className={'rounded-lg p-3 border ' + (map[tone] || 'bg-panel')}>
       <div className="text-xs uppercase tracking-wide opacity-70">{label}</div>
       <div className="text-lg font-semibold mt-1">{value}</div>
       {sub && <div className="text-[10px] opacity-60 mt-0.5">{sub}</div>}
@@ -645,8 +645,8 @@ function BillTally({ lines, billTotal }: { lines: BillLine[]; billTotal: number 
 
       <div className="grid grid-cols-3 gap-2 text-xs text-slate-600">
         <div>✅ Matched: <b>{matched.length}</b></div>
-        <div>⚠️ Discrepancy: <b className="text-amber-700">{discrepancy.length}</b></div>
-        <div>🚫 Not in our ledger: <b className="text-rose-700">{notInLedger.length}</b></div>
+        <div>⚠️ Discrepancy: <b className="text-amber-300">{discrepancy.length}</b></div>
+        <div>🚫 Not in our ledger: <b className="text-rose-300">{notInLedger.length}</b></div>
       </div>
 
       <div className="border rounded overflow-hidden">
@@ -667,29 +667,29 @@ function BillTally({ lines, billTotal }: { lines: BillLine[]; billTotal: number 
               const d = l.discrepancy
               const matched = l.our_amount !== null && Math.abs(d || 0) < 0.5
               const tone = l.our_amount === null
-                ? 'bg-rose-50'
-                : matched ? '' : 'bg-amber-50'
+                ? 'bg-rose-500/10'
+                : matched ? '' : 'bg-amber-500/10'
               return (
                 <tr key={l.id} className={'border-t ' + tone}>
                   <td className="px-3 py-2 text-slate-500 text-xs">{l.line_no}</td>
                   <td className="px-3 py-2 font-mono text-xs">{l.ev_id_raw || '—'}</td>
                   <td className="px-3 py-2 text-right">₹{fmt(l.their_amount)}</td>
                   <td className="px-3 py-2 text-right">
-                    {l.our_amount === null ? <span className="text-rose-600">—</span> : `₹${fmt(l.our_amount)}`}
+                    {l.our_amount === null ? <span className="text-rose-400">—</span> : `₹${fmt(l.our_amount)}`}
                   </td>
                   <td className={'px-3 py-2 text-right ' +
                                   (d === null ? 'text-slate-400'
-                                  : Math.abs(d) < 0.5 ? 'text-emerald-700'
-                                  : 'text-amber-700 font-semibold')}>
+                                  : Math.abs(d) < 0.5 ? 'text-emerald-300'
+                                  : 'text-amber-300 font-semibold')}>
                     {d === null ? '—' : `${d >= 0 ? '+' : ''}₹${fmt(d)}`}
                   </td>
                   <td className="px-3 py-2 text-xs text-slate-600">{l.status_note || '—'}</td>
                   <td className="px-3 py-2 text-xs">
                     {l.our_amount === null
-                      ? <span className="text-rose-700">Not in ledger</span>
+                      ? <span className="text-rose-300">Not in ledger</span>
                       : matched
-                        ? <span className="text-emerald-700">Matched</span>
-                        : <span className="text-amber-700">Discrepancy</span>}
+                        ? <span className="text-emerald-300">Matched</span>
+                        : <span className="text-amber-300">Discrepancy</span>}
                   </td>
                 </tr>
               )

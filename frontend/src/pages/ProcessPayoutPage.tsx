@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { usePersistedState } from '../state/usePersistedState'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { addDaysISO, todayISO } from '../lib/dates'
@@ -30,7 +31,10 @@ function downloadBase64(b64: string, filename: string, mime: string) {
 
 export function ProcessPayoutPage() {
   const [companies, setCompanies] = useState<Company[]>([])
-  const [company, setCompany] = useState('')
+  // Which company you process is a sticky choice — coming back to this page
+  // mid-task should not reset it. Dates deliberately stay ephemeral: they
+  // re-derive from the company's next unprocessed cycle on every visit.
+  const [company, setCompany] = usePersistedState('process:company', '')
   const [cycleStart, setCycleStart] = useState(isoToday(-7))
   const [cycleEnd, setCycleEnd] = useState(isoToday(-1))
   const [file, setFile] = useState<File | null>(null)
@@ -128,7 +132,7 @@ export function ProcessPayoutPage() {
         Commit writes everything atomically and returns the styled workbook for download.
       </p>
 
-      <form onSubmit={(e) => submit(false, e)} className="bg-white rounded-xl border border-slate-200/80 shadow-card p-6 mb-6">
+      <form onSubmit={(e) => submit(false, e)} className="panel p-6 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium mb-1">Company</label>
@@ -192,19 +196,19 @@ export function ProcessPayoutPage() {
             <span className="text-xs text-slate-500">Preview first — commit unlocks for the previewed file and dates.</span>
           )}
           {previewIsCurrent && blockers.length > 0 && (
-            <span className="text-xs text-rose-700">Cannot commit: {blockers.join('; ')}.</span>
+            <span className="text-xs text-rose-300">Cannot commit: {blockers.join('; ')}.</span>
           )}
         </div>
-        {error && <p className="text-red-600 mt-3 text-sm">{error}</p>}
+        {error && <p className="text-red-400 mt-3 text-sm">{error}</p>}
       </form>
 
       {preview && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-6">
+        <div className="panel p-6">
           <div className="flex items-baseline gap-3 mb-4 flex-wrap">
             <h2 className="text-xl font-bold">
               {preview.committed ? 'Committed' : 'Preview'} — {preview.company} cycle {preview.cycle_start} → {preview.cycle_end}
             </h2>
-            <span className={'text-xs px-2 py-0.5 rounded ' + (preview.committed ? 'bg-green-200' : 'bg-slate-200')}>
+            <span className={'text-xs px-2 py-0.5 rounded ' + (preview.committed ? 'bg-emerald-500/20' : 'bg-slate-200')}>
               {preview.committed ? 'WRITTEN' : 'DRY RUN'}
             </span>
           </div>
@@ -218,19 +222,19 @@ export function ProcessPayoutPage() {
           </div>
 
           {preview.unreadable_riders && preview.unreadable_riders.length > 0 && (
-            <div className="mb-4 bg-rose-50 border border-rose-200 rounded p-3">
-              <p className="font-medium text-rose-900">
+            <div className="mb-4 bg-rose-500/10 border border-rose-400/30 rounded p-3">
+              <p className="font-medium text-rose-200">
                 {preview.unreadable_riders.length} rider(s) have a payout cell that is not a number.
               </p>
-              <p className="text-xs text-rose-800 mt-1">
+              <p className="text-xs text-rose-300 mt-1">
                 They are kept as present (no missed-rent arrears), but nothing can be settled from
                 an unreadable amount. Fix the cells in the file and upload it again.
               </p>
-              <ul className="mt-2 text-sm text-rose-900 list-disc list-inside">
+              <ul className="mt-2 text-sm text-rose-200 list-disc list-inside">
                 {preview.unreadable_riders.map((u) => (
                   <li key={u.rider_id}>
                     <span className="font-mono">{u.rider_id}</span>{u.name ? ` — ${u.name}` : ''}:
-                    {' '}<span className="font-mono bg-rose-100 px-1 rounded">{u.cell || '(blank)'}</span>
+                    {' '}<span className="font-mono bg-rose-500/15 px-1 rounded">{u.cell || '(blank)'}</span>
                   </li>
                 ))}
               </ul>
@@ -238,11 +242,11 @@ export function ProcessPayoutPage() {
           )}
 
           {preview.auto_linked && preview.auto_linked.length > 0 && (
-            <details className="mb-4 bg-sky-50 border border-sky-200 rounded p-3">
-              <summary className="font-medium cursor-pointer text-sky-900">
+            <details className="mb-4 bg-sky-500/10 border border-sky-400/30 rounded p-3">
+              <summary className="font-medium cursor-pointer text-sky-200">
                 {preview.auto_linked.length} rider(s) linked from {preview.auto_linked[0].linked_from} by shared rider ID
               </summary>
-              <ul className="mt-2 text-sm text-sky-900 list-disc list-inside">
+              <ul className="mt-2 text-sm text-sky-200 list-disc list-inside">
                 {preview.auto_linked.map((a) => (
                   <li key={a.rider_id}><span className="font-mono">{a.rider_id}</span> → {a.name} (person #{a.person_id})</li>
                 ))}
@@ -251,12 +255,12 @@ export function ProcessPayoutPage() {
           )}
 
           {preview.unknown_riders && preview.unknown_riders.length > 0 && (
-            <div className="mb-4 bg-rose-50 border border-rose-200 rounded p-3 flex items-start justify-between gap-3">
+            <div className="mb-4 bg-rose-500/10 border border-rose-400/30 rounded p-3 flex items-start justify-between gap-3">
               <div>
-                <p className="font-medium text-rose-900">
+                <p className="font-medium text-rose-200">
                   {preview.unknown_riders.length} rider(s) in the file aren't in the database yet.
                 </p>
-                <p className="text-xs text-rose-800 mt-1">
+                <p className="text-xs text-rose-300 mt-1">
                   Onboard them now (add or link to an existing person) so they
                   get included when you commit. The list will pre-fill from the
                   file's name and hub columns.
@@ -270,11 +274,11 @@ export function ProcessPayoutPage() {
           )}
 
           {preview.warnings.length > 0 && (
-            <details className="mb-4 bg-amber-50 border border-amber-200 rounded p-3">
+            <details className="mb-4 bg-amber-500/10 border border-amber-400/30 rounded p-3">
               <summary className="font-medium cursor-pointer">
                 {preview.warnings.length} warning(s)
               </summary>
-              <ul className="mt-2 text-sm list-disc list-inside text-amber-900">
+              <ul className="mt-2 text-sm list-disc list-inside text-amber-200">
                 {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
               </ul>
             </details>
@@ -289,16 +293,16 @@ export function ProcessPayoutPage() {
             />
           )}
 
-          <Section title={`PAY (${preview.pay_rows.length})`} color="bg-green-100">
+          <Section title={`PAY (${preview.pay_rows.length})`} color="bg-emerald-500/15">
             <PayTable rows={preview.pay_rows} />
           </Section>
           {preview.dues_rows.length > 0 && (
-            <Section title={`DUES (${preview.dues_rows.length})`} color="bg-orange-100">
+            <Section title={`DUES (${preview.dues_rows.length})`} color="bg-orange-500/15">
               <PayTable rows={preview.dues_rows} />
             </Section>
           )}
           {preview.inactive_rows.length > 0 && (
-            <Section title={`INACTIVE (${preview.inactive_rows.length})`} color="bg-red-100">
+            <Section title={`INACTIVE (${preview.inactive_rows.length})`} color="bg-red-500/15">
               <InactiveTable rows={preview.inactive_rows} />
             </Section>
           )}
@@ -349,7 +353,7 @@ function PayTable({ rows }: { rows: RiderResultRow[] }) {
           const carry = Math.max(0, -r.new_balance)
           const deductions = r.payout - r.released
           return (
-            <tr key={r.rider_id + ':' + r.company} className={'border-t ' + (r.is_hold ? 'bg-amber-100' : '')}>
+            <tr key={r.rider_id + ':' + r.company} className={'border-t ' + (r.is_hold ? 'bg-amber-500/15' : '')}>
               <Td>{r.person_id}</Td><Td>{r.rider_id}</Td><Td>{r.name}</Td>
               <Td>{r.hub ?? '-'}</Td><Td>{r.vehicle ?? '-'}</Td>
               <Td>{r.ev_id ?? '-'}</Td>
@@ -451,8 +455,8 @@ function OnboardUnknownsModal({ company, unknowns, onClose, onDone }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-pop w-full max-w-6xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+      <div className="panel-pop w-full max-w-6xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold">Onboard unknown riders — {company}</h3>
@@ -541,7 +545,7 @@ function OnboardUnknownsModal({ company, unknowns, onClose, onDone }: {
 
         <div className="px-5 py-3 border-t flex justify-end items-center gap-2">
           {msg && (
-            <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>
+            <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>
               {msg}
             </span>
           )}
@@ -570,7 +574,7 @@ function InactiveTable({ rows }: { rows: InactiveRow[] }) {
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.person_id} className="border-t bg-red-50">
+          <tr key={r.person_id} className="border-t bg-red-500/10">
             <Td>{r.person_id}</Td>
             <Td>{r.name}</Td>
             <Td>{r.vehicle ?? '-'}</Td>

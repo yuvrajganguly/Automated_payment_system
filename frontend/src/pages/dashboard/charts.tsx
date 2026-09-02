@@ -9,23 +9,24 @@
  * - A legend whenever there are ≥2 series; text always wears ink colors,
  *   never the series color.
  *
- * Palette (validated for CVD + normal-vision separation on the light
- * surface; the aqua slot carries a contrast warning, so every chart is
- * paired with a data table in its tab):
- *   blue #2a78d6 · aqua #1baf7a · red #d03b3b · orange #eb6834
- * Red and orange are never used in the same chart (they fail the
- * normal-vision separation floor against each other).
+ * Palette: see the validated dark-mode constants below. Red and orange are
+ * never used in the same chart (they fail the normal-vision separation
+ * floor against each other); every chart is paired with a data table.
  */
 import { useRef, useState } from 'react'
 import { money, moneyWhole } from '../../lib/format'
 
+// Dark-mode steps of the same hues, validated on the midnight surface
+// (#0d111a): lightness band, chroma, CVD + normal-vision separation and
+// ≥3:1 surface contrast all pass; the aqua↔red pair sits in the 6–8 CVD
+// warn band, covered by legends, direct tooltips and each tab's data table.
 export const C = {
-  blue: '#2a78d6',
-  aqua: '#1baf7a',
-  red: '#d03b3b',
-  orange: '#eb6834',
-  grid: '#e7e5e4',
-  ink: '#64748b',
+  blue: '#3987e5',
+  aqua: '#199e70',
+  red: '#e66767',
+  orange: '#d95926',
+  grid: '#232a38',
+  ink: '#7d879d',
 } as const
 
 export interface Series {
@@ -105,7 +106,7 @@ function TooltipBox({
   const right = tip.xPct > 60 ? `calc(${100 - tip.xPct}% + 10px)` : undefined
   return (
     <div
-      className="absolute z-20 pointer-events-none bg-white border border-slate-200 shadow-lg rounded-md px-2.5 py-1.5 text-xs"
+      className="absolute z-20 pointer-events-none panel-pop !rounded-md px-2.5 py-1.5 text-xs"
       style={{ left, right, top: `${Math.min(tip.yPct, 55)}%` }}
     >
       <p className="font-medium text-slate-700 mb-0.5">{title}</p>
@@ -223,7 +224,7 @@ export function LineChart({
               cy={y(s.values[tip.index] ?? 0)}
               r="4"
               fill={s.color}
-              stroke="#fcfcfb"
+              stroke="#0e1220"
               strokeWidth="2"
             />
           ))}
@@ -297,7 +298,7 @@ export function StackedBarChart({
                       key={g.s.key}
                       d={`M ${x0} ${g.y0 + g.h} L ${x0} ${g.y0 + r} Q ${x0} ${g.y0} ${x0 + r} ${g.y0} L ${x0 + barW - r} ${g.y0} Q ${x0 + barW} ${g.y0} ${x0 + barW} ${g.y0 + r} L ${x0 + barW} ${g.y0 + g.h} Z`}
                       fill={g.s.color}
-                      stroke="#fcfcfb"
+                      stroke="#0e1220"
                       strokeWidth="1"
                     />
                   )
@@ -310,7 +311,7 @@ export function StackedBarChart({
                     width={barW}
                     height={g.h}
                     fill={g.s.color}
-                    stroke="#fcfcfb"
+                    stroke="#0e1220"
                     strokeWidth="1"
                   />
                 )

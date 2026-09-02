@@ -39,8 +39,8 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-8 w-full max-w-sm">
+    <div className="auth-bg min-h-screen flex items-center justify-center">
+      <div className="panel p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold mb-1">Payout System</h1>
         <p className="text-slate-500 text-sm mb-6">
           {stage === 'request' ? 'Enter your email and we\'ll send a 6-digit code.'
@@ -81,7 +81,7 @@ export function ForgotPasswordPage() {
         )}
 
         {stage === 'done' && (
-          <p className="text-green-700 text-sm">Password updated. Redirecting to sign-in…</p>
+          <p className="text-emerald-300 text-sm">Password updated. Redirecting to sign-in…</p>
         )}
 
         <p className="text-xs text-slate-500 mt-6">
@@ -107,5 +107,5 @@ function Submit({ busy, label }: { busy: boolean; label: string }) {
   </button>
 }
 function Msg({ tone, children }: { tone: 'ok' | 'err'; children: React.ReactNode }) {
-  return <p className={'text-sm mt-3 ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>{children}</p>
+  return <p className={'text-sm mt-3 ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{children}</p>
 }

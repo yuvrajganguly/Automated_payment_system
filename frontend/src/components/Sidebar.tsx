@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { rememberedPath } from '../state/useRouteMemory'
 
@@ -33,24 +33,42 @@ const SECTIONS: { heading?: string; items: { to: string; label: string; end?: bo
 
 const CREATOR_NAV = [{ to: '/system', label: 'System' }]
 
-const heading = 'mt-6 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 px-3'
+const heading =
+  'mt-6 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400/80 px-3'
+
 const linkClass = ({ isActive }: { isActive: boolean }) =>
-  'relative px-3 py-[7px] rounded-lg text-[13px] leading-5 transition-colors duration-100 ' +
+  'group relative px-3 py-[7px] rounded-lg text-[13px] leading-5 ' +
+  'transition-all duration-150 ease-out ' +
   (isActive
-    ? 'bg-brand-500/15 text-white font-semibold ' +
+    ? 'text-white font-semibold bg-gradient-to-r from-brand-500/20 to-brand-500/[0.06] ' +
+      'shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(57,135,229,0.22)] ' +
       'before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] ' +
-      'before:rounded-full before:bg-brand-400'
-    : 'text-slate-400 hover:text-white hover:bg-white/5')
+      'before:rounded-full before:bg-brand-400 ' +
+      'before:shadow-[0_0_8px_rgba(84,154,233,0.8)]'
+    : 'text-slate-500 hover:text-slate-800 hover:bg-white/[0.04] hover:translate-x-[2px]')
 
 export function Sidebar() {
   const { user, logout } = useAuth()
+  const { pathname, search } = useLocation()
   const isCreator = user?.role === 'creator'
+
+  // Route memory is written by an effect AFTER render, so at render time the
+  // stored value for the CURRENT route is one navigation behind — clicking
+  // the section you're already in used to reset its tabs/filters. The live
+  // location is the truth for the active route; storage covers the rest.
+  const linkTo = (to: string) => (pathname === to ? pathname + search : rememberedPath(to))
+
   return (
-    <aside className="w-56 shrink-0 bg-ink-900 text-slate-300 flex flex-col border-r border-black/40
-                      sticky top-0 h-screen overflow-y-auto px-3 py-5">
+    <aside className="w-56 shrink-0 sticky top-0 h-screen overflow-y-auto px-3 py-5 flex flex-col
+                      bg-gradient-to-b from-ink-800 to-ink-950
+                      border-r border-white/[0.06]
+                      shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)]">
       <div className="flex items-center gap-2.5 mb-4 px-2">
-        <div className="h-8 w-8 rounded-lg bg-brand-500 grid place-items-center
-                        font-display font-bold text-white text-sm">P</div>
+        <div className="h-8 w-8 rounded-lg grid place-items-center font-display font-bold text-white text-sm
+                        bg-gradient-to-br from-brand-400 to-brand-800
+                        shadow-[0_0_0_1px_rgba(122,178,242,0.35),0_2px_12px_-2px_rgba(57,135,229,0.7)]">
+          P
+        </div>
         <span className="text-[15px] font-display font-semibold tracking-tight text-white">
           Payout
         </span>
@@ -60,7 +78,7 @@ export function Sidebar() {
           <div key={section.heading ?? i} className="flex flex-col gap-0.5">
             {section.heading && <div className={heading}>{section.heading}</div>}
             {section.items.map((item) => (
-              <NavLink key={item.to} to={rememberedPath(item.to)} end={item.end} className={linkClass}>
+              <NavLink key={item.to} to={linkTo(item.to)} end={item.end} className={linkClass}>
                 {item.label}
               </NavLink>
             ))}
@@ -72,12 +90,13 @@ export function Sidebar() {
             {CREATOR_NAV.map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={linkTo(item.to)}
                 className={({ isActive }) =>
-                  'px-3 py-[7px] rounded-lg text-[13px] transition-colors duration-100 ' +
+                  'px-3 py-[7px] rounded-lg text-[13px] transition-all duration-150 ' +
                   (isActive
-                    ? 'bg-fuchsia-500/20 text-white font-semibold'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5')
+                    ? 'bg-fuchsia-500/15 text-white font-semibold ' +
+                      'shadow-[0_0_0_1px_rgba(217,70,239,0.25)]'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-white/[0.04]')
                 }
               >
                 {item.label}
@@ -86,17 +105,17 @@ export function Sidebar() {
           </>
         )}
       </nav>
-      <div className="mt-auto pt-4 border-t border-white/10 text-xs px-2">
-        <p className="font-medium text-slate-200 truncate">{user?.email}</p>
+      <div className="mt-auto pt-4 border-t border-white/[0.06] text-xs px-2">
+        <p className="font-medium text-slate-700 truncate">{user?.email}</p>
         <div className="mt-1.5 mb-2.5 flex items-center gap-2">
           <span className={'pill ring-1 ' +
             (user?.role === 'creator' ? 'bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-400/25'
              : user?.role === 'admin' ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/25'
-             :                          'bg-white/10 text-slate-300 ring-white/15')}>
+             :                          'bg-white/10 text-slate-600 ring-white/15')}>
             {user?.role}
           </span>
           <button onClick={logout}
-                  className="text-[11px] text-slate-500 hover:text-white transition-colors">
+                  className="text-[11px] text-slate-400 hover:text-slate-800 transition-colors">
             Log out
           </button>
         </div>

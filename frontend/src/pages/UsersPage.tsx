@@ -38,9 +38,9 @@ export function UsersPage() {
       {isCreator && <AddUserCard onAdded={reload} />}
 
       {busy && <Spinner />}
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -94,8 +94,8 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
           <select value={row.role} onChange={(e) => setRole(e.target.value)}
                   disabled={busy === 'role'}
                   className={'text-xs border rounded px-2 py-0.5 ' +
-                    (row.role === 'creator' ? 'bg-purple-100'
-                     : row.role === 'admin' ? 'bg-emerald-100'
+                    (row.role === 'creator' ? 'bg-purple-500/15'
+                     : row.role === 'admin' ? 'bg-emerald-500/15'
                      :                        'bg-slate-100')}>
             <option value="user">user</option>
             <option value="admin">admin</option>
@@ -103,14 +103,14 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
           </select>
         ) : (
           <span className={'text-xs px-1.5 py-0.5 rounded ' +
-            (row.role === 'creator' ? 'bg-purple-100'
-             : row.role === 'admin' ? 'bg-emerald-100'
+            (row.role === 'creator' ? 'bg-purple-500/15'
+             : row.role === 'admin' ? 'bg-emerald-500/15'
              :                        'bg-slate-100')}>{row.role}</span>
         )}
       </Td>
       <Td>
         <span className={'text-xs px-1.5 py-0.5 rounded ' +
-          (row.is_active ? 'bg-green-100' : 'bg-red-100')}>
+          (row.is_active ? 'bg-emerald-500/15' : 'bg-red-500/15')}>
           {row.is_active ? 'yes' : 'no'}
         </span>
       </Td>
@@ -121,7 +121,7 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
                   className="text-xs underline text-brand disabled:opacity-30">
             {row.is_active ? 'Deactivate' : 'Reactivate'}
           </button>
-          {error && <div className="text-xs text-red-600 mt-1">{error}</div>}
+          {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
         </Td>
       )}
     </tr>
@@ -148,7 +148,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-4">
+    <div className="panel p-4 mb-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm">Add user</h3>
         <button onClick={() => setOpen(!open)} className="text-xs text-brand underline">
@@ -184,7 +184,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
                     className="bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
               {busy ? '…' : 'Add'}
             </button>
-            {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>{msg}</span>}
+            {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
           </div>
         </form>
       )}

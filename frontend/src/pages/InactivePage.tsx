@@ -58,7 +58,7 @@ export function InactivePage() {
         Per-cycle inactive lists in the workbook are scoped to that cycle's company; this view aggregates across all.
       </p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-4 flex flex-wrap gap-4 items-end">
+      <div className="panel p-4 mb-4 flex flex-wrap gap-4 items-end">
         <div>
           <label className="block text-xs font-medium mb-1">Considered inactive after</label>
           <select value={days} onChange={(e) => setDays(parseInt(e.target.value))}
@@ -88,9 +88,9 @@ export function InactivePage() {
         <Stat label="EV-rent arrears" value={fmt(totals.arrears)} bad />
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -120,10 +120,10 @@ export function InactivePage() {
                 <Td className="text-xs">{r.handover_date ?? '-'}</Td>
                 <Td className="text-xs">{r.rent_charged_through ?? '-'}</Td>
                 <Td className="text-xs">{r.last_seen_cycle ?? 'never'}</Td>
-                <Td right className={r.current_balance < 0 ? 'text-red-700 font-medium' : ''}>
+                <Td right className={r.current_balance < 0 ? 'text-red-300 font-medium' : ''}>
                   {fmt(Math.max(0, -r.current_balance))}
                 </Td>
-                <Td right className={r.arrears_outstanding > 0 ? 'text-red-700 font-medium' : ''}>
+                <Td right className={r.arrears_outstanding > 0 ? 'text-red-300 font-medium' : ''}>
                   {fmt(r.arrears_outstanding)}
                 </Td>
                 <Td className="text-xs">{r.reason}</Td>
@@ -142,9 +142,9 @@ export function InactivePage() {
 }
 
 function Stat({ label, value, bad }: { label: string; value: string; bad?: boolean }) {
-  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3">
+  return <div className="panel p-3">
     <p className="text-xs text-slate-500">{label}</p>
-    <p className={'text-lg font-semibold ' + (bad ? 'text-red-600' : '')}>{value}</p>
+    <p className={'text-lg font-semibold ' + (bad ? 'text-red-400' : '')}>{value}</p>
   </div>
 }
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {

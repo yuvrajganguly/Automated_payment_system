@@ -29,7 +29,7 @@ export function SettingsPage() {
       <h1 className="text-2xl font-bold mb-1">Settings</h1>
       <p className="text-slate-500 text-sm mb-6">Your account and password.</p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 mb-6">
+      <div className="panel p-4 mb-6">
         <h3 className="font-semibold mb-2">Profile</h3>
         <dl className="text-sm grid grid-cols-2 gap-y-1">
           <dt className="text-slate-500">Email</dt><dd>{user?.email}</dd>
@@ -37,15 +37,15 @@ export function SettingsPage() {
         </dl>
       </div>
 
-      <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
+      <form onSubmit={submit} className="panel p-4">
         <h3 className="font-semibold mb-3">Change Password</h3>
         <div className="grid gap-3">
           <Field label="Current password" type="password" v={current} on={setCurrent} />
           <Field label="New password" type="password" v={next} on={setNext} />
           <Field label="Confirm new password" type="password" v={confirm} on={setConfirm} />
         </div>
-        {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
-        {msg && <p className="text-green-700 text-sm mt-3">{msg}</p>}
+        {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
+        {msg && <p className="text-emerald-300 text-sm mt-3">{msg}</p>}
         <button type="submit" disabled={busy || !current || !next || !confirm}
                 className="mt-4 bg-brand hover:bg-brand-700 text-white px-4 py-2 rounded disabled:opacity-50">
           {busy ? 'Updating…' : 'Update Password'}

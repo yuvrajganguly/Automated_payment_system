@@ -92,7 +92,7 @@ export function PaymentsPage() {
       {isAdmin && <UploadCard onUploaded={(id) => { reloadList(); setPicked(id) }} />}
 
       <h2 className="font-semibold mt-6 mb-2">Recent uploads</h2>
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -107,16 +107,16 @@ export function PaymentsPage() {
           <tbody>
             {uploads.map((u) => (
               <tr key={u.id} className={'border-t hover:bg-slate-50 ' +
-                                       (picked === u.id ? 'bg-amber-50' : '')}>
+                                       (picked === u.id ? 'bg-amber-500/10' : '')}>
                 <Td>{u.file_name}</Td>
                 <Td className="text-xs">{u.uploaded_at ?? ''}</Td>
                 <Td className="text-xs">{u.uploaded_by ?? ''}</Td>
                 <Td right>{u.line_count}</Td>
-                <Td right className="text-emerald-700">{u.success_count}</Td>
-                <Td right className={u.failed_count > 0 ? 'text-red-700 font-semibold' : 'text-slate-400'}>
+                <Td right className="text-emerald-300">{u.success_count}</Td>
+                <Td right className={u.failed_count > 0 ? 'text-red-300 font-semibold' : 'text-slate-400'}>
                   {u.failed_count}
                 </Td>
-                <Td right className={u.unmatched_count > 0 ? 'text-amber-700' : 'text-slate-400'}>
+                <Td right className={u.unmatched_count > 0 ? 'text-amber-300' : 'text-slate-400'}>
                   {u.unmatched_count}
                 </Td>
                 <Td>
@@ -136,7 +136,7 @@ export function PaymentsPage() {
         )}
       </div>
 
-      {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
       {busy && <Spinner />}
 
       {detail && (
@@ -180,7 +180,7 @@ function UploadCard({ onUploaded }: { onUploaded: (id: number) => void }) {
     } finally { setBusy(false) }
   }
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4 flex flex-wrap gap-3 items-end">
+    <div className="panel p-4 flex flex-wrap gap-3 items-end">
       <label className="block flex-1 min-w-[260px]">
         <span className="block text-xs text-slate-600">Bank MIS PDF</span>
         <input type="file" accept=".pdf"
@@ -191,7 +191,7 @@ function UploadCard({ onUploaded }: { onUploaded: (id: number) => void }) {
               className="bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
         {busy ? 'Parsing…' : 'Upload & parse'}
       </button>
-      {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-600' : 'text-green-700')}>{msg}</span>}
+      {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
     </div>
   )
 }
@@ -226,24 +226,24 @@ function UploadDetail({ detail, isAdmin, onChanged }:
       </h2>
 
       {absent.length > 0 && (
-        <details className="mb-3 bg-rose-50 border border-rose-200 rounded p-3" open>
-          <summary className="cursor-pointer font-medium text-rose-900">
+        <details className="mb-3 bg-rose-500/10 border border-rose-400/30 rounded p-3" open>
+          <summary className="cursor-pointer font-medium text-rose-200">
             {absent.length} rider(s) completely absent from this file
             {detail.window && (
-              <span className="ml-2 text-xs text-rose-700 font-normal">
+              <span className="ml-2 text-xs text-rose-300 font-normal">
                 (window {detail.window.from} → {detail.window.to})
               </span>
             )}
           </summary>
-          <p className="text-xs text-rose-800 mt-1 mb-2">
+          <p className="text-xs text-rose-300 mt-1 mb-2">
             They had a RELEASE in a cycle that overlaps this bank statement
             but their name and account number don't appear in any line.
             Probably paid by UPI or yet to be paid. Matched by name and
             account, not internal ID.
           </p>
-          <div className="overflow-x-auto bg-white rounded border border-rose-100">
+          <div className="overflow-x-auto bg-panel rounded border border-rose-400/25">
             <table className="w-full text-xs">
-              <thead className="bg-rose-100 text-left">
+              <thead className="bg-rose-500/15 text-left">
                 <tr>
                   <Th>Person</Th>
                   <Th>Name</Th>
@@ -267,7 +267,7 @@ function UploadDetail({ detail, isAdmin, onChanged }:
                       {a.earliest_cycle} → {a.latest_cycle}
                     </Td>
                     <Td className="text-[11px] font-mono">{a.accounts}</Td>
-                    <Td right className="font-semibold text-rose-700">
+                    <Td right className="font-semibold text-rose-300">
                       {fmt(a.expected_amount)}
                     </Td>
                   </tr>
@@ -288,7 +288,7 @@ function UploadDetail({ detail, isAdmin, onChanged }:
           </button>
         ))}
       </div>
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -341,10 +341,10 @@ function LineRow({ line, mode, isAdmin, onChanged }:
 
   const matchPill =
     line.match_status === 'matched'
-      ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100">acc+ifsc</span>
+      ? <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/15">acc+ifsc</span>
       : line.match_status === 'name_matched'
-      ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100">by name</span>
-      : <span className="text-xs px-1.5 py-0.5 rounded bg-red-100">none</span>
+      ? <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15">by name</span>
+      : <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/15">none</span>
 
   return (
     <tr className="border-t hover:bg-slate-50">
@@ -365,7 +365,7 @@ function LineRow({ line, mode, isAdmin, onChanged }:
       <Td>
         <span className={'text-xs px-1.5 py-0.5 rounded ' +
           ((line.bank_status || '').toLowerCase().startsWith('success')
-            ? 'bg-green-100' : 'bg-red-100')}>
+            ? 'bg-emerald-500/15' : 'bg-red-500/15')}>
           {line.bank_status || '-'}
         </span>
       </Td>
@@ -387,7 +387,7 @@ function LineRow({ line, mode, isAdmin, onChanged }:
                     title="Bank failed; credit the rider's ledger so the amount carries.">
               {busy === 'credit' ? '…' : 'Add to ledger'}
             </button>
-            {error && <span className="text-xs text-red-600">{error}</span>}
+            {error && <span className="text-xs text-red-400">{error}</span>}
           </div>
         </Td>
       )}
@@ -395,7 +395,7 @@ function LineRow({ line, mode, isAdmin, onChanged }:
         <Td>
           <span className={'text-xs px-1.5 py-0.5 rounded ' +
             (line.resolution_method === 'upi_paid'
-              ? 'bg-emerald-100' : 'bg-amber-100')}>
+              ? 'bg-emerald-500/15' : 'bg-amber-500/15')}>
             {line.resolution_method === 'upi_paid' ? 'paid via UPI' : 'credited ledger'}
           </span>
           <div className="text-xs text-slate-500 mt-1">

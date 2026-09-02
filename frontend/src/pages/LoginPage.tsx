@@ -42,8 +42,9 @@ export function LoginPage() {
     <div className="auth-bg min-h-screen flex items-center justify-center p-6">
       <div className="w-full max-w-sm animate-fade-up">
         <div className="flex items-center gap-2.5 mb-6 justify-center">
-          <div className="h-10 w-10 rounded-xl bg-white/10 ring-1 ring-white/15 grid place-items-center
-                          font-display font-bold text-white text-lg">P</div>
+          <div className="h-10 w-10 rounded-xl grid place-items-center font-display font-bold text-white text-lg
+                          bg-gradient-to-br from-brand-400 to-brand-800
+                          shadow-[0_0_0_1px_rgba(122,178,242,0.35),0_2px_16px_-2px_rgba(57,135,229,0.7)]">P</div>
           <span className="text-xl font-display font-semibold tracking-tight text-white">Payout System</span>
         </div>
         <form onSubmit={onSubmit}
@@ -72,8 +73,7 @@ export function LoginPage() {
 
           <button
             type="submit" disabled={busy}
-            className="w-full bg-white text-midnight-900 font-semibold py-2.5 rounded-lg text-sm
-                       hover:bg-silver-200 hover:shadow-glow transition-all disabled:opacity-60"
+            className="w-full btn-primary justify-center !py-2.5 disabled:opacity-60"
           >
             {busy ? 'Signing in…' : 'Sign in'}
           </button>

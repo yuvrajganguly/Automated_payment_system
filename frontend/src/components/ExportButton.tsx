@@ -46,14 +46,14 @@ export function ExportButton({ path, name, query, ids, className = '' }: Props) 
     <span className="inline-flex items-center gap-2">
       <button onClick={go} disabled={busy}
               className={
-                'text-sm bg-emerald-600 hover:bg-emerald-700 text-white ' +
+                'text-sm bg-emerald-600 hover:bg-emerald-500 text-white ' +
                 'px-3 py-1.5 rounded inline-flex items-center gap-1 ' +
                 'disabled:opacity-50 ' + className
               }>
         <span aria-hidden="true">⬇</span>
         {busy ? 'Exporting…' : 'Export to Excel'}
       </button>
-      {error && <span role="alert" className="text-xs text-rose-600">{error}</span>}
+      {error && <span role="alert" className="text-xs text-rose-400">{error}</span>}
     </span>
   )
 }

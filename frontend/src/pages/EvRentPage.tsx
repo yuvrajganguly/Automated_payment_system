@@ -168,10 +168,10 @@ export function EvRentPage() {
       </div>
 
       {busy && <Spinner />}
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} cycles.</p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -214,30 +214,30 @@ export function EvRentPage() {
                     <Td>{r.cycle_end}</Td>
                     <Td right>{r.rider_count}</Td>
                     <Td right>{fmt(r.expected_rent)}</Td>
-                    <Td right className="text-emerald-700 font-medium">{fmt(r.collected_rent)}</Td>
-                    <Td right className={(r.prior_recovered ?? 0) > 0 ? 'text-emerald-600 italic' : 'text-slate-400'}
+                    <Td right className="text-emerald-300 font-medium">{fmt(r.collected_rent)}</Td>
+                    <Td right className={(r.prior_recovered ?? 0) > 0 ? 'text-emerald-400 italic' : 'text-slate-400'}
                         title="Of the collected total, this much was recovery of prior-cycle pending or arrears (not new rent owed this cycle).">
                       {fmt(r.prior_recovered ?? 0)}
                     </Td>
-                    <Td right className={r.rolled_forward > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'}
+                    <Td right className={r.rolled_forward > 0 ? 'text-amber-300 font-semibold' : 'text-slate-400'}
                         title={(r.rolled_recovered_later ?? 0) > 0
                           ? `${fmt(r.rolled_recovered_later)} of this was recovered later — net ${fmt(r.rolled_forward_net)}`
                           : undefined}>
                       {(r.rolled_recovered_later ?? 0) > 0 ? (
                         <>
                           <span className="line-through text-slate-400 mr-1">{fmt(r.rolled_forward)}</span>
-                          <span className="text-emerald-700">{fmt(r.rolled_forward_net)}</span>
+                          <span className="text-emerald-300">{fmt(r.rolled_forward_net)}</span>
                         </>
                       ) : fmt(r.rolled_forward)}
                     </Td>
-                    <Td right className={r.arrears_rent > 0 ? 'text-red-700 font-semibold' : 'text-slate-400'}
+                    <Td right className={r.arrears_rent > 0 ? 'text-red-300 font-semibold' : 'text-slate-400'}
                         title={(r.arrears_recovered_later ?? 0) > 0
                           ? `${fmt(r.arrears_recovered_later)} of this was recovered later — net ${fmt(r.arrears_net)}`
                           : undefined}>
                       {(r.arrears_recovered_later ?? 0) > 0 ? (
                         <>
                           <span className="line-through text-slate-400 mr-1">{fmt(r.arrears_rent)}</span>
-                          <span className="text-emerald-700">{fmt(r.arrears_net)}</span>
+                          <span className="text-emerald-300">{fmt(r.arrears_net)}</span>
                         </>
                       ) : fmt(r.arrears_rent)}
                     </Td>
@@ -271,7 +271,7 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
   if (rows.length === 0) return <p className="text-xs text-slate-500">No riders billed.</p>
   return (
     <table className="w-full text-xs">
-      <thead className="bg-white text-left">
+      <thead className="bg-panel text-left">
         <tr>
           <th className="px-2 py-1">Person</th>
           <th className="px-2 py-1">Rider ID</th>
@@ -297,31 +297,31 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
             <td className="px-2 py-1">{r.hub ?? '-'}</td>
             <td className="px-2 py-1">{r.days_billed ?? '-'}</td>
             <td className="px-2 py-1 text-right">{fmt(r.expected_rent)}</td>
-            <td className="px-2 py-1 text-right text-emerald-700">{fmt(r.collected_rent)}</td>
-            <td className={'px-2 py-1 text-right italic ' + ((r.prior_recovered ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-300')}>
+            <td className="px-2 py-1 text-right text-emerald-300">{fmt(r.collected_rent)}</td>
+            <td className={'px-2 py-1 text-right italic ' + ((r.prior_recovered ?? 0) > 0 ? 'text-emerald-400' : 'text-slate-300')}>
               {fmt(r.prior_recovered ?? 0)}
             </td>
-            <td className={'px-2 py-1 text-right ' + (r.rolled_forward > 0 ? 'text-amber-700 font-medium' : '')}
+            <td className={'px-2 py-1 text-right ' + (r.rolled_forward > 0 ? 'text-amber-300 font-medium' : '')}
                 title={(r.future_xc_recovered ?? 0) > 0
                   ? `${fmt(r.future_xc_recovered ?? 0)} of this was recovered at a later cycle`
                   : undefined}>
               {(r.future_xc_recovered ?? 0) > 0 ? (
                 <>
                   <span className="line-through text-slate-400 mr-1">{fmt(r.rolled_forward)}</span>
-                  <span className="text-emerald-700">
+                  <span className="text-emerald-300">
                     {fmt(Math.max(0, r.rolled_forward - (r.future_xc_recovered ?? 0)))}
                   </span>
                 </>
               ) : fmt(r.rolled_forward)}
             </td>
-            <td className={'px-2 py-1 text-right ' + (r.arrears_rent > 0 ? 'text-red-700 font-medium' : '')}
+            <td className={'px-2 py-1 text-right ' + (r.arrears_rent > 0 ? 'text-red-300 font-medium' : '')}
                 title={(r.future_arrears_recovered ?? 0) > 0
                   ? `${fmt(r.future_arrears_recovered ?? 0)} of this was recovered at a later cycle`
                   : undefined}>
               {(r.future_arrears_recovered ?? 0) > 0 ? (
                 <>
                   <span className="line-through text-slate-400 mr-1">{fmt(r.arrears_rent)}</span>
-                  <span className="text-emerald-700">
+                  <span className="text-emerald-300">
                     {fmt(Math.max(0, r.arrears_rent - (r.future_arrears_recovered ?? 0)))}
                   </span>
                 </>
@@ -329,11 +329,11 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
             </td>
             <td className="px-2 py-1">
               <span className={'text-xs px-1.5 py-0.5 rounded ' +
-                (r.status === 'paid'               ? 'bg-green-100'
-                 : r.status === 'recovered'         ? 'bg-emerald-200 text-emerald-900'
-                 : r.status === 'partial_recovered' ? 'bg-teal-100 text-teal-900'
-                 : r.status === 'inactive'          ? 'bg-red-100'
-                 :                                    'bg-amber-100')}
+                (r.status === 'paid'               ? 'bg-emerald-500/15'
+                 : r.status === 'recovered'         ? 'bg-emerald-500/20 text-emerald-200'
+                 : r.status === 'partial_recovered' ? 'bg-teal-500/15 text-teal-200'
+                 : r.status === 'inactive'          ? 'bg-red-500/15'
+                 :                                    'bg-amber-500/15')}
                 title={r.status === 'recovered'
                        ? 'Originally inactive/partial here; rent fully recovered at a later cycle.'
                        : r.status === 'partial_recovered'
@@ -352,14 +352,14 @@ function RiderBreakdown({ rows }: { rows: RiderLine[] }) {
 function Stat({ label, value, tone, sub }:
   { label: string; value: string; sub?: string
     tone: 'expected' | 'charged' | 'rolled' | 'missed' }) {
-  const ring = tone === 'missed'   ? 'border-l-4 border-red-400'
-             : tone === 'rolled'   ? 'border-l-4 border-amber-400'
-             : tone === 'charged'  ? 'border-l-4 border-emerald-400'
-             :                       'border-l-4 border-slate-400'
-  return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-card p-3 ' + ring}>
+  const ring = tone === 'missed'   ? 'border-l-[3px] border-l-red-400'
+             : tone === 'rolled'   ? 'border-l-[3px] border-l-amber-400'
+             : tone === 'charged'  ? 'border-l-[3px] border-l-emerald-400'
+             :                       'border-l-[3px] border-l-slate-400'
+  return <div className={'panel p-3 ' + ring}>
     <p className="text-xs text-slate-500">{label}</p>
     <p className="text-lg font-bold">{value}</p>
-    {sub && <p className="text-[10px] text-emerald-700 mt-0.5">{sub}</p>}
+    {sub && <p className="text-[10px] text-emerald-300 mt-0.5">{sub}</p>}
   </div>
 }
 function Th({ children }: { children: React.ReactNode }) {

@@ -98,10 +98,10 @@ export function CodPage() {
       </div>
 
       {busy && <Spinner />}
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} riders.</p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -123,7 +123,7 @@ export function CodPage() {
                 <Td>{r.display_name}</Td>
                 <Td className="text-xs">{r.companies || '-'}</Td>
                 <Td className="text-xs">{r.hubs || '-'}</Td>
-                <Td right className="font-semibold text-red-700">{fmt(r.total_pending)}</Td>
+                <Td right className="font-semibold text-red-300">{fmt(r.total_pending)}</Td>
                 <Td right>{r.entry_count}</Td>
                 <Td right>{r.recent_payout != null ? fmt(r.recent_payout) : '-'}</Td>
                 <Td className="text-xs">{r.recent_payout_cycle ?? '-'}</Td>
@@ -199,8 +199,8 @@ function ClearModal({ row, onClose, onCleared }:
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-pop w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 z-50">
+      <div className="panel-pop w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
             <h3 className="font-semibold">Mark COD cleared — {row.display_name}</h3>
@@ -279,7 +279,7 @@ function ClearModal({ row, onClose, onCleared }:
             </p>
           </div>
 
-          {error && <p className="text-red-600 text-xs mt-3">{error}</p>}
+          {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
         </div>
         <div className="px-5 py-3 border-t flex justify-end gap-2">
           <button onClick={onClose} disabled={busy}
@@ -295,7 +295,7 @@ function ClearModal({ row, onClose, onCleared }:
 }
 
 function Stat({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-3">
+  return <div className="panel p-3">
     <p className="text-xs text-slate-500">{label}</p>
     <p className={'text-lg ' + (bold ? 'font-bold' : 'font-semibold')}>{value}</p>
   </div>

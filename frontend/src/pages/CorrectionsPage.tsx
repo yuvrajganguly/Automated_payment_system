@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useUrlString } from '../state/useUrlState'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useApi } from '../hooks/useApi'
@@ -50,10 +51,10 @@ interface Correction {
 
 const EVENT_TONE: Record<string, string> = {
   ADJUSTMENT: 'bg-brand-50 text-brand-700',
-  RENT_REVERSAL: 'bg-amber-50 text-amber-700',
+  RENT_REVERSAL: 'bg-amber-500/10 text-amber-300',
   OPENING: 'bg-slate-100 text-slate-600',
-  RENT_RECOVERED: 'bg-emerald-50 text-emerald-700',
-  RENT_COLLECTED: 'bg-emerald-50 text-emerald-700',
+  RENT_RECOVERED: 'bg-emerald-500/10 text-emerald-300',
+  RENT_COLLECTED: 'bg-emerald-500/10 text-emerald-300',
 }
 
 function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
@@ -100,7 +101,7 @@ function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
         {s.last_payout_end ? <span className="text-slate-400"> · last payout {s.last_payout_end}</span> : null}
       </div>
       {result ? (
-        <div className="text-sm text-emerald-700">{result}</div>
+        <div className="text-sm text-emerald-300">{result}</div>
       ) : (
         <div className="flex items-center gap-2">
           <label className="text-xs text-slate-500">Returned on</label>
@@ -121,7 +122,7 @@ function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
 
 export function CorrectionsPage() {
   const suspects = useApi<Suspect[]>('/evs/suspected-returns')
-  const [eventType, setEventType] = useState('')
+  const [eventType, setEventType] = useUrlString('type')
   const feed = useApi<Correction[]>(
     `/corrections?limit=200${eventType ? `&event_type=${eventType}` : ''}`,
     [eventType],
@@ -134,7 +135,7 @@ export function CorrectionsPage() {
         Suspected EV returns to confirm, and the log of every manual change to the books.
       </p>
 
-      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card mb-6 overflow-hidden">
+      <section className="panel mb-6 overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between bg-slate-50/60 border-b border-slate-100">
           <h2 className="font-semibold text-slate-800 text-sm">Suspected returns</h2>
           <span className="text-xs text-slate-500">
@@ -155,11 +156,11 @@ export function CorrectionsPage() {
         )}
       </section>
 
-      <section className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+      <section className="panel overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between gap-3 bg-slate-50/60 border-b border-slate-100">
           <h2 className="font-semibold text-slate-800 text-sm">Manual changes</h2>
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white">
+                  className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-panel">
             <option value="">All types</option>
             <option value="ADJUSTMENT">Adjustments</option>
             <option value="RENT_REVERSAL">Arrears reversals</option>

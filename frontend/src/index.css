@@ -2,61 +2,160 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Midnight design system — base layer.
+   Deep layered blacks, hairline edges, one restrained accent, motion that is
+   fast and purposeful. Every element here is a default; utilities on the
+   element always win.
+   ═════════════════════════════════════════════════════════════════════════ */
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    color-scheme: dark;
   }
   body {
-    @apply text-slate-800 bg-surface;
+    @apply text-slate-800;
     font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
     min-height: 100vh;
+    background-color: theme('colors.abyss');
+    /* Two faint cold tints anchor the top corners; the page floor stays
+       near-black. Fixed so scroll doesn't swim. */
+    background-image:
+      radial-gradient(1000px 560px at 8% -12%, rgba(57, 135, 229, 0.07) 0%, transparent 55%),
+      radial-gradient(820px 480px at 104% -6%, rgba(122, 178, 242, 0.04) 0%, transparent 50%);
+    background-attachment: fixed;
   }
   h1, h2, h3, h4 {
     font-family: '"Space Grotesk"', 'Inter', ui-sans-serif, sans-serif;
     letter-spacing: -0.01em;
   }
-  /* Quiet element defaults — utilities on the element always win. */
+
+  /* Form controls: recessed panels with hairline edges. */
   input, select, textarea {
-    @apply bg-white;
+    @apply bg-panel-deep text-slate-800 rounded-lg;
+    border-color: theme('colors.edge.DEFAULT');
+    transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
   }
-  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
-    outline: 2px solid theme('colors.brand.400');
-    outline-offset: 1px;
+  input::placeholder, textarea::placeholder { color: theme('colors.slate.400'); }
+  input:hover, select:hover, textarea:hover { border-color: theme('colors.edge.strong'); }
+  input:focus, select:focus, textarea:focus,
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
+    border-color: rgba(84, 154, 233, 0.6);
+    box-shadow: 0 0 0 3px rgba(57, 135, 229, 0.18);
+    background-color: theme('colors.panel.DEFAULT');
   }
-  ::selection { background: theme('colors.brand.100'); }
+  select option { background: theme('colors.panel.raised'); color: theme('colors.slate.800'); }
+  input[type='date']::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+  input[type='checkbox'] { accent-color: theme('colors.brand.500'); }
+
+  button { transition: background-color .15s ease, color .15s ease, border-color .15s ease,
+                       box-shadow .15s ease, transform .1s ease, opacity .15s ease; }
+  button:not(:disabled):active { transform: translateY(0.5px) scale(0.995); }
+  button:focus-visible, a:focus-visible, [role='tab']:focus-visible {
+    outline: 2px solid rgba(84, 154, 233, 0.7);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection { background: rgba(57, 135, 229, 0.35); color: #fff; }
+
+  /* Slim, quiet scrollbars. */
+  * { scrollbar-width: thin; scrollbar-color: #2a3145 transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background: #262d40; border-radius: 8px; border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background-color: #343d56; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  /* Tables breathe: hairline separators, gentle row hover. */
+  thead th { color: theme('colors.slate.500'); font-weight: 500; }
+  tbody tr { transition: background-color .12s ease; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 @layer components {
   .font-display { font-family: '"Space Grotesk"', 'Inter', sans-serif; }
 
-  /* The app's shared surfaces — used by the shell and (incrementally) pages. */
-  .card {
-    @apply bg-white rounded-xl border border-slate-200/80 shadow-card;
+  /* ── The card. One surface for the whole product. ────────────────────────
+     Multi-layer edge: hairline border + 1px inner top highlight (in the
+     shadow stack) + slight vertical surface gradient. Hover lifts the edge,
+     never the layout. */
+  .panel {
+    @apply rounded-xl;
+    background: linear-gradient(180deg, #10152500 0%, rgba(255,255,255,0.012) 100%),
+                theme('colors.panel.DEFAULT');
+    border: 1px solid theme('colors.edge.DEFAULT');
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.04) inset,
+                0 1px 2px rgba(0,0,0,.5), 0 8px 24px -8px rgba(0,0,0,.6);
+    transition: border-color .18s ease, box-shadow .18s ease;
   }
-  .page-title {
-    @apply text-2xl font-bold text-slate-900;
+  .panel:hover { border-color: theme('colors.edge.strong'); }
+
+  /* Elevated surface (modals, drawers, menus). */
+  .panel-pop {
+    @apply rounded-2xl;
+    background: theme('colors.panel.raised');
+    border: 1px solid theme('colors.edge.strong');
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.05) inset,
+                0 12px 32px rgba(0,0,0,.55), 0 32px 80px -16px rgba(0,0,0,.6);
   }
+
+  .page-title { @apply text-2xl font-bold text-slate-900 tracking-tight; }
+
   .btn {
     @apply inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium
-           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+           disabled:opacity-40 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn text-white;
+    background: linear-gradient(180deg, #4390ea 0%, #2f77d0 100%);
+    border: 1px solid rgba(122, 178, 242, 0.35);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 2px 8px -2px rgba(57,135,229,.5);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: linear-gradient(180deg, #549ae9 0%, #3987e5 100%);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.18) inset, 0 0 18px -4px rgba(57,135,229,.65);
   }
   .btn-ghost {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply btn text-slate-700;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid theme('colors.edge.DEFAULT');
   }
-  .pill {
-    @apply inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  .btn-ghost:not(:disabled):hover {
+    background: rgba(255,255,255,0.06);
+    border-color: theme('colors.edge.strong');
+    color: theme('colors.slate.900');
   }
-  /* Auth screens keep the deep-navy welcome; the app itself is a flat, crisp
-     light console. */
+
+  .pill { @apply inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold; }
+
+  /* Loading shimmer for skeleton rows. */
+  .skeleton {
+    @apply rounded-md;
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%,
+                rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
+
+  /* Auth screens share the product's midnight, with a touch more drama. */
   .auth-bg {
-    background:
-      radial-gradient(1100px 600px at 12% -8%, #1b2547 0%, transparent 55%),
-      radial-gradient(900px 520px at 108% 6%, #18203c 0%, transparent 50%),
-      linear-gradient(180deg, #0b1020 0%, #070a14 100%);
+    background-color: theme('colors.abyss');
+    background-image:
+      radial-gradient(900px 520px at 18% -10%, rgba(57,135,229,0.14) 0%, transparent 55%),
+      radial-gradient(720px 480px at 100% 8%, rgba(122,178,242,0.07) 0%, transparent 50%);
   }
 }

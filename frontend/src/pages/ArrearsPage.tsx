@@ -108,7 +108,7 @@ export function ArrearsPage() {
       />
 
       {busy && <Spinner />}
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <Stat label="EV-rent outstanding" value={fmt(totals.ev_outstanding)} tone="ev" />
@@ -118,7 +118,7 @@ export function ArrearsPage() {
       </div>
       <p className="text-xs text-slate-500 mb-3">Showing {visible.length} of {rows.length} riders.</p>
 
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">
+      <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
@@ -153,13 +153,13 @@ export function ArrearsPage() {
                 <Td className="text-xs">{r.hubs || '-'}</Td>
                 <Td>{r.ev_id ?? '-'}</Td>
                 <Td>{r.model ?? '-'}</Td>
-                <Td right className={r.outstanding > 0 ? 'font-semibold text-amber-700' : 'text-slate-400'}>
+                <Td right className={r.outstanding > 0 ? 'font-semibold text-amber-300' : 'text-slate-400'}>
                   {fmt(r.outstanding)}
                 </Td>
-                <Td right className={r.dues_outstanding > 0 ? 'font-semibold text-blue-700' : 'text-slate-400'}>
+                <Td right className={r.dues_outstanding > 0 ? 'font-semibold text-blue-300' : 'text-slate-400'}>
                   {fmt(r.dues_outstanding)}
                 </Td>
-                <Td right className={(r.total_dues ?? (r.outstanding + r.dues_outstanding)) > 0 ? 'font-bold text-rose-700' : (r.total_dues ?? (r.outstanding + r.dues_outstanding)) < 0 ? 'font-semibold text-emerald-700' : 'text-slate-400'}>
+                <Td right className={(r.total_dues ?? (r.outstanding + r.dues_outstanding)) > 0 ? 'font-bold text-rose-300' : (r.total_dues ?? (r.outstanding + r.dues_outstanding)) < 0 ? 'font-semibold text-emerald-300' : 'text-slate-400'}>
                   {fmt(r.total_dues ?? (r.outstanding + r.dues_outstanding))}
                 </Td>
                 <Td className="text-xs">{r.last_updated ?? ''}</Td>
@@ -176,10 +176,10 @@ export function ArrearsPage() {
 
 function Stat({ label, value, tone }:
   { label: string; value: string; tone: 'ev' | 'dues' | 'total' }) {
-  const ring = tone === 'ev'    ? 'border-l-4 border-amber-400'
-             : tone === 'total' ? 'border-l-4 border-emerald-500'
-             :                    'border-l-4 border-blue-400'
-  return <div className={'bg-white rounded-xl border border-slate-200/80 shadow-card p-3 ' + ring}>
+  const ring = tone === 'ev'    ? 'border-l-[3px] border-l-amber-400'
+             : tone === 'total' ? 'border-l-[3px] border-l-emerald-500'
+             :                    'border-l-[3px] border-l-blue-400'
+  return <div className={'panel p-3 ' + ring}>
     <p className="text-xs text-slate-500">{label}</p>
     <p className="text-lg font-bold">{value}</p>
   </div>

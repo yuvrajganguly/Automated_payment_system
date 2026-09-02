@@ -95,10 +95,10 @@ function AttentionStrip() {
   return (
     <Link
       to="/corrections"
-      className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-300/70
-                 bg-amber-50 text-amber-900 shadow-card hover:bg-amber-100/70 transition-colors"
+      className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl border border-amber-400/30
+                 bg-amber-500/10 text-amber-200 shadow-card hover:bg-amber-500/15 transition-colors"
     >
-      <span className="pill bg-amber-200/80 text-amber-900">{data.length}</span>
+      <span className="pill bg-amber-400/20 text-amber-200">{data.length}</span>
       <span className="text-sm">
         <span className="font-semibold">Suspected EV return{data.length > 1 ? 's' : ''}</span>
         {' — '}rent worth ₹{moneyWhole(total)} kept accruing for EV
@@ -141,7 +141,7 @@ export function DashboardPage() {
   }
 
   if (busy && !data) return <Spinner label="Loading dashboard…" />
-  if (error || !data) return <p className="text-red-600">{error ?? 'No data'}</p>
+  if (error || !data) return <p className="text-red-400">{error ?? 'No data'}</p>
   const s = data.stats
 
   return (
@@ -258,10 +258,12 @@ export function DashboardPage() {
             aria-selected={tab === key}
             onClick={() => setTab(key)}
             className={
-              'px-4 py-2 text-sm font-medium rounded-t-lg -mb-px border ' +
+              'relative px-4 py-2 text-sm font-medium -mb-px transition-colors ' +
               (tab === key
-                ? 'bg-white border-slate-200 border-b-white text-brand'
-                : 'bg-transparent border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100')
+                ? 'text-slate-900 after:absolute after:left-2 after:right-2 after:-bottom-px ' +
+                  'after:h-[2px] after:rounded-full after:bg-brand-400 ' +
+                  'after:shadow-[0_0_8px_rgba(84,154,233,0.7)]'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-white/[0.03] rounded-t-lg')
             }
           >
             {label}
@@ -339,12 +341,14 @@ function Chip({
 }
 
 type Tone = 'emerald' | 'rose' | 'amber' | 'blue' | 'slate'
+// Tone = a quiet 3px rail on the card's left edge (left color only — the
+// panel's hairline stays neutral on the other three sides).
 const TONE_BORDER: Record<Tone, string> = {
-  emerald: 'border-l-4 border-emerald-500',
-  rose: 'border-l-4 border-rose-500',
-  amber: 'border-l-4 border-amber-500',
-  blue: 'border-l-4 border-blue-500',
-  slate: 'border-l-4 border-slate-400',
+  emerald: 'border-l-[3px] border-l-emerald-400/80',
+  rose: 'border-l-[3px] border-l-rose-400/80',
+  amber: 'border-l-[3px] border-l-amber-400/80',
+  blue: 'border-l-[3px] border-l-brand-400/80',
+  slate: 'border-l-[3px] border-l-slate-300',
 }
 
 function Kpi({
@@ -379,8 +383,10 @@ function Kpi({
             }
           : undefined
       }
-      className={`bg-white rounded-xl border border-slate-200/80 shadow-card p-3 ${TONE_BORDER[tone]} ${
-        interactive ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-glass transition' : ''
+      className={`panel p-3 ${TONE_BORDER[tone]} ${
+        interactive
+          ? 'cursor-pointer transition hover:-translate-y-0.5 hover:shadow-pop'
+          : ''
       }`}
     >
       <p className="text-xs text-slate-500 truncate">{label}</p>
@@ -475,10 +481,10 @@ function RecentCycles({ rows }: { rows: Summary['recent_cycle_per_company'] }) {
                 <td className="px-3 py-2 text-right">{integer(r.rider_count)}</td>
                 <td className="px-3 py-2 text-right font-mono">{money(r.total_release)}</td>
                 <td className="px-3 py-2 text-right font-mono">{money(r.total_rent_charged)}</td>
-                <td className="px-3 py-2 text-right font-mono text-emerald-700">
+                <td className="px-3 py-2 text-right font-mono text-emerald-300">
                   {money(r.total_rent_collected)}
                 </td>
-                <td className="px-3 py-2 text-right font-mono text-rose-700">
+                <td className="px-3 py-2 text-right font-mono text-rose-300">
                   {money(r.total_rent_missed)}
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-500">{r.processed_at}</td>
@@ -513,12 +519,12 @@ function BreakdownDrawer({
   )
   return (
     <div className="fixed inset-0 z-50 flex" onClick={onClose}>
-      <div className="flex-1 bg-black/40" />
+      <div className="flex-1 bg-black/60 backdrop-blur-[2px]" />
       <div
-        className="bg-white w-full max-w-4xl shadow-2xl overflow-y-auto flex flex-col"
+        className="bg-panel w-full max-w-4xl shadow-2xl overflow-y-auto flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-3 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+        <div className="px-5 py-3 border-b flex items-center justify-between sticky top-0 bg-panel z-10">
           <div>
             <h3 className="font-semibold">{data?.title ?? metric}</h3>
             <p className="text-xs text-slate-500">
@@ -537,7 +543,7 @@ function BreakdownDrawer({
         <div className="flex-1 p-4">
           {busy && <Spinner />}
           {error && !busy && (
-            <p role="alert" className="text-center text-rose-600 p-8">
+            <p role="alert" className="text-center text-rose-400 p-8">
               {error}
             </p>
           )}
@@ -709,12 +715,12 @@ function ReportPanel({
         <button
           onClick={go}
           disabled={busy}
-          className="text-sm bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded inline-flex items-center gap-1 disabled:opacity-50"
+          className="text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded inline-flex items-center gap-1 disabled:opacity-50"
         >
           <span>⬇</span>
           {busy ? 'Generating…' : 'Download report'}
         </button>
-        {err && <span className="text-xs text-red-600">{err}</span>}
+        {err && <span className="text-xs text-red-400">{err}</span>}
       </div>
       <p className="text-xs text-slate-500 mt-3">
         Sheets included: Overview · <b>EV Rent vs Expected</b> · <b>Riders in Arrears</b> · Active

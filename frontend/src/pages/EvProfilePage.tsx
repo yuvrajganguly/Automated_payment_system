@@ -53,7 +53,7 @@ export function EvProfilePage() {
   useEffect(load, [id])
 
   if (busy && !profile) return <Spinner label="Loading…" />
-  if (error || !profile) return <p className="text-red-600">{error ?? 'Not found'}</p>
+  if (error || !profile) return <p className="text-red-400">{error ?? 'Not found'}</p>
 
   const u = profile.unit
   const cur = profile.current
@@ -69,7 +69,7 @@ export function EvProfilePage() {
         <span className={'text-xs px-2 py-0.5 rounded ' + statusColor(u.status)}>{u.status}</span>
         <span className="text-sm text-slate-500">Weekly rate: {fmt(u.weekly_rate)}</span>
         {openMaint && (
-          <span className="text-xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
+          <span className="text-xs bg-amber-500/20 text-amber-200 px-2 py-0.5 rounded">
             in maintenance since {openMaint.from_date}
           </span>
         )}
@@ -118,7 +118,7 @@ export function EvProfilePage() {
                   </Link>
                 </Td>
                 <Td>{a.handover_date ?? '-'}</Td>
-                <Td>{a.returned_date ?? <span className="text-amber-700 font-medium">open</span>}</Td>
+                <Td>{a.returned_date ?? <span className="text-amber-300 font-medium">open</span>}</Td>
                 <Td>{a.rent_charged_through ?? '-'}</Td>
               </tr>
             ))}
@@ -135,10 +135,10 @@ export function EvProfilePage() {
           </thead>
           <tbody>
             {profile.maintenance.map((m) => (
-              <tr key={m.id} className={'border-t ' + (m.to_date === null ? 'bg-amber-50' : '')}>
+              <tr key={m.id} className={'border-t ' + (m.to_date === null ? 'bg-amber-500/10' : '')}>
                 <Td>{m.id}</Td>
                 <Td>{m.from_date}</Td>
-                <Td>{m.to_date ?? <span className="text-amber-700 font-medium">still open</span>}</Td>
+                <Td>{m.to_date ?? <span className="text-amber-300 font-medium">still open</span>}</Td>
                 <Td>{m.reason ?? ''}</Td>
                 <Td className="text-xs">{m.created_by ?? ''}</Td>
                 <Td className="text-xs">{m.created_at ?? ''}</Td>
@@ -163,10 +163,10 @@ export function EvProfilePage() {
 }
 
 function statusColor(s: string) {
-  if (s === 'in_use') return 'bg-green-100'
+  if (s === 'in_use') return 'bg-emerald-500/15'
   if (s === 'returned') return 'bg-slate-100'
-  if (s === 'maintenance') return 'bg-amber-200'
-  return 'bg-amber-100'
+  if (s === 'maintenance') return 'bg-amber-500/20'
+  return 'bg-amber-500/15'
 }
 
 function AssignCard({ evId, hasHolder, onChanged }:
@@ -377,11 +377,11 @@ function MarkSpareCard({ evId, hasHolder, onChanged }:
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="mb-6">
     <h2 className="font-semibold mb-2">{title}</h2>
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-x-auto">{children}</div>
+    <div className="panel overflow-x-auto">{children}</div>
   </section>
 }
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl border border-slate-200/80 shadow-card p-4">
+  return <div className="panel p-4">
     <h3 className="font-semibold text-sm mb-2">{title}</h3>{children}
   </div>
 }
