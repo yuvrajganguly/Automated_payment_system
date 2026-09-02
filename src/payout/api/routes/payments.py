@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
+from payout.domain.arrears import settle_arrears_from_credit
 from payout.parsers.bank_mis import parse_bank_mis
 
 router = APIRouter()
@@ -345,6 +346,9 @@ def resolve_line(line_id: int, body: ResolveIn, user: dict = Depends(require_adm
                 company="",
             )
             txn_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            # The refund credit immediately pays down any EV arrears (net-zero
+            # positions used to sit on the books until the next payout cycle).
+            settle_arrears_from_credit(conn, line["person_id"], created_by=user["email"])
         conn.execute(
             "UPDATE payment_lines SET resolution_method=?, resolved_at=date('now'), "
             "resolved_by=?, transaction_id=? WHERE id=?",

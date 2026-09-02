@@ -497,6 +497,23 @@ def process_cycle(
 
             prev_bal = _balance(conn, pid)
             arr_out = _arrears_out(conn, pid)
+            # DORMANT ARREARS: the person returned their EV (no open assignment,
+            # no rent this cycle) but still owes EV back-rent. Their arrears sit
+            # silently off the active view; when a payout shows up anyway, HOLD
+            # the whole thing — recover nothing automatically — so the operator
+            # decides (recover, release, or both). force_release overrides.
+            dormant_hold = (
+                arr_out > 0
+                and rent == 0
+                and not ov.force_release
+                and _vehicle_for(conn, pid, company) != "EV"
+            )
+            if dormant_hold:
+                result.warnings.append(
+                    f"{rec.rider_id} ({person['name']}): payout arrived for a rider with "
+                    f"DORMANT EV arrears ({to_rupees(arr_out):,.0f} owed, EV returned). "
+                    "Payout is HELD; nothing was auto-recovered — resolve manually."
+                )
             cod_amt_for_settle = holds.per_rider.get(rec.rider_id, 0.0)
             cod_carry = get_cod_arrears(conn, pid)[2]
             # Cross-company pending rent gets folded into THIS cycle's rent.
@@ -542,7 +559,7 @@ def process_cycle(
                 rec.payout,
                 effective_rent,
                 prev_bal,
-                arr_out,
+                0 if dormant_hold else arr_out,  # dormant: recover nothing
                 cod_due=cod_amt_for_settle,
                 cod_outstanding=cod_carry,
             )
@@ -821,7 +838,7 @@ def process_cycle(
                 )
                 rent_done.add(pid)
 
-            is_hold = pid in held_person_ids or rec.rider_id in held_set
+            is_hold = dormant_hold or pid in held_person_ids or rec.rider_id in held_set
             cod_amt = holds.per_rider.get(rec.rider_id, 0.0)
 
             rr = RiderResult(
@@ -841,10 +858,12 @@ def process_cycle(
                 prev_balance=prev_bal,
                 released=s.released,
                 new_balance=s.new_balance,
-                new_arrears=s.new_arrears,
+                new_arrears=arr_out if dormant_hold else s.new_arrears,
                 cod_hold=cod_amt,
                 is_hold=is_hold,
-                remarks="HOLD" if is_hold else "PAY",
+                remarks=(
+                    "HOLD — dormant arrears" if dormant_hold else "HOLD" if is_hold else "PAY"
+                ),
                 account_no=person["account_no"],
                 ifsc=person["ifsc"],
                 orders=getattr(rec, "orders", None),

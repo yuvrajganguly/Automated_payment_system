@@ -18,6 +18,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import ExportSelection
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
+from payout.domain.arrears import settle_arrears_from_credit
 from payout.exports import xlsx_response
 from payout.money import to_paise
 
@@ -170,10 +171,16 @@ def clear_cod(body: CodClearIn, user: dict = Depends(require_admin)) -> dict:
                 rider_id="",
                 company="",
             )
+        settled = 0
+        if (new_balance or 0) > 0:
+            settled = settle_arrears_from_credit(conn, body.person_id, created_by=user["email"])
+            if settled and new_balance is not None:
+                new_balance = new_balance - settled
         conn.commit()
     return {
         "person_id": body.person_id,
         "entries_cleared": entries_cleared,
         "ledger_amount": adj_amount,
         "new_balance": new_balance,
+        "arrears_settled_from_credit": settled,
     }

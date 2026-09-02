@@ -201,6 +201,59 @@ def record_recovery(
     return amount
 
 
+def settle_arrears_from_credit(conn, person_id, *, created_by, reason=None):
+    """Use a positive general balance to pay down EV-rent arrears.
+
+    A rider can end up with a credit (manual adjustment, COD clearance, a
+    failed-transfer refund) while still carrying EV arrears. On the books they
+    owed nothing net, but both sides sat there forever if no payout cycle ever
+    ran for them again — the Arrears view showed a debt that was already
+    covered. This settles the overlap immediately with a proper audit trail:
+    an ADJUSTMENT debiting the credit and a RENT_RECOVERED reducing arrears
+    (with the daily ledger healed like any other recovery).
+
+    Returns the paise settled (0 when there is no overlap).
+    """
+    balance = _gen_balance(conn, person_id) or 0
+    _, _, outstanding = get_arrears(conn, person_id)
+    amount = int(min(max(0, balance), max(0, outstanding or 0)))
+    if amount <= 0:
+        return 0
+    today = date.today()
+    new_balance = balance - amount
+    conn.execute(
+        "UPDATE balances SET current_balance=?, last_updated=? WHERE person_id=?",
+        (new_balance, today.isoformat(), person_id),
+    )
+    conn.execute(
+        "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
+        "event_type, amount, balance_after, remarks, created_by) "
+        "VALUES (?,?,?,?,?,'ADJUSTMENT',?,?,?,?)",
+        (
+            person_id,
+            "",
+            "",
+            today.isoformat(),
+            today.isoformat(),
+            -amount,
+            new_balance,
+            reason or "Credit balance applied to EV rent arrears",
+            created_by,
+        ),
+    )
+    record_recovery(conn, person_id, amount, today, today, created_by=created_by)
+    rec = conn.execute(
+        "SELECT id FROM transactions WHERE person_id=? AND event_type='RENT_RECOVERED' "
+        "ORDER BY id DESC LIMIT 1",
+        (person_id,),
+    ).fetchone()
+    if rec:
+        from payout.domain.ev_daily import attribute_recovery
+
+        attribute_recovery(conn, person_id=person_id, recovery_event_id=rec["id"], amount=amount)
+    return amount
+
+
 def get_cod_arrears(conn, person_id):
     """Return (cod_missed_total, cod_recovered_total, cod_outstanding)."""
     row = conn.execute(

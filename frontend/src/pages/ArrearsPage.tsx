@@ -26,6 +26,8 @@ interface ArrearsRow {
   companies: string | null
   hubs: string | null
   last_updated: string | null
+  /** EV arrears but the EV was returned — kept silently; payouts are HELD. */
+  dormant?: boolean | number
 }
 
 type Bucket = 'all' | 'ev' | 'dues'
@@ -34,15 +36,18 @@ export function ArrearsPage() {
   const [rows, setRows] = useState<ArrearsRow[]>([])
   const [filters, setFilters] = useUrlRecord('f')
   const [bucket, setBucket] = useUrlString('bucket', 'all') as [Bucket, (v: Bucket) => void]
+  const [dormantParam, setDormantParam] = useUrlString('dormant', '0')
+  const showDormant = dormantParam === '1'
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get<ArrearsRow[]>('/arrears')
+    setBusy(true)
+    api.get<ArrearsRow[]>('/arrears', { query: { include_dormant: showDormant } })
       .then(setRows)
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
-  }, [])
+  }, [showDormant])
 
   const scoped = useMemo(() => {
     switch (bucket) {
@@ -84,6 +89,11 @@ export function ArrearsPage() {
             {b === 'all' ? 'All' : b === 'ev' ? 'EV-rent only' : 'Dues only'}
           </button>
         ))}
+        <label className="ml-4 inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+          <input type="checkbox" checked={showDormant}
+                 onChange={(e) => setDormantParam(e.target.checked ? '1' : '0')} />
+          Show dormant (EV returned, debt kept silently)
+        </label>
       </div>
 
       <ColumnFilters
@@ -130,7 +140,15 @@ export function ArrearsPage() {
                 <Td><Link to={'/persons/' + r.person_id} className="text-brand underline">
                   #{r.person_id}
                 </Link></Td>
-                <Td>{r.display_name}</Td>
+                <Td>
+                  {r.display_name}
+                  {!!r.dormant && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wide bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded"
+                          title="EV returned with arrears still owed. Hidden from the active view; any future payout is HELD for manual resolution.">
+                      Dormant
+                    </span>
+                  )}
+                </Td>
                 <Td className="text-xs">{r.companies || '-'}</Td>
                 <Td className="text-xs">{r.hubs || '-'}</Td>
                 <Td>{r.ev_id ?? '-'}</Td>

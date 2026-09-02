@@ -10,6 +10,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import AdjustmentIn, RentPaymentIn, TransactionOut
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
+from payout.domain.arrears import settle_arrears_from_credit
 from payout.exports import xlsx_response
 from payout.money import to_paise
 
@@ -492,5 +493,17 @@ def post_adjustment_endpoint(body: AdjustmentIn, user: dict = Depends(require_ad
             rider_id=body.rider_id or "",
             company=body.company or "",
         )
+        settled = 0
+        if amt_p > 0:
+            # A credit is immediately used to pay down any EV arrears — the two
+            # cancelled each other on net but both used to sit on the books.
+            settled = settle_arrears_from_credit(conn, pid, created_by=user["email"])
+            if settled:
+                new_balance = new_balance - settled
         conn.commit()
-    return {"person_id": pid, "amount": amt_p, "new_balance": new_balance}
+    return {
+        "person_id": pid,
+        "amount": amt_p,
+        "new_balance": new_balance,
+        "arrears_settled_from_credit": settled,
+    }

@@ -98,10 +98,26 @@ def _0003_companies_shared_rider_ids(conn: Any) -> None:
     add_column(conn, "companies", "rider_ids_shared_with", "TEXT")
 
 
+def _0004_offset_credit_vs_arrears(conn: Any) -> None:
+    """Data sweep: riders holding BOTH a credit balance and EV-rent arrears
+    owed nothing net, but both sides sat on the books forever unless another
+    payout cycle happened to run for them. Settle every overlap once; the
+    routes that create credits now do this at write time."""
+    from payout.domain.arrears import settle_arrears_from_credit
+
+    rows = conn.execute(
+        "SELECT b.person_id FROM balances b JOIN ev_arrears ea ON ea.person_id = b.person_id "
+        "WHERE b.current_balance > 0 AND ea.outstanding > 0"
+    ).fetchall()
+    for r in rows:
+        settle_arrears_from_credit(conn, r[0], created_by="migration:0004_offset_credit_vs_arrears")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
     ("0003_companies_shared_rider_ids", _0003_companies_shared_rider_ids),
+    ("0004_offset_credit_vs_arrears", _0004_offset_credit_vs_arrears),
 ]
 
 _TRACKING_DDL = (

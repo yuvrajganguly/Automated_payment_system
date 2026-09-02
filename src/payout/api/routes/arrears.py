@@ -13,14 +13,24 @@ router = APIRouter()
 
 
 @router.get("")
-def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
+def list_arrears(include_dormant: bool = False, _: dict = Depends(get_current_user)) -> list[dict]:
     """All persons with money owed in any bucket: EV-rent, COD, or general
     dues (carryforward from prior cycles).
 
     Dues are reported as a positive ``dues_outstanding`` (= -current_balance
     when it's negative). The Arrears page uses this to surface carryforward
     riders alongside the EV-rent and COD buckets.
+
+    A person with EV arrears whose EV was RETURNED is ``dormant``: hidden from
+    the active view unless ``include_dormant`` is set. The debt is kept
+    silently, and the engine HOLDS any future payout for them instead of
+    auto-settling. Riders whose debt is purely general dues are always listed
+    — dormancy is an EV-arrears concept.
     """
+    # Dormant = still owes EV back-rent but holds no EV any more (the open-
+    # assignment join below produced no row).
+    dormant_expr = "(COALESCE(ea.outstanding, 0) > 0 AND a.ev_id IS NULL)"
+    dormant_filter = "" if include_dormant else f"AND NOT {dormant_expr} "
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT pr.person_id, pr.display_name, "
@@ -40,16 +50,17 @@ def list_arrears(_: dict = Depends(get_current_user)) -> list[dict]:
             "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "
             "        WHERE rm.person_id = pr.person_id AND rm.is_active = 1 "
             "          AND rm.hub IS NOT NULL AND rm.hub <> '') AS hubs, "
-            "       COALESCE(ea.last_updated, b.last_updated) AS last_updated "
+            "       COALESCE(ea.last_updated, b.last_updated) AS last_updated, "
+            f"      {dormant_expr} AS dormant "
             "FROM person_registry pr "
             "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
             "LEFT JOIN balances   b  ON b.person_id  = pr.person_id "
             "LEFT JOIN ev_assignments a ON a.person_id = pr.person_id AND a.returned_date IS NULL "
             "LEFT JOIN ev_units  u ON u.ev_id    = a.ev_id "
             "LEFT JOIN ev_models m ON m.model_id = u.model_id "
-            # Show only riders who still owe on net: EV arrears net of any
             # Show a rider only when net Total Dues > 0; hide 0-or-credit.
             "WHERE (COALESCE(ea.outstanding, 0) - COALESCE(b.current_balance, 0)) > 0 "
+            f"{dormant_filter}"
             "ORDER BY (COALESCE(ea.outstanding,0) + COALESCE(ea.cod_outstanding,0) "
             "        + CASE WHEN COALESCE(b.current_balance,0)<0 "
             "               THEN -b.current_balance ELSE 0 END) DESC"
@@ -66,13 +77,16 @@ def export_arrears(
     Adds a derived Total Dues column (EV outstanding + Dues carry-forward) so
     the operator can ladder by overall debt at a glance.
     """
-    data = list_arrears(_)
+    # Exports always include dormant rows (records beat screens); the Status
+    # column tells them apart.
+    data = list_arrears(include_dormant=True, _=_)
     if body.ids is not None:
         idset = {str(x) for x in body.ids}
         data = [r for r in data if str(r["person_id"]) in idset]
     headers = [
         "Person ID",
         "Name",
+        "Status",
         "Companies",
         "Hub",
         "EV ID",
@@ -86,6 +100,7 @@ def export_arrears(
         (
             r["person_id"],
             r["display_name"],
+            "Dormant" if r.get("dormant") else "Active",
             r["companies"] or "",
             r["hubs"] or "",
             r["ev_id"] or "",
@@ -102,8 +117,8 @@ def export_arrears(
         sheet_name="ARREARS",
         headers=headers,
         rows=rows,
-        numeric_cols=(7, 8, 9),
-        money_cols=(7, 8, 9),
-        totals_cols=(7, 8, 9),
-        left_align_cols=(2, 3, 4),
+        numeric_cols=(8, 9, 10),
+        money_cols=(8, 9, 10),
+        totals_cols=(8, 9, 10),
+        left_align_cols=(2, 3, 4, 5),
     )
