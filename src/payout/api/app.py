@@ -27,6 +27,9 @@ from payout.api.routes import (
     companies as company_routes,
 )
 from payout.api.routes import (
+    corrections as corrections_routes,
+)
+from payout.api.routes import (
     creator as creator_routes,
 )
 from payout.api.routes import (
@@ -162,6 +165,7 @@ app.include_router(ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"
 app.include_router(payments_routes.router, prefix="/api/payments", tags=["payments"])
 app.include_router(dashboard_routes.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(analytics_routes.router, prefix="/api/dashboard", tags=["analytics"])
+app.include_router(corrections_routes.router, prefix="/api/corrections", tags=["corrections"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
 

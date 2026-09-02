@@ -939,6 +939,25 @@ def process_cycle(
                     assignment_ids={L.assignment_id for L in rinfo.legs},
                 )
                 total_missed += rinfo.rent
+                # Suspected return: an EV holder absent from payouts two+
+                # cycles running usually means the EV went back and nobody
+                # told the office. Surface it BEFORE the operator commits.
+                prior_misses = conn.execute(
+                    "SELECT COUNT(*) FROM transactions WHERE person_id=? "
+                    "AND event_type='RENT_MISSED' AND cycle_start < ? "
+                    "AND cycle_start > COALESCE((SELECT MAX(cycle_end) FROM transactions "
+                    "  WHERE person_id=? AND event_type='PAYOUT'), '0000-00-00')",
+                    (pid, _iso(cycle_start), pid),
+                ).fetchone()[0]
+                if prior_misses >= 1:
+                    evs = ", ".join(sorted({L.ev_id for L in rinfo.legs if L.ev_id}))
+                    result.warnings.append(
+                        f"SUSPECTED RETURN — {a['display_name']} "
+                        f"({a['deduction_rider_id'] or pid}@{company}, EV {evs}) has "
+                        f"missed rent {prior_misses + 1} cycles in a row. If the EV "
+                        f"was returned, record the return with the real date and the "
+                        f"wrongly-missed rent reverses automatically."
+                    )
             ridx_rows = conn.execute(
                 "SELECT rider_id, hub FROM rider_master WHERE person_id=? AND company=?",
                 (pid, company),
