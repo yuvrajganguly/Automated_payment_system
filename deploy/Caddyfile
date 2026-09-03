@@ -1,0 +1,14 @@
+# Caddy fetches and renews Let's Encrypt certificates automatically for
+# SITE_ADDRESS (works with sslip.io names and real domains alike).
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy app:8000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
