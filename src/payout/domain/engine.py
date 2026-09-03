@@ -116,6 +116,13 @@ class CycleResult:
     # Riders whose id was unknown for this company but matched the company
     # named in companies.rider_ids_shared_with, and were linked automatically.
     auto_linked: list = field(default_factory=list)
+    # Roster hubs rewritten from the payout file this run:
+    # {rider_id, name, old_hub, new_hub}. The company file is the authority on
+    # where a rider works; the roster follows it.
+    hub_updates: list = field(default_factory=list)
+    # Every rider id present in the payout sheet (known or not). The HOLD sheet
+    # uses it to split COD riders into "in this payout" / "not in this payout".
+    file_rider_ids: list = field(default_factory=list)
     committed: bool = False
     totals: dict = field(default_factory=dict)
 
@@ -142,6 +149,28 @@ def _txn(conn, **kw):
             kw.get("remarks", ""),
             kw.get("created_by", "engine"),
         ),
+    )
+
+
+def _sync_hub(conn, rec, company, person, result):
+    """Roster hub follows the payout file. Called for every known rider in the
+    file; a no-op when the file has no hub column or it already matches."""
+    new_hub = (rec.hub or "").strip()
+    old_hub = (person.get("hub") or "").strip()
+    if not new_hub or new_hub == old_hub:
+        return
+    conn.execute(
+        "UPDATE rider_master SET hub=?, updated_at=datetime('now') WHERE rider_id=? AND company=?",
+        (new_hub, rec.rider_id, company),
+    )
+    person["hub"] = new_hub
+    result.hub_updates.append(
+        {
+            "rider_id": rec.rider_id,
+            "name": person.get("name") or rec.name or "",
+            "old_hub": old_hub,
+            "new_hub": new_hub,
+        }
     )
 
 
@@ -377,6 +406,7 @@ def process_cycle(
                         )
             if p:
                 present_persons[rec.rider_id] = p
+                _sync_hub(conn, rec, company, p, result)
             else:
                 result.unknown_ids.append(rec.rider_id)
                 result.unknown_riders.append(
@@ -860,7 +890,9 @@ def process_cycle(
                 person_id=pid,
                 rider_id=rec.rider_id,
                 name=person["name"],
-                hub=person["hub"],
+                # Hub as the company file states it (the roster was just synced
+                # to it); roster value only when the file has no hub column.
+                hub=rec.hub or person["hub"],
                 vehicle=person.get("vehicle"),
                 company=company,
                 ev_id=ev_id,
@@ -1021,10 +1053,31 @@ def process_cycle(
                     company=company,
                 )
 
-        result.hold_rows = [
-            {"rider_id": rid, "amount": amt}
-            for rid, amt in sorted(holds.per_rider.items(), key=lambda x: -x[1])
-        ]
+        if result.hub_updates:
+            shown = ", ".join(
+                f"{u['rider_id']} {u['old_hub'] or '—'} → {u['new_hub']}"
+                for u in result.hub_updates[:5]
+            )
+            more = len(result.hub_updates) - 5
+            result.warnings.append(
+                f"{len(result.hub_updates)} rider hub(s) updated from the file: {shown}"
+                + (f" … +{more} more" if more > 0 else "")
+            )
+        result.file_rider_ids = [rec.rider_id for rec in parsed.records]
+        in_file = set(result.file_rider_ids)
+        result.hold_rows = []
+        for rid, amt in sorted(holds.per_rider.items(), key=lambda x: -x[1]):
+            info = holds.rider_info.get(rid) or {}
+            p = present_persons.get(rid) or _lookup(conn, rid, company)
+            result.hold_rows.append(
+                {
+                    "rider_id": rid,
+                    "amount": amt,
+                    "name": (p["name"] if p else None) or info.get("name") or "",
+                    "hub": info.get("hub") or (p["hub"] if p else None) or "",
+                    "in_payout": rid in in_file,
+                }
+            )
         all_rows = result.pay_rows + result.dues_rows
         result.totals = {
             "riders_paid": len(result.pay_rows),

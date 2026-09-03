@@ -314,16 +314,54 @@ def _arrears_sheet(wb, conn, cs, ce):
 
 
 # ---- HOLD ----
-HOLD_HEADERS = ["Rider ID", "Name", "COD Total"]
-LINE_HEADERS = ["Rider ID", "Order Number", "Amount", "Payment Mode", "Status", "Source"]
+HOLD_HEADERS = ["Rider ID", "Name", "Hub", "COD Total", "In Payout"]
+HOLD_NUM_COL = 4
+LINE_HEADERS = [
+    "Rider ID",
+    "Name",
+    "Hub",
+    "Order Number",
+    "Amount",
+    "Payment Mode",
+    "Status",
+    "Source",
+]
+LINE_NUM_COL = 5
+NOT_IN_PAYOUT_TITLE = "COD riders NOT in this payout (no payout row to hold — follow up by hub)"
 
 
-def _hold_sheet(wb, conn, company, cs, ce):
+def _money_cell(ws, row_idx, col):
+    c = ws.cell(row=row_idx, column=col)
+    if isinstance(c.value, (int, float)) and not isinstance(c.value, bool):
+        c.value = to_rupees(c.value)
+    c.number_format = NUM
+
+
+def _hold_sheet(wb, conn, cycle_result):
+    """COD holds for the cycle, in two blocks.
+
+    1. Riders whose COD is pending AND who are in the payout sheet — their
+       payout is held.
+    2. Riders with pending COD who are NOT in the payout sheet — there is
+       nothing to hold, so the office has to chase them; the hub (as the
+       company's COD sheet states it) says where.
+    Name and hub come from the file first (a COD-only rider may not be on the
+    roster at all), then the roster.
+    """
+    company, cs, ce = cycle_result.company, cycle_result.cycle_start, cycle_result.cycle_end
+    in_file = set(getattr(cycle_result, "file_rider_ids", None) or [])
+    if not in_file:
+        # Older callers without file_rider_ids: everyone we paid/held was in the file.
+        in_file = {r.rider_id for r in cycle_result.pay_rows + cycle_result.dues_rows}
+        in_file |= set(cycle_result.unknown_ids)
     ws = wb.create_sheet("HOLD")
-    _write_header(ws, HOLD_HEADERS)
     rows = conn.execute(
         """
-        SELECT ch.rider_id, MAX(rm.name) AS name, SUM(ch.amount) AS total
+        SELECT ch.rider_id,
+               COALESCE(MAX(rm.name), MAX(ch.worker_name), '') AS name,
+               MAX(ch.hub)                                      AS file_hub,
+               MAX(rm.hub)                                      AS roster_hub,
+               SUM(ch.amount)                                   AS total
         FROM cod_holds ch
         LEFT JOIN rider_master rm ON rm.rider_id = ch.rider_id AND rm.company = ch.company
         WHERE ch.company=? AND ch.cycle_start=? AND ch.cycle_end=?
@@ -331,32 +369,76 @@ def _hold_sheet(wb, conn, company, cs, ce):
     """,
         (company, cs.isoformat(), ce.isoformat()),
     ).fetchall()
-    for i, r in enumerate(rows, 2):
-        vals = [r["rider_id"], r["name"] or "", r["total"]]
-        for col, v in enumerate(vals, 1):
-            ws.cell(row=i, column=col, value=v).alignment = Alignment(
-                horizontal="left" if col == 2 else "center", vertical="center"
-            )
-        _style_row(ws, i, len(HOLD_HEADERS), fill=HOLD_FILL)
-        _hc = ws.cell(row=i, column=3)
-        if isinstance(_hc.value, (int, float)) and not isinstance(_hc.value, bool):
-            _hc.value = to_rupees(_hc.value)
-        _hc.number_format = NUM
-    start = len(rows) + 4
-    if start > 4:
-        ws.cell(row=start - 1, column=1, value="Line Items").font = _body_font(bold=True)
-    _write_header(ws, LINE_HEADERS, row=start)
+    rows = [dict(r) for r in rows]
+    for r in rows:
+        # In the payout: the roster hub was just synced from the payout sheet
+        # (the primary source). Otherwise the COD sheet's hub code is all we
+        # have — and exactly what the office needs to chase the cash.
+        first, second = (
+            (r["roster_hub"], r["file_hub"])
+            if r["rider_id"] in in_file
+            else (r["file_hub"], r["roster_hub"])
+        )
+        r["hub"] = first or second or ""
+    held = [r for r in rows if r["rider_id"] in in_file]
+    not_in_payout = [r for r in rows if r["rider_id"] not in in_file]
+
+    def _block(start_row, block_rows, title=None, fill=HOLD_FILL):
+        row = start_row
+        if title:
+            ws.cell(row=row, column=1, value=title).font = _body_font(bold=True)
+            row += 1
+        _write_header(ws, HOLD_HEADERS, row=row)
+        row += 1
+        first = row
+        for r in block_rows:
+            vals = [
+                r["rider_id"],
+                r["name"] or "",
+                r["hub"] or "",
+                r["total"],
+                "Yes" if r["rider_id"] in in_file else "No",
+            ]
+            for col, v in enumerate(vals, 1):
+                ws.cell(row=row, column=col, value=v).alignment = Alignment(
+                    horizontal="left" if col in (2, 3) else "center", vertical="center"
+                )
+            _style_row(ws, row, len(HOLD_HEADERS), fill=fill)
+            _money_cell(ws, row, HOLD_NUM_COL)
+            row += 1
+        if block_rows:
+            ws.cell(row=row, column=2, value="TOTAL")
+            letter = get_column_letter(HOLD_NUM_COL)
+            ws.cell(row=row, column=HOLD_NUM_COL, value=f"=SUM({letter}{first}:{letter}{row - 1})")
+            _style_row(ws, row, len(HOLD_HEADERS), fill=TOTAL_FILL, bold=True)
+            _money_cell(ws, row, HOLD_NUM_COL)
+            row += 1
+        return row
+
+    row = _block(1, held)
+    if not_in_payout:
+        row = _block(row + 1, not_in_payout, title=NOT_IN_PAYOUT_TITLE, fill=FLAG_FILL)
+
+    start = row + 1
+    ws.cell(row=start, column=1, value="Line Items").font = _body_font(bold=True)
+    _write_header(ws, LINE_HEADERS, row=start + 1)
     line_rows = conn.execute(
         """
-        SELECT rider_id, order_number, amount, payment_mode, txn_status, source
-        FROM cod_holds WHERE company=? AND cycle_start=? AND cycle_end=?
-        ORDER BY rider_id, amount DESC
+        SELECT ch.rider_id, COALESCE(rm.name, ch.worker_name, '') AS name,
+               COALESCE(ch.hub, rm.hub, '') AS hub,
+               ch.order_number, ch.amount, ch.payment_mode, ch.txn_status, ch.source
+        FROM cod_holds ch
+        LEFT JOIN rider_master rm ON rm.rider_id = ch.rider_id AND rm.company = ch.company
+        WHERE ch.company=? AND ch.cycle_start=? AND ch.cycle_end=?
+        ORDER BY ch.rider_id, ch.amount DESC
     """,
         (company, cs.isoformat(), ce.isoformat()),
     ).fetchall()
-    for i, r in enumerate(line_rows, start + 1):
+    for i, r in enumerate(line_rows, start + 2):
         vals = [
             r["rider_id"],
+            r["name"] or "",
+            r["hub"] or "",
             r["order_number"] or "",
             r["amount"],
             r["payment_mode"] or "",
@@ -364,12 +446,11 @@ def _hold_sheet(wb, conn, company, cs, ce):
             r["source"],
         ]
         for col, v in enumerate(vals, 1):
-            ws.cell(row=i, column=col, value=v).alignment = Alignment(horizontal="center")
-        _style_row(ws, i, len(LINE_HEADERS))
-        _hc = ws.cell(row=i, column=3)
-        if isinstance(_hc.value, (int, float)) and not isinstance(_hc.value, bool):
-            _hc.value = to_rupees(_hc.value)
-        _hc.number_format = NUM
+            ws.cell(row=i, column=col, value=v).alignment = Alignment(
+                horizontal="left" if col in (2, 3) else "center"
+            )
+        _style_row(ws, i, len(LINE_HEADERS), fill=None if r["rider_id"] in in_file else FLAG_FILL)
+        _money_cell(ws, i, LINE_NUM_COL)
     _auto_width(ws)
 
 
@@ -478,9 +559,7 @@ def build_output(cycle_result) -> BytesIO:
         _pay_sheet(wb, cycle_result.pay_rows)
         _dues_sheet(wb, cycle_result.dues_rows)
         _arrears_sheet(wb, conn, cycle_result.cycle_start, cycle_result.cycle_end)
-        _hold_sheet(
-            wb, conn, cycle_result.company, cycle_result.cycle_start, cycle_result.cycle_end
-        )
+        _hold_sheet(wb, conn, cycle_result)
         _inactive_sheet(wb, cycle_result.inactive_rows)
         _audit_sheet(wb, conn, cycle_result.cycle_start, cycle_result.cycle_end)
     finally:

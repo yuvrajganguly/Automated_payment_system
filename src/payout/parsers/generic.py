@@ -17,6 +17,7 @@ Resilience built in:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from io import BytesIO
 
@@ -26,19 +27,70 @@ from payout.domain.models import CodHoldLine, ParseResult, RiderRecord
 from payout.money import to_paise
 from payout.parsers.base import match_column, read_table, select_sheet, to_float
 
-_RIDER_ALIASES = ("rider_id", "rider id", "riderid", "worker code")
+# Every header a client has used for the rider id. Spencer's rider id IS the
+# rider's phone number, and their 2026-08 layout calls the column rider_phone.
+_RIDER_ALIASES = (
+    "rider_id",
+    "rider id",
+    "riderid",
+    "worker code",
+    "worker_code",
+    "rider_phone",
+    "rider phone",
+)
+# Name column: Myntra files say "Name" or "Worker Name" depending on the
+# export; both mean the rider's name.
+_NAME_ALIASES = ("rider_name", "rider name", "name", "worker name", "worker_name")
+# Hub / store column. Spencer's new layout carries the store as store_names
+# (+ store_ids); older files used Store / Hub.
+_HUB_ALIASES = (
+    "store",
+    "hub",
+    "store/hub",
+    "store_hub",
+    "store name",
+    "hub name",
+    "store/hub name",
+    "store_names",
+    "store names",
+    "store_name",
+    "hub code",
+    "hub_code",
+    "store_ids",
+    "store ids",
+    "store_id",
+    "store id",
+)
+
+
+_PHONEISH_RE = re.compile(r"^\+?\d[\d\s\-]*$")
 
 
 def _normalise_rider_id(value) -> str:
-    """Canonical rider id text. Excel hands numeric ids over as ``1234.0`` when
-    the cell is a number; strip that, and surrounding whitespace."""
+    """Canonical rider id text.
+
+    Excel hands numeric ids over as ``1234.0`` when the cell is a number; strip
+    that, and surrounding whitespace. Ids that are phone numbers (Spencer's)
+    arrive in every spelling a human types into a sheet — ``'+91 98765 43210``,
+    ``098765-43210`` — and must match the plain ``9876543210`` on the payout
+    sheet, so a purely numeric id is reduced to its digits and a leading
+    country code (91) / trunk zero dropped from a 10-digit Indian number.
+    Alphanumeric ids (``BD-12``) are left exactly as written.
+    """
     if value is None:
         return ""
-    text = str(value).strip()
+    text = str(value).strip().strip("'\"‘’“”").strip()
     if not text or text.lower() == "nan":
         return ""
     if text.endswith(".0") and text[:-2].isdigit():
         text = text[:-2]
+    if _PHONEISH_RE.match(text):
+        digits = re.sub(r"\D", "", text)
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        elif len(digits) == 11 and digits.startswith("0"):
+            digits = digits[1:]
+        text = digits
     return text
 
 
@@ -97,19 +149,8 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     # Optional name and hub columns. We pull these from the file so the engine
     # can label unknown rider_ids with a real name + hub in the onboarding
     # modal (instead of just "id 8906377190 — who's that?").
-    name_col = match_column(
-        df.columns, "rider_name", "rider name", "name", "worker name", "worker_name"
-    )
-    hub_col = match_column(
-        df.columns,
-        "store",
-        "hub",
-        "store/hub",
-        "store_hub",
-        "store name",
-        "hub name",
-        "store/hub name",
-    )
+    name_col = match_column(df.columns, *_NAME_ALIASES)
+    hub_col = match_column(df.columns, *_HUB_ALIASES)
     if name_col:
         matched["name"] = name_col
     if hub_col:
@@ -253,22 +294,41 @@ def _extract_cod_lines(
     company = config["company_name"]
     key_col = match_column(df.columns, config["hold_key_column"], "worker code")
     amt_col = match_column(df.columns, config["hold_amount_column"], "amount")
-    status_col = (
-        match_column(df.columns, config["hold_status_column"])
-        if config["hold_status_column"]
-        else None
+    # Status: the configured column, else the usual header names. A COD sheet
+    # that carries a status column but no config for it used to hold EVERY
+    # line, settled ones included.
+    status_col = match_column(
+        df.columns,
+        config["hold_status_column"],
+        "transaction status",
+        "txn status",
+        "txn_status",
+        "status",
     )
     order_col = match_column(df.columns, "order number", "order_number", "order no")
     mode_col = match_column(df.columns, "payment mode", "payment_mode")
+    hub_col = match_column(df.columns, "hub code", "hub_code", *_HUB_ALIASES)
+    name_col = match_column(df.columns, "worker name", "worker_name", *_NAME_ALIASES)
 
     if not key_col or not amt_col:
         warnings.append(f"{company}: hold sheet missing key/amount columns")
         return []
 
+    def _text(row, col):
+        if not col:
+            return None
+        v = row.get(col)
+        if v is None:
+            return None
+        t = str(v).strip()
+        return t if t and t.lower() != "nan" else None
+
     lines: list[CodHoldLine] = []
     for _, row in df.iterrows():
-        worker_code = str(row.get(key_col, "")).strip()
-        if not worker_code or worker_code.lower() == "nan":
+        # Same normalisation as the payout sheet: the worker code is the rider
+        # id (a phone number at Spencer's) and must match the payout rows.
+        worker_code = _normalise_rider_id(row.get(key_col, ""))
+        if not worker_code:
             continue
         amount = to_float(row.get(amt_col))
         if amount is None:
@@ -277,9 +337,11 @@ def _extract_cod_lines(
             CodHoldLine(
                 worker_code=worker_code,
                 amount=to_paise(amount),
-                order_number=str(row.get(order_col, "")).strip() if order_col else None,
-                payment_mode=str(row.get(mode_col, "")).strip() if mode_col else None,
-                txn_status=str(row.get(status_col, "")).strip() if status_col else None,
+                order_number=_text(row, order_col) or "" if order_col else None,
+                payment_mode=_text(row, mode_col) or "" if mode_col else None,
+                txn_status=_text(row, status_col) or "" if status_col else None,
+                hub=_text(row, hub_col),
+                name=_text(row, name_col),
             )
         )
     return lines

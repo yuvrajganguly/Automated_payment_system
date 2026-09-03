@@ -31,11 +31,20 @@ def normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def match_column(columns, *candidates: str | None) -> str | None:
-    """Return the real column name matching any candidate (case-insensitive)."""
+    """Return the real column name matching any candidate (case-insensitive).
+
+    A candidate may list alternatives separated by ``|`` ("Total Payable
+    Amount|Total Payable"), so a company config can name every header a
+    client has used across layout changes without a code change.
+    """
     lower = {str(c).strip().lower(): c for c in columns}
     for cand in candidates:
-        if cand and str(cand).strip().lower() in lower:
-            return lower[str(cand).strip().lower()]
+        if not cand:
+            continue
+        for alt in str(cand).split("|"):
+            key = alt.strip().lower()
+            if key and key in lower:
+                return lower[key]
     return None
 
 
@@ -108,7 +117,13 @@ def read_table(xl: pd.ExcelFile, sheet: str, anchor_candidates, max_scan: int = 
     # otherwise turn "N/A", "NA", "null", "-" into NaN and we could no longer
     # tell "blank" from "junk" when reporting an unreadable payout.
     probe = xl.parse(sheet, header=None, dtype=str, nrows=max_scan, keep_default_na=False)
-    anchors = {str(a).strip().lower() for a in anchor_candidates if a}
+    anchors = {
+        alt.strip().lower()
+        for a in anchor_candidates
+        if a
+        for alt in str(a).split("|")
+        if alt.strip()
+    }
     header_row = 0
     for i in range(len(probe)):
         cells = {str(v).strip().lower() for v in probe.iloc[i].tolist()}

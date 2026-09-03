@@ -117,8 +117,10 @@ def _import_roster(conn, xl, report):
     c = {
         "rid": match_column(df.columns, "rider_id", "rider id", "riderid"),
         "co": match_column(df.columns, "company"),
-        "name": match_column(df.columns, "rider_name", "rider name", "name"),
-        "hub": match_column(df.columns, "hub"),
+        "name": match_column(
+            df.columns, "rider_name", "rider name", "name", "worker name", "worker_name"
+        ),
+        "hub": match_column(df.columns, "hub", "store", "store_names", "store name"),
         "veh": match_column(df.columns, "vehicle", "vehicle type"),
         "acc": match_column(df.columns, "account_no", "account no", "acc_no", "account number"),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),

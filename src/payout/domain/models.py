@@ -41,6 +41,11 @@ class CodHoldLine:
     order_number: str | None = None
     payment_mode: str | None = None
     txn_status: str | None = None
+    # Hub / store code and worker name as the COD sheet states them. COD
+    # riders are not always in the payout sheet (or even on the roster), so
+    # the file is the only place these can come from.
+    hub: str | None = None
+    name: str | None = None
 
 
 @dataclass

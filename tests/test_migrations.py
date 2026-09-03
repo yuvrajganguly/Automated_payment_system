@@ -18,6 +18,8 @@ from tests.conftest import reset_database
 _NEW_COLUMNS = [
     ("password_reset_tokens", "attempts"),
     ("companies", "rider_ids_shared_with"),
+    ("cod_holds", "hub"),
+    ("cod_holds", "worker_name"),
 ]
 
 
@@ -54,7 +56,16 @@ def test_pre_runner_database_gets_every_migration():
         "    rider_ids_shared_with TEXT\n",
         "    is_active          INTEGER NOT NULL DEFAULT 1\n",
     )
+    old_schema = old_schema.replace(
+        "    -- Hub/store code and worker name exactly as the company's COD sheet\n"
+        "    -- states them. A COD rider need not be in the payout (or on the roster),\n"
+        "    -- so the file is the only source for these.\n"
+        "    hub          TEXT,\n"
+        "    worker_name  TEXT,\n",
+        "",
+    )
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
+    assert "worker_name" not in old_schema
 
     import payout.db.schema as schema_mod
 
@@ -79,3 +90,39 @@ def test_pre_runner_database_gets_every_migration():
             assert has_column(conn, table, col), (table, col)
         # idempotent: the columns exist, the steps must not fail if re-run
         assert run_migrations(conn, fresh_database=False) == []
+
+
+def test_0007_upgrades_stock_spencers_config_only():
+    """An existing DB whose Spencer's row still carries the pre-2026-08 headers
+    gets the '|'-alternatives; a row the operator customised is left alone."""
+    from payout.db.migrations import _0007_cod_hub_and_spencers_layout
+
+    reset_database()
+    initialize_database()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE companies SET rider_id_column='Rider id', "
+            "payout_column='Total Payable Amount', orders_column='Delivered Orders' "
+            "WHERE company_name=?",
+            ("Spencer's",),
+        )
+        conn.execute(
+            "INSERT INTO companies (company_name, parser_type, rider_id_column, payout_column, "
+            "orders_column) VALUES ('Custom', 'generic', 'Rider id', 'My Pay', 'Delivered Orders')"
+        )
+        _0007_cod_hub_and_spencers_layout(conn)
+        sp = conn.execute(
+            "SELECT rider_id_column, payout_column, orders_column FROM companies "
+            "WHERE company_name=?",
+            ("Spencer's",),
+        ).fetchone()
+        assert tuple(sp) == (
+            "Rider id|rider_phone",
+            "Total Payable Amount|Total Payable",
+            "Delivered Orders|total_orders_delivered",
+        )
+        other = conn.execute(
+            "SELECT rider_id_column, payout_column FROM companies WHERE company_name='Custom'"
+        ).fetchone()
+        assert tuple(other) == ("Rider id", "My Pay")
+        conn.rollback()

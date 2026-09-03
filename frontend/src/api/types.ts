@@ -61,7 +61,15 @@ export interface CycleResult {
   cycle_end: string
   pay_rows: RiderResultRow[]
   dues_rows: RiderResultRow[]
-  hold_rows: { rider_id: string; amount: number }[]
+  hold_rows: {
+    rider_id: string
+    amount: number
+    name?: string
+    hub?: string
+    in_payout?: boolean
+  }[]
+  hub_updates?: { rider_id: string; name: string; old_hub: string; new_hub: string }[]
+  file_rider_ids?: string[]
   inactive_rows: InactiveRow[]
   warnings: string[]
   unknown_ids: string[]

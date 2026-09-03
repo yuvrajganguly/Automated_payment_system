@@ -86,14 +86,19 @@ COMPANIES: list[dict] = [
     {
         "company_name": "Spencer's",
         "parser_type": "spencers",
-        # Sheets are now named WEEK1, WEEK2, … so we just take the first sheet.
+        # Sheets are now named WEEK1, WEEK2, … so we just take the first sheet
+        # (the parser also finds the payout sheet by its columns).
         "payout_sheet": None,
-        "rider_id_column": "Rider id",
-        "payout_column": "Total Payable Amount",
-        "orders_column": "Delivered Orders",
+        # Two layouts in the wild: the classic "Rider id / Total Payable Amount /
+        # Delivered Orders" sheet, and the 2026-08 export keyed on rider_phone
+        # (the rider id IS the phone number) with "Total Payable" and
+        # "total_orders_delivered". "|" separates the accepted headers.
+        "rider_id_column": "Rider id|rider_phone",
+        "payout_column": "Total Payable Amount|Total Payable",
+        "orders_column": "Delivered Orders|total_orders_delivered",
         "has_hold_sheet": 1,
         "hold_style": "sheet",
-        "hold_sheet": "COD",
+        "hold_sheet": "COD",  # found by content too ("COD HOLD" in the new export)
         "hold_key_column": "WORKER CODE",
         "hold_amount_column": "AMOUNT",
         "hold_status_column": None,

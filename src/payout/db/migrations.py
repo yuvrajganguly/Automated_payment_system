@@ -213,6 +213,32 @@ def _0006_collapse_bluedart(conn: Any) -> None:
         )
 
 
+def _0007_cod_hub_and_spencers_layout(conn: Any) -> None:
+    """Spencer's 2026-08 payout layout + COD hub/name.
+
+    * ``cod_holds.hub`` / ``worker_name``: the COD sheet's HUB CODE and WORKER
+      NAME, so the HOLD sheet can label COD riders who are not in the payout.
+    * Spencer's file now keys riders on ``rider_phone`` (the rider id has
+      always been the phone number), pays ``Total Payable`` and counts
+      ``total_orders_delivered``. Column configs accept ``|``-separated
+      alternatives, so both the old and the new headers stay valid. Only a
+      config still on the stock value is touched — an operator's edit wins.
+    """
+    add_column(conn, "cod_holds", "hub", "TEXT")
+    add_column(conn, "cod_holds", "worker_name", "TEXT")
+    for col, old, new in (
+        ("rider_id_column", "Rider id", "Rider id|rider_phone"),
+        ("payout_column", "Total Payable Amount", "Total Payable Amount|Total Payable"),
+        ("orders_column", "Delivered Orders", "Delivered Orders|total_orders_delivered"),
+    ):
+        # Company name bound as a parameter: a double-quoted "Spencer's" would
+        # be an identifier on Postgres, not a string.
+        conn.execute(
+            f"UPDATE companies SET {col}=? WHERE company_name=? AND {col}=?",
+            (new, "Spencer's", old),
+        )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -220,6 +246,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0004_offset_credit_vs_arrears", _0004_offset_credit_vs_arrears),
     ("0005_deposit_for_closed_evs", _0005_deposit_for_closed_evs),
     ("0006_collapse_bluedart", _0006_collapse_bluedart),
+    ("0007_cod_hub_and_spencers_layout", _0007_cod_hub_and_spencers_layout),
 ]
 
 _TRACKING_DDL = (

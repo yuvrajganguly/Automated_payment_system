@@ -182,10 +182,18 @@ outstanding and carries forward. Recovered arrears are logged as
 
 Two input styles, same outcome (mark rider HOLD, show pending amount, write to
 `cod_holds`, list on the Hold List):
-- **Jiffy** — separate COD sheet (2nd sheet). Group by `WORKER CODE`, sum
-  `AMOUNT` (defensively where `Transaction Status` = pending — expected to be
-  all rows). Match worker code to the payout sheet's `Rider id`.
+- **Jiffy / Spencer's** — separate COD sheet (found by its columns). Group by
+  `WORKER CODE`, sum `AMOUNT` where `Transaction Status` = pending (the status
+  column is picked up by name even when the config names none). Match worker
+  code to the payout sheet's rider id — both are normalised the same way, so
+  `'+91 98765 43210` on a hand-typed COD row still matches `9876543210`.
+  `HUB CODE` and `WORKER NAME` are stored with each line (`cod_holds.hub`,
+  `worker_name`).
 - **Myntra** — inline `COD-Pending` column on the payout row.
+
+The output's **HOLD sheet** has two blocks: COD riders who are in the payout
+(their payout is held) and COD riders who are *not* in the payout — nothing to
+hold, so the office chases them; each carries the hub the COD sheet gave.
 
 COD is a withhold flag + recorded amount for manual decision; it is **not**
 auto-deducted from the payout. (`Cod-Adjusted` / `Previous Week COD ADJ` are not
@@ -234,7 +242,8 @@ Aadhaar (`kyc_no`) will make this permanent later.
 | Blitz     | only sheet                            | `rider_id`      | `net_pay`              | — |
 | Nykaa     | only sheet *(provisional: same as Blitz)* | `rider_id` (= Blitz ID) | `net_pay`      | — |
 | Myntra    | 1st sheet                             | `Worker Code`   | `Final Payout`         | inline `COD-Pending` |
-| Jiffy     | 1st sheet                             | `Rider id`      | `Total Payable Amount` | 2nd sheet (COD line items) |
+| Spencer's (Jiffy) — classic | 1st sheet (`WEEK1`…)      | `Rider id`      | `Total Payable Amount` | `COD` sheet (line items) |
+| Spencer's — 2026-08 export | `Payout` sheet             | `rider_phone`   | `Total Payable`        | `COD HOLD` sheet (line items) |
 | Zepto     | *to be provided*                      | —               | —                      | — |
 
 \* Not `total payout to be released` — that figure includes Qwikserve's 3P cut.
@@ -246,7 +255,16 @@ Status, Transaction Type, Remarks. Sum `AMOUNT` per `WORKER CODE`.
 **Parsing is config-driven** — a single generic parser reads each company's
 `companies` row (sheet selector + columns + hold style), so onboarding a new
 company is a config row, not code. This is what the dashboard's future parser
-builder will sit on.
+builder will sit on. A column config may list alternatives separated by `|`
+(`Total Payable Amount|Total Payable`) so one row covers every layout a client
+has shipped; the rider-id column additionally accepts `rider_id` / `Rider id` /
+`Worker Code` / `rider_phone`, the name column `Name` / `Rider Name` /
+`Worker Name`, and the hub column `Store` / `Hub` / `store_names` / `store_ids`.
+
+**Hubs follow the file.** Every rider in a payout has their roster hub
+(`rider_master.hub`) rewritten from the file's hub column on each run, and the
+PAY/DUES rows show the file's hub. The roster value is only a fallback for
+files with no hub column and for absent (INACTIVE) riders.
 
 ---
 

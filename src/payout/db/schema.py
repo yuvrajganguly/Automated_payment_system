@@ -167,6 +167,11 @@ CREATE TABLE IF NOT EXISTS cod_holds (
     payment_mode TEXT,
     txn_status   TEXT,
     source       TEXT NOT NULL,
+    -- Hub/store code and worker name exactly as the company's COD sheet
+    -- states them. A COD rider need not be in the payout (or on the roster),
+    -- so the file is the only source for these.
+    hub          TEXT,
+    worker_name  TEXT,
     cleared_at   TEXT,           -- NULL until the operator marks the COD collected
     cleared_by   TEXT,
     created_at   TEXT DEFAULT (datetime('now'))
