@@ -329,16 +329,21 @@ def dashboard_summary(
             ).fetchone()["s"]
         )
 
+        # Active riders only — silent (dormant) debt is excluded from every
+        # dashboard total and lives on the Arrears page under "Show dormant".
+        _not_dormant_bal = dormant_person_sql("balances.person_id")
         old_dues_now = float(
             conn.execute(
                 "SELECT COALESCE(SUM(-current_balance), 0) AS s FROM balances "
-                "WHERE current_balance < 0"
+                f"WHERE current_balance < 0 AND NOT {_not_dormant_bal}"
             ).fetchone()["s"]
         )
+        _not_dormant_arr = dormant_person_sql("ev_arrears.person_id")
         ev_arrears_now = float(
-            conn.execute("SELECT COALESCE(SUM(outstanding), 0) AS s FROM ev_arrears").fetchone()[
-                "s"
-            ]
+            conn.execute(
+                "SELECT COALESCE(SUM(outstanding), 0) AS s FROM ev_arrears "
+                f"WHERE NOT {_not_dormant_arr}"
+            ).fetchone()["s"]
         )
         total_arrears = old_dues_now + ev_arrears_now
 
@@ -402,16 +407,15 @@ def dashboard_summary(
             SELECT pr.person_id, pr.display_name,
                    COALESCE(ar.outstanding, 0) AS ev_arrears,
                    CASE WHEN COALESCE(b.current_balance, 0) < 0
-                        THEN -b.current_balance ELSE 0 END AS dues,
-                   CASE WHEN {_dormant} THEN 1 ELSE 0 END AS dormant
+                        THEN -b.current_balance ELSE 0 END AS dues
             FROM person_registry pr
             LEFT JOIN balances   b  ON b.person_id  = pr.person_id
             LEFT JOIN ev_arrears ar ON ar.person_id = pr.person_id
             WHERE (COALESCE(b.current_balance, 0) < 0
                    OR COALESCE(ar.outstanding, 0) > 0)
+              AND NOT {_dormant}
               {arr_co_filter}
-            ORDER BY CASE WHEN {_dormant} THEN 1 ELSE 0 END,
-                     (COALESCE(ar.outstanding, 0) +
+            ORDER BY (COALESCE(ar.outstanding, 0) +
                       CASE WHEN COALESCE(b.current_balance, 0) < 0
                            THEN -b.current_balance ELSE 0 END) DESC
             """,
@@ -424,7 +428,6 @@ def dashboard_summary(
                 "ev_arrears": round(float(r["ev_arrears"] or 0), 2),
                 "dues": round(float(r["dues"] or 0), 2),
                 "arrears_total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2),
-                "dormant": bool(r["dormant"]),
             }
             for r in top_arrears_rows
         ]
@@ -950,23 +953,23 @@ def dashboard_breakdown(
             rows = [dict(r) for r in conn.execute(sql, scope_params + [limit])]
 
         elif metric == "total_arrears":
-            title = "All riders carrying arrears or dues (live) — silent = EV returned, pay held"
-            columns = ["person_id", "name", "status", "ev_arrears", "dues", "arrears_total"]
+            title = "Riders carrying arrears or dues (live, active riders only)"
+            columns = ["person_id", "name", "ev_arrears", "dues", "arrears_total"]
             dormant = dormant_person_sql("pr.person_id")
+            # Silent (dormant) debtors are excluded entirely — their debt
+            # lives on the Arrears page under "Show dormant", nowhere else.
             sql = (
                 "SELECT pr.person_id, pr.display_name AS name, "
-                f"      CASE WHEN {dormant} THEN 'silent' ELSE 'active' END AS status, "
                 "       COALESCE(ar.outstanding, 0) AS ev_arrears, "
                 "       CASE WHEN COALESCE(b.current_balance, 0) < 0 "
                 "            THEN -b.current_balance ELSE 0 END AS dues "
                 "FROM person_registry pr "
                 "LEFT JOIN balances   b  ON b.person_id  = pr.person_id "
                 "LEFT JOIN ev_arrears ar ON ar.person_id = pr.person_id "
-                "WHERE COALESCE(b.current_balance, 0) < 0 "
-                "   OR COALESCE(ar.outstanding, 0) > 0 "
-                # active debtors first (the chase list), silent ones after
-                f"ORDER BY CASE WHEN {dormant} THEN 1 ELSE 0 END, "
-                "         (COALESCE(ar.outstanding, 0) + "
+                "WHERE (COALESCE(b.current_balance, 0) < 0 "
+                "   OR COALESCE(ar.outstanding, 0) > 0) "
+                f"  AND NOT {dormant} "
+                "ORDER BY (COALESCE(ar.outstanding, 0) + "
                 "          CASE WHEN COALESCE(b.current_balance, 0) < 0 "
                 "               THEN -b.current_balance ELSE 0 END) DESC "
                 "LIMIT ?"

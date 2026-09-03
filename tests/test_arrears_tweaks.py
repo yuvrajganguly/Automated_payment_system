@@ -371,9 +371,10 @@ def test_story_by_rider_flags_dormant_rows(db):
     assert rows[active]["dormant"] is False
 
 
-def test_breakdown_drawer_marks_silent_riders_and_sorts_them_last(db):
-    """The dashboard card drill-down (breakdown/total_arrears) must tag
-    no-open-EV debtors 'silent' and list active debtors first."""
+def test_breakdown_drawer_excludes_silent_riders_entirely(db):
+    """The dashboard card drill-down (breakdown/total_arrears) must not list
+    no-open-EV debtors at all, and the summary total_arrears stat must not
+    include their debt — silent debt lives only on the Arrears page."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
@@ -396,13 +397,13 @@ def test_breakdown_drawer_marks_silent_riders_and_sorts_them_last(db):
     with TestClient(app) as c:
         c.post("/api/auth/login", data={"username": "adm5@t.test", "password": "Admin-pass-1"})
         payload = c.get("/api/dashboard/breakdown/total_arrears").json()
-    assert "status" in payload["columns"]
-    rows = payload["rows"]
-    by_pid = {r["person_id"]: r for r in rows}
-    assert by_pid[dormant]["status"] == "silent"
-    assert by_pid[dues_dormant]["status"] == "silent"
-    assert by_pid[active]["status"] == "active"
-    # active debtors first, however small their debt
-    statuses = [r["status"] for r in rows]
-    assert statuses.index("silent") > statuses.index("active")
-    assert "silent" not in statuses[: statuses.index("silent")]
+        summary = c.get("/api/dashboard/summary").json()
+    pids = {r["person_id"] for r in payload["rows"]}
+    assert active in pids
+    assert dormant not in pids, "silent debtor must not appear in the drawer"
+    assert dues_dormant not in pids
+    # the live total counts ONLY the active debtor's ₹100
+    assert summary["stats"]["total_arrears"] == 100.0
+    # and the top-arrears list is silent-free too
+    top = {r["person_id"] for r in summary["charts"]["top_arrears"]}
+    assert active in top and dormant not in top and dues_dormant not in top

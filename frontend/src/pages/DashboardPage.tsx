@@ -210,16 +210,6 @@ function cellValue(col: string, v: unknown, i: number) {
   if (col === 'person_id' && typeof v === 'number') {
     return <Link key={i} to={'/persons/' + v} className="text-brand-300 hover:underline">#{v}</Link>
   }
-  if (col === 'status' && v === 'silent') {
-    return (
-      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded
-                       bg-amber-500/10 text-amber-400 border border-amber-500/20"
-            title="EV returned — debt kept silently, payouts held">
-        silent
-      </span>
-    )
-  }
-  if (col === 'status' && v === 'active') return <span className="text-xs text-slate-500">active</span>
   if (typeof v === 'number' && !_PLAIN_COLS.has(col)) return '₹' + moneyWhole(v)
   return String(v ?? '—')
 }
@@ -281,9 +271,7 @@ function BreakdownDrawer({ metric, suffix, onClose }: {
               </thead>
               <tbody>
                 {data.rows.map((r, i) => (
-                  <tr key={i}
-                      className={'border-t border-edge-soft hover:bg-white/[0.02]' +
-                        (r.status === 'silent' ? ' opacity-55' : '')}>
+                  <tr key={i} className="border-t border-edge-soft hover:bg-white/[0.02]">
                     {data.columns.map((c) => (
                       <td key={c} className={'px-2.5 py-1.5 whitespace-nowrap ' +
                         (typeof r[c] === 'number' && !_PLAIN_COLS.has(c) ? 'text-right tabular-nums' : '')}>
@@ -553,25 +541,9 @@ function StoryTab({ s, suffix, setTab }: {
         <Big label="Rent dues — active EV holders" value={r0(p.ev_arrears_active)}
              onClick={() => setDrill('total_arrears')}
              tone={p.ev_arrears_active > 0 ? 'bad' : 'good'}
-             sub={
-               <>
-                 the number to chase — owed by riders who still hold an EV
-                 {(p.ev_arrears_dormant > 0 || (p.dues_dormant ?? 0) > 0) && (
-                   <> · {r0(p.ev_arrears_dormant + (p.dues_dormant ?? 0))} more kept silently
-                   on {p.dormant_riders} rider{p.dormant_riders === 1 ? '' : 's'} without
-                   an EV (their pay is held)</>
-                 )}
-               </>
-             } />
-        <Big label="Other dues owed by riders" value={r0(p.dues)}
-             sub={
-               <>
-                 carry-forward balances
-                 {(p.dues_dormant ?? 0) > 0 && (
-                   <> · {r0(p.dues_dormant)} of it on riders without an EV (pay held)</>
-                 )}
-               </>
-             }
+             sub={<>the number to chase — owed by riders who still hold an EV</>} />
+        <Big label="Other dues owed by riders" value={r0(p.dues - (p.dues_dormant ?? 0))}
+             sub={<>carry-forward balances, active riders</>}
              onClick={() => navigate('/arrears?bucket=dues')} />
         <Big label="Credit riders hold with us" value={r0(p.credit)} sub={<>auto-offsets new arrears</>}
              onClick={() => setDrill('credit_balances')} />
@@ -694,8 +666,7 @@ function CompaniesTab({ suffix }: { suffix: string }) {
     <>
       <p className="text-sm text-slate-500 mb-3">
         Each company's window: what they sent, what riders got, and how their rent behaved.
-        <span className="text-slate-400"> "Owed now" is live (not window-scoped), active riders only —
-        the amber "silent" line is debt kept quietly on riders who returned their EV.</span>
+        <span className="text-slate-400"> "Owed now" is live (not window-scoped), active riders only.</span>
       </p>
       <TableShell>
         <thead className="text-left border-b border-edge-soft">
@@ -729,9 +700,6 @@ function CompaniesTab({ suffix }: { suffix: string }) {
                 <td className={cell}>{r0(r.written_off)}</td>
                 <td className={cell + ((r.outstanding + r.dues) > 0 ? ' text-red-300' : '')}>
                   {r0(r.outstanding + r.dues)}
-                  {(r.silent ?? 0) > 0 && (
-                    <div className="text-[11px] text-amber-400/80">+ {r0(r.silent!)} silent</div>
-                  )}
                 </td>
               </tr>
             )
@@ -747,14 +715,7 @@ function CompaniesTab({ suffix }: { suffix: string }) {
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_missed, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
-            <td className={cell}>
-              {r0(sorted.reduce((a, r) => a + r.outstanding + r.dues, 0))}
-              {sorted.some((r) => (r.silent ?? 0) > 0) && (
-                <div className="text-[11px] font-normal text-amber-400/80">
-                  + {r0(sorted.reduce((a, r) => a + (r.silent ?? 0), 0))} silent
-                </div>
-              )}
-            </td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.outstanding + r.dues, 0))}</td>
           </tr>
         </tfoot>
       </TableShell>
@@ -857,9 +818,9 @@ function RidersTab({ suffix }: { suffix: string }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <p className="text-sm text-slate-500">
-          Per rider for the window. <span className="text-slate-400">"Owes now" = live EV debt + dues.
-          Riders tagged <span className="text-amber-400/90">silent</span> returned their EV — debt kept
-          quietly, pay held; they're out of the chase total.</span>
+          Per rider for the window. <span className="text-slate-400">"Owes now" = live EV debt + dues,
+          active riders only — <span className="text-amber-400/90">silent</span> riders' debt lives on
+          the Arrears page (Show dormant).</span>
         </p>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter riders…"
                className="border rounded-lg px-3 py-1.5 text-sm w-56" />
@@ -903,8 +864,8 @@ function RidersTab({ suffix }: { suffix: string }) {
                 <td className={cell}>{r0(r.arrears_recovered)}</td>
                 <td className={cell}>{r0(r.written_off)}</td>
                 <td className={cell + ' font-semibold ' +
-                    (owes > 0 ? (r.dormant ? 'text-amber-400/80' : 'text-red-300') : 'text-slate-500')}>
-                  {r0(owes)}
+                    (!r.dormant && owes > 0 ? 'text-red-300' : 'text-slate-500')}>
+                  {r.dormant ? '—' : r0(owes)}
                 </td>
               </tr>
             )
@@ -922,12 +883,6 @@ function RidersTab({ suffix }: { suffix: string }) {
             <td className={cell}>
               {r0(sorted.filter((r) => !r.dormant)
                         .reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))}
-              {sorted.some((r) => r.dormant) && (
-                <div className="text-[11px] font-normal text-amber-400/80">
-                  + {r0(sorted.filter((r) => r.dormant)
-                              .reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))} silent
-                </div>
-              )}
             </td>
           </tr>
         </tfoot>
