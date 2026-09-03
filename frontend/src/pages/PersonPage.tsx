@@ -140,14 +140,18 @@ export function PersonPage() {
         </div>
       )}
 
-      {person.ev_history && person.ev_history.length > 0 && (
-        <Section title={`EV History (${person.ev_history.length})`}>
+      <Section title={`EV History (${person.ev_history?.length ?? 0})`}>
+        {!person.ev_history?.length ? (
+          <p className="text-sm text-slate-500 px-1 py-2">
+            This rider has never held an EV.
+          </p>
+        ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-left">
               <tr>
                 <Th>EV ID</Th><Th>Provider</Th><Th>Model</Th>
                 <Th right>Weekly</Th><Th>Handover</Th><Th>Returned</Th>
-                <Th>Rent through</Th>
+                <Th right>Days held</Th><Th>Rent through</Th>
               </tr>
             </thead>
             <tbody>
@@ -167,13 +171,14 @@ export function PersonPage() {
                       ? <span className="text-amber-300 font-medium">open</span>
                       : h.returned_date}
                   </Td>
+                  <Td right>{daysHeld(h.handover_date, h.returned_date)}</Td>
                   <Td>{h.rent_charged_through ?? '-'}</Td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </Section>
-      )}
+        )}
+      </Section>
 
       {isAdmin && person.riders.length >= 2 && (
         <div className="mb-3 flex justify-end">
@@ -446,6 +451,14 @@ function AdjustmentForm({ personId, onPosted }: { personId: number; onPosted: ()
   )
 }
 
+function daysHeld(handover: string | null, returned: string | null): string {
+  if (!handover) return '-'
+  const from = new Date(handover + 'T00:00:00')
+  const to = returned ? new Date(returned + 'T00:00:00') : new Date()
+  const d = Math.round((to.getTime() - from.getTime()) / 86400000)
+  return d >= 0 ? String(d) : '-'
+}
+
 function Stat({ label, value, bad, linkTo }:
   { label: string; value: string; bad?: boolean; linkTo?: string }) {
   const inner = (
@@ -478,6 +491,7 @@ function RiderRow({
   rider: RiderRow; companies: CompanyOpt[]; isAdmin: boolean; onSaved: () => void
 }) {
   const [editing, setEditing] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
   const initial = () => ({
     new_rider_id: rider.rider_id,
     new_company: rider.company,
@@ -492,6 +506,20 @@ function RiderRow({
   const [err, setErr] = useState<string | null>(null)
 
   function reset() { setForm(initial()); setErr(null); setEditing(false) }
+
+  async function remove() {
+    setBusy(true); setErr(null)
+    try {
+      await api.delete(
+        '/riders/' + encodeURIComponent(rider.rider_id) +
+        '?company=' + encodeURIComponent(rider.company),
+      )
+      onSaved()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Delete failed')
+      setBusy(false); setConfirmDel(false)
+    }
+  }
 
   async function save() {
     setBusy(true); setErr(null)
@@ -545,10 +573,31 @@ function RiderRow({
         <Td>{rider.is_active ? 'yes' : 'no'}</Td>
         {isAdmin && (
           <Td>
-            <button onClick={() => setEditing(true)}
-                    className="text-xs text-brand underline hover:opacity-80">
-              Edit
-            </button>
+            {confirmDel ? (
+              <span className="text-xs whitespace-nowrap">
+                <span className="text-red-300 mr-1.5">Delete {rider.rider_id}?</span>
+                <button onClick={remove} disabled={busy}
+                        className="text-red-300 underline hover:opacity-80 mr-1.5 disabled:opacity-50">
+                  {busy ? '…' : 'Yes, delete'}
+                </button>
+                <button onClick={() => setConfirmDel(false)} disabled={busy}
+                        className="text-slate-400 underline hover:opacity-80">
+                  Cancel
+                </button>
+                {err && <span className="block text-red-400 mt-0.5">{err}</span>}
+              </span>
+            ) : (
+              <span className="text-xs whitespace-nowrap">
+                <button onClick={() => setEditing(true)}
+                        className="text-brand underline hover:opacity-80 mr-2">
+                  Edit
+                </button>
+                <button onClick={() => setConfirmDel(true)}
+                        className="text-red-400/70 underline hover:text-red-300">
+                  Delete
+                </button>
+              </span>
+            )}
           </Td>
         )}
       </tr>

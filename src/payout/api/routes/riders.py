@@ -442,6 +442,74 @@ def update_rider(
     return RiderOut(**_rider_dict(row))
 
 
+@router.delete("/{rider_id}")
+def delete_rider(
+    rider_id: str, company: str = Query(...), _: dict = Depends(require_admin)
+) -> dict:
+    """Delete one (rider_id, company) mapping.
+
+    Only the workbook mapping goes — the person, their balances, transactions,
+    COD history and EV assignments are all keyed by person_id and stay intact.
+    If the deleted id was the person's deduction anchor, the anchor moves to
+    one of their remaining rider ids (or clears when none remain). Payout
+    workbooks carrying this rider_id will land as unknown riders afterwards —
+    that's the point of deleting a bad id.
+
+    (The audit middleware records who deleted what, as with every DELETE.)
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
+            (rider_id, company),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Rider not found")
+        pid = row["person_id"]
+
+        conn.execute("DELETE FROM rider_master WHERE rider_id=? AND company=?", (rider_id, company))
+
+        remaining = conn.execute(
+            "SELECT rider_id, company FROM rider_master WHERE person_id=? "
+            "ORDER BY is_active DESC, updated_at DESC",
+            (pid,),
+        ).fetchall()
+
+        # Re-anchor the deduction pointer if it referenced the deleted id.
+        anchor = conn.execute(
+            "SELECT deduction_rider_id, deduction_company FROM person_registry WHERE person_id=?",
+            (pid,),
+        ).fetchone()
+        deduction_moved_to = None
+        if (
+            anchor
+            and anchor["deduction_rider_id"] == rider_id
+            and anchor["deduction_company"] == company
+        ):
+            if remaining:
+                deduction_moved_to = {
+                    "rider_id": remaining[0]["rider_id"],
+                    "company": remaining[0]["company"],
+                }
+                conn.execute(
+                    "UPDATE person_registry SET deduction_rider_id=?, deduction_company=? "
+                    "WHERE person_id=?",
+                    (remaining[0]["rider_id"], remaining[0]["company"], pid),
+                )
+            else:
+                conn.execute(
+                    "UPDATE person_registry SET deduction_rider_id=NULL, deduction_company=NULL "
+                    "WHERE person_id=?",
+                    (pid,),
+                )
+        conn.commit()
+    return {
+        "deleted": {"rider_id": rider_id, "company": company},
+        "person_id": pid,
+        "remaining_rider_ids": len(remaining),
+        "deduction_moved_to": deduction_moved_to,
+    }
+
+
 @router.get("/{rider_id}", response_model=RiderOut)
 def get_rider(
     rider_id: str, company: str = Query(...), _: dict = Depends(get_current_user)

@@ -148,3 +148,55 @@ def test_assign_ev_by_person_id(db, client):
         == 404
     )
     assert client.post("/api/evs/assign", json={"ev_id": "EV-P2"}).status_code == 400
+
+
+# ── 4. delete a rider id ─────────────────────────────────────────────────────
+
+
+def test_delete_rider_id_reanchors_deduction(db, client):
+    pid = make_person(db, "TwoIds")
+    make_rider(db, pid, "R1", "Blitz", "TwoIds")
+    make_rider(db, pid, "R2", "Myntra", "TwoIds")
+    db.execute(
+        "UPDATE person_registry SET deduction_rider_id='R1', deduction_company='Blitz' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+
+    r = client.delete("/api/riders/R1?company=Blitz")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == {"rider_id": "R1", "company": "Blitz"}
+    assert body["remaining_rider_ids"] == 1
+    assert body["deduction_moved_to"] == {"rider_id": "R2", "company": "Myntra"}
+    assert (
+        db.execute(
+            "SELECT COUNT(*) FROM rider_master WHERE rider_id='R1' AND company='Blitz'"
+        ).fetchone()[0]
+        == 0
+    )
+    anchor = db.execute(
+        "SELECT deduction_rider_id, deduction_company FROM person_registry WHERE person_id=?",
+        (pid,),
+    ).fetchone()
+    assert (anchor["deduction_rider_id"], anchor["deduction_company"]) == ("R2", "Myntra")
+
+    # deleting the last id clears the anchor; the person survives
+    r2 = client.delete("/api/riders/R2?company=Myntra")
+    assert r2.status_code == 200
+    assert r2.json()["remaining_rider_ids"] == 0
+    assert r2.json()["deduction_moved_to"] is None
+    anchor = db.execute(
+        "SELECT deduction_rider_id, deduction_company FROM person_registry WHERE person_id=?",
+        (pid,),
+    ).fetchone()
+    assert anchor["deduction_rider_id"] is None and anchor["deduction_company"] is None
+    assert (
+        db.execute("SELECT COUNT(*) FROM person_registry WHERE person_id=?", (pid,)).fetchone()[0]
+        == 1
+    )
+
+
+def test_delete_rider_id_unknown_404(db, client):
+    assert client.delete("/api/riders/NOPE?company=Blitz").status_code == 404
