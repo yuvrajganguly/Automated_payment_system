@@ -21,15 +21,24 @@ def list_arrears(include_dormant: bool = False, _: dict = Depends(get_current_us
     when it's negative). The Arrears page uses this to surface carryforward
     riders alongside the EV-rent and COD buckets.
 
-    A person with EV arrears whose EV was RETURNED is ``dormant``: hidden from
-    the active view unless ``include_dormant`` is set. The debt is kept
-    silently, and the engine HOLDS any future payout for them instead of
-    auto-settling. Riders whose debt is purely general dues are always listed
-    — dormancy is an EV-arrears concept.
+    A person who no longer holds an EV but still owes money is ``dormant``:
+    hidden from the active view unless ``include_dormant`` is set. The debt is
+    kept silently, and the engine HOLDS any future payout for them instead of
+    auto-settling. This covers BOTH buckets — EV back-rent AND general
+    carry-forward dues — for anyone who ever held an EV (their shortfalls often
+    rolled into dues rather than the EV-arrears bucket). A rider who never had
+    an EV and owes only general dues stays on the active list: their dues clear
+    automatically from the next payout.
     """
-    # Dormant = still owes EV back-rent but holds no EV any more (the open-
-    # assignment join below produced no row).
-    dormant_expr = "(COALESCE(ea.outstanding, 0) > 0 AND a.ev_id IS NULL)"
+    # Dormant = holds no EV any more (the open-assignment join produced no
+    # row) AND either owes EV back-rent, or is an ex-EV holder whose debt
+    # rolled into general dues.
+    dormant_expr = (
+        "(a.ev_id IS NULL AND (COALESCE(ea.outstanding, 0) > 0 "
+        "OR EXISTS (SELECT 1 FROM ev_assignments ra "
+        "           WHERE ra.person_id = pr.person_id "
+        "             AND ra.returned_date IS NOT NULL)))"
+    )
     dormant_filter = "" if include_dormant else f"AND NOT {dormant_expr} "
     with get_connection() as conn:
         rows = conn.execute(

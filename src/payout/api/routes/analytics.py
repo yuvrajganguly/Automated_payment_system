@@ -557,19 +557,42 @@ def money_story(
             " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NOT NULL "
             "     THEN ea.outstanding END), 0) AS ev_arrears_active, "
             " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NULL "
-            "     THEN ea.outstanding END), 0) AS ev_arrears_dormant, "
-            " COALESCE(SUM(CASE WHEN ea.outstanding > 0 AND a.person_id IS NULL "
-            "     THEN 1 ELSE 0 END), 0) AS dormant_riders "
+            "     THEN ea.outstanding END), 0) AS ev_arrears_dormant "
             "FROM ev_arrears ea "
             "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
             "           WHERE returned_date IS NULL) a ON a.person_id = ea.person_id"
         ).fetchone()
+        # Dues split mirrors the EV-arrears split: an ex-EV holder (no open
+        # assignment, has a closed one) with a negative balance is dormant —
+        # their debt often rolled into dues instead of the EV-arrears bucket.
         bal = conn.execute(
             "SELECT "
-            " COALESCE(SUM(CASE WHEN current_balance < 0 THEN -current_balance END), 0) AS dues, "
-            " COALESCE(SUM(CASE WHEN current_balance > 0 THEN current_balance END), 0) AS credit "
-            "FROM balances"
+            " COALESCE(SUM(CASE WHEN b.current_balance < 0 THEN -b.current_balance END), 0) "
+            "   AS dues, "
+            " COALESCE(SUM(CASE WHEN b.current_balance < 0 AND o.person_id IS NULL "
+            "     AND r.person_id IS NOT NULL THEN -b.current_balance END), 0) AS dues_dormant, "
+            " COALESCE(SUM(CASE WHEN b.current_balance > 0 THEN b.current_balance END), 0) "
+            "   AS credit "
+            "FROM balances b "
+            "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+            "           WHERE returned_date IS NULL) o ON o.person_id = b.person_id "
+            "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+            "           WHERE returned_date IS NOT NULL) r ON r.person_id = b.person_id"
         ).fetchone()
+        # Dormant riders = ex-EV holders, no open EV, owing in EITHER bucket.
+        dormant_riders = conn.execute(
+            "SELECT COUNT(*) FROM person_registry pr "
+            "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
+            "LEFT JOIN balances   b  ON b.person_id  = pr.person_id "
+            "WHERE NOT EXISTS (SELECT 1 FROM ev_assignments a "
+            "                  WHERE a.person_id = pr.person_id "
+            "                    AND a.returned_date IS NULL) "
+            "  AND (COALESCE(ea.outstanding, 0) > 0 "
+            "       OR (COALESCE(b.current_balance, 0) < 0 "
+            "           AND EXISTS (SELECT 1 FROM ev_assignments a "
+            "                       WHERE a.person_id = pr.person_id "
+            "                         AND a.returned_date IS NOT NULL)))"
+        ).fetchone()[0]
         cod = conn.execute(
             "SELECT COALESCE(SUM(amount),0) FROM cod_holds WHERE cleared_at IS NULL"
         ).fetchone()[0]
@@ -580,8 +603,9 @@ def money_story(
             "ev_arrears": pos["ev_arrears"],
             "ev_arrears_active": pos["ev_arrears_active"],
             "ev_arrears_dormant": pos["ev_arrears_dormant"],
-            "dormant_riders": pos["dormant_riders"],
+            "dormant_riders": dormant_riders,
             "dues": bal["dues"],
+            "dues_dormant": bal["dues_dormant"],
             "credit": bal["credit"],
             "cod_uncleared": int(cod),
         },

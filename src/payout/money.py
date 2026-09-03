@@ -85,6 +85,7 @@ MONEY_KEYS = frozenset(
         "dues_outstanding",
         "ev_arrears",
         "dues",
+        "dues_dormant",
         "total_dues",
         "expected",
         "collected",

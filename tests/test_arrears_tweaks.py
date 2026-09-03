@@ -234,3 +234,94 @@ def test_arrears_view_hides_dormant_by_default(db):
     assert active in default and dues_only in default
     assert dormant in both and bool(both[dormant]["dormant"]) is True
     assert bool(both[active]["dormant"]) is False
+
+
+# ── 3. dormancy covers general dues too (no-open-EV = silent, any bucket) ────
+
+
+def _dues_only_ex_ev_rider(db, rid="G1", dues=45000):
+    """Returned their EV; zero EV arrears — the debt rolled into general
+    carry-forward dues instead (the Dipanjan/Sayan shape)."""
+    pid = make_person(db, "DuesDormant", balance=-dues)
+    make_rider(db, pid, rid, "Blitz", "DuesDormant")
+    make_ev(db, "EV-G", provider="Raft", model="Regular")
+    assign(db, pid, "EV-G", returned="2026-07-10", charged_through="2026-07-09")
+    db.commit()
+    return pid
+
+
+def test_dues_only_ex_ev_rider_is_dormant_in_arrears_view(db):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from payout.api import ratelimit
+    from payout.api.app import app
+    from payout.auth import hash_password
+
+    pid = _dues_only_ex_ev_rider(db)
+    # control: never-EV rider with dues stays on the active list
+    bike = make_person(db, "BikeDues", balance=-30000)
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
+        ("adm2@t.test", hash_password("Admin-pass-1"), "admin"),
+    )
+    db.commit()
+    ratelimit.reset()
+    with TestClient(app) as c:
+        c.post("/api/auth/login", data={"username": "adm2@t.test", "password": "Admin-pass-1"})
+        default = {r["person_id"]: r for r in c.get("/api/arrears").json()}
+        both = {r["person_id"]: r for r in c.get("/api/arrears?include_dormant=true").json()}
+    assert pid not in default, "ex-EV rider with dues-only debt must be hidden by default"
+    assert bike in default and bool(default[bike].get("dormant")) is False
+    assert pid in both and bool(both[pid]["dormant"]) is True
+    assert both[pid]["dues_outstanding"] == 450.0  # rupees at the edge
+
+
+def test_future_payout_for_dues_only_ex_ev_rider_is_held(db):
+    _dues_only_ex_ev_rider(db)
+    r = process_cycle(
+        "Blitz", date(2026, 8, 1), date(2026, 8, 7), _file([("G1", 2000)]), commit=True
+    )
+    row = (r.pay_rows + r.dues_rows)[0]
+    assert row.is_hold is True
+    assert "dormant" in row.remarks.lower()
+    assert any("DORMANT" in w for w in r.warnings)
+
+
+def test_bike_rider_with_dues_is_not_held(db):
+    """Never held an EV — dues clear normally from the payout, no hold."""
+    pid = make_person(db, "PureBike", balance=-20000)
+    make_rider(db, pid, "B9", "Blitz", "PureBike")
+    db.commit()
+    r = process_cycle(
+        "Blitz", date(2026, 8, 1), date(2026, 8, 7), _file([("B9", 1000)]), commit=True
+    )
+    row = (r.pay_rows + r.dues_rows)[0]
+    assert row.is_hold is False
+    assert _balance(db, pid) == 0  # ₹1000 payout cleared the ₹200 dues, rest released
+
+
+def test_story_position_reports_dormant_dues_split(db):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from payout.api import ratelimit
+    from payout.api.app import app
+    from payout.auth import hash_password
+
+    _dues_only_ex_ev_rider(db, rid="G2", dues=45000)  # dormant: dues bucket
+    _dormant_rider(db, rid="D2", arrears=125000)  # dormant: EV-arrears bucket
+    make_person(db, "BikeDues2", balance=-30000)  # active: never-EV
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
+        ("adm3@t.test", hash_password("Admin-pass-1"), "admin"),
+    )
+    db.commit()
+    ratelimit.reset()
+    with TestClient(app) as c:
+        c.post("/api/auth/login", data={"username": "adm3@t.test", "password": "Admin-pass-1"})
+        p = c.get("/api/dashboard/story").json()["position"]
+    assert p["dues_dormant"] == 450.0  # rupees at the edge
+    assert p["dues"] == 750.0  # dormant 450 + active bike 300
+    assert p["ev_arrears_dormant"] == 1250.0
+    assert p["dormant_riders"] == 2

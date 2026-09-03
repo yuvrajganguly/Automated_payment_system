@@ -255,6 +255,17 @@ def _vehicle_for(conn, pid, company):
     return "EV" if r else "BIKE"
 
 
+def _ever_returned_ev(conn, pid):
+    """True if the person has at least one CLOSED EV assignment — an ex-EV
+    holder. Distinguishes riders whose debt should go dormant from pure
+    bike riders whose dues clear normally from the next payout."""
+    r = conn.execute(
+        "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NOT NULL LIMIT 1",
+        (pid,),
+    ).fetchone()
+    return r is not None
+
+
 def _shared_rider_source(conn, company):
     """Company whose rider ids this company reuses (companies.rider_ids_shared_with)."""
     row = conn.execute(
@@ -497,22 +508,26 @@ def process_cycle(
 
             prev_bal = _balance(conn, pid)
             arr_out = _arrears_out(conn, pid)
-            # DORMANT ARREARS: the person returned their EV (no open assignment,
-            # no rent this cycle) but still owes EV back-rent. Their arrears sit
-            # silently off the active view; when a payout shows up anyway, HOLD
-            # the whole thing — recover nothing automatically — so the operator
-            # decides (recover, release, or both). force_release overrides.
+            # DORMANT DEBT: the person returned their EV (no open assignment,
+            # no rent this cycle) but still owes money — EV back-rent, OR
+            # general dues their shortfalls rolled into. The debt sits
+            # silently off the active view; when a payout shows up anyway,
+            # HOLD the whole thing — recover nothing automatically from the
+            # EV bucket — so the operator decides (recover, release, or
+            # both). Pure bike riders (never held an EV) are exempt: their
+            # dues clear normally. force_release overrides.
             dormant_hold = (
-                arr_out > 0
-                and rent == 0
+                rent == 0
                 and not ov.force_release
                 and _vehicle_for(conn, pid, company) != "EV"
+                and (arr_out > 0 or (prev_bal < 0 and _ever_returned_ev(conn, pid)))
             )
             if dormant_hold:
+                owed = arr_out + max(0, -prev_bal)
                 result.warnings.append(
                     f"{rec.rider_id} ({person['name']}): payout arrived for a rider with "
-                    f"DORMANT EV arrears ({to_rupees(arr_out):,.0f} owed, EV returned). "
-                    "Payout is HELD; nothing was auto-recovered — resolve manually."
+                    f"DORMANT debt ({to_rupees(owed):,.0f} owed — EV returned). "
+                    "Payout is HELD; no EV arrears were auto-recovered — resolve manually."
                 )
             cod_amt_for_settle = holds.per_rider.get(rec.rider_id, 0.0)
             cod_carry = get_cod_arrears(conn, pid)[2]

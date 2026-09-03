@@ -42,6 +42,7 @@ interface Position {
   ev_arrears_dormant: number
   dormant_riders: number
   dues: number
+  dues_dormant: number
   credit: number
   cod_uncleared: number
 }
@@ -541,13 +542,22 @@ function StoryTab({ s, suffix, setTab }: {
              sub={
                <>
                  the number to chase — owed by riders who still hold an EV
-                 {p.ev_arrears_dormant > 0 && (
-                   <> · {r0(p.ev_arrears_dormant)} more kept silently on {p.dormant_riders} rider
-                   {p.dormant_riders === 1 ? '' : 's'} without an EV (their pay is held)</>
+                 {(p.ev_arrears_dormant > 0 || (p.dues_dormant ?? 0) > 0) && (
+                   <> · {r0(p.ev_arrears_dormant + (p.dues_dormant ?? 0))} more kept silently
+                   on {p.dormant_riders} rider{p.dormant_riders === 1 ? '' : 's'} without
+                   an EV (their pay is held)</>
                  )}
                </>
              } />
-        <Big label="Other dues owed by riders" value={r0(p.dues)} sub={<>carry-forward balances</>}
+        <Big label="Other dues owed by riders" value={r0(p.dues)}
+             sub={
+               <>
+                 carry-forward balances
+                 {(p.dues_dormant ?? 0) > 0 && (
+                   <> · {r0(p.dues_dormant)} of it on riders without an EV (pay held)</>
+                 )}
+               </>
+             }
              onClick={() => navigate('/arrears?bucket=dues')} />
         <Big label="Credit riders hold with us" value={r0(p.credit)} sub={<>auto-offsets new arrears</>}
              onClick={() => setDrill('credit_balances')} />
