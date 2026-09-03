@@ -78,6 +78,7 @@ interface CompanyRow {
   written_off: number
   outstanding: number
   dues: number
+  silent?: number
 }
 interface RiderRow {
   person_id: number
@@ -92,6 +93,7 @@ interface RiderRow {
   written_off: number
   outstanding: number
   balance: number
+  dormant?: boolean
 }
 interface EvRow {
   ev_id: string
@@ -680,7 +682,8 @@ function CompaniesTab({ suffix }: { suffix: string }) {
     <>
       <p className="text-sm text-slate-500 mb-3">
         Each company's window: what they sent, what riders got, and how their rent behaved.
-        <span className="text-slate-400"> "Owed now" is live, not window-scoped.</span>
+        <span className="text-slate-400"> "Owed now" is live (not window-scoped), active riders only —
+        the amber "silent" line is debt kept quietly on riders who returned their EV.</span>
       </p>
       <TableShell>
         <thead className="text-left border-b border-edge-soft">
@@ -714,6 +717,9 @@ function CompaniesTab({ suffix }: { suffix: string }) {
                 <td className={cell}>{r0(r.written_off)}</td>
                 <td className={cell + ((r.outstanding + r.dues) > 0 ? ' text-red-300' : '')}>
                   {r0(r.outstanding + r.dues)}
+                  {(r.silent ?? 0) > 0 && (
+                    <div className="text-[11px] text-amber-400/80">+ {r0(r.silent!)} silent</div>
+                  )}
                 </td>
               </tr>
             )
@@ -729,7 +735,14 @@ function CompaniesTab({ suffix }: { suffix: string }) {
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_missed, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
-            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.outstanding + r.dues, 0))}</td>
+            <td className={cell}>
+              {r0(sorted.reduce((a, r) => a + r.outstanding + r.dues, 0))}
+              {sorted.some((r) => (r.silent ?? 0) > 0) && (
+                <div className="text-[11px] font-normal text-amber-400/80">
+                  + {r0(sorted.reduce((a, r) => a + (r.silent ?? 0), 0))} silent
+                </div>
+              )}
+            </td>
           </tr>
         </tfoot>
       </TableShell>
@@ -832,7 +845,9 @@ function RidersTab({ suffix }: { suffix: string }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <p className="text-sm text-slate-500">
-          Per rider for the window. <span className="text-slate-400">"Owes now" = live EV debt + dues.</span>
+          Per rider for the window. <span className="text-slate-400">"Owes now" = live EV debt + dues.
+          Riders tagged <span className="text-amber-400/90">silent</span> returned their EV — debt kept
+          quietly, pay held; they're out of the chase total.</span>
         </p>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter riders…"
                className="border rounded-lg px-3 py-1.5 text-sm w-56" />
@@ -854,12 +869,20 @@ function RidersTab({ suffix }: { suffix: string }) {
           {sorted.map((r) => {
             const owes = r.outstanding + Math.max(0, -r.balance)
             return (
-              <tr key={r.person_id} className="border-t border-edge-soft hover:bg-white/[0.02]">
+              <tr key={r.person_id}
+                  className={'border-t border-edge-soft hover:bg-white/[0.02]' + (r.dormant ? ' opacity-60' : '')}>
                 <td className={cellL}>
                   <Link to={'/persons/' + r.person_id} className="text-slate-900 hover:text-brand-300 font-medium">
                     {r.display_name}
                   </Link>
                   <span className="text-xs text-slate-500 ml-2">{r.company}</span>
+                  {r.dormant && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded
+                                     bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          title="EV returned — debt kept silently, payouts held">
+                      silent
+                    </span>
+                  )}
                 </td>
                 <td className={cell}>{r0(r.gross_payout)}</td>
                 <td className={cell + ' text-emerald-300'}>{r0(r.released)}</td>
@@ -867,7 +890,8 @@ function RidersTab({ suffix }: { suffix: string }) {
                 <td className={cell + (r.rent_missed > 0 ? ' text-red-300' : '')}>{r0(r.rent_missed)}</td>
                 <td className={cell}>{r0(r.arrears_recovered)}</td>
                 <td className={cell}>{r0(r.written_off)}</td>
-                <td className={cell + ' font-semibold ' + (owes > 0 ? 'text-red-300' : 'text-slate-500')}>
+                <td className={cell + ' font-semibold ' +
+                    (owes > 0 ? (r.dormant ? 'text-amber-400/80' : 'text-red-300') : 'text-slate-500')}>
                   {r0(owes)}
                 </td>
               </tr>
@@ -884,7 +908,14 @@ function RidersTab({ suffix }: { suffix: string }) {
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
             <td className={cell}>
-              {r0(sorted.reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))}
+              {r0(sorted.filter((r) => !r.dormant)
+                        .reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))}
+              {sorted.some((r) => r.dormant) && (
+                <div className="text-[11px] font-normal text-amber-400/80">
+                  + {r0(sorted.filter((r) => r.dormant)
+                              .reduce((a, r) => a + r.outstanding + Math.max(0, -r.balance), 0))} silent
+                </div>
+              )}
             </td>
           </tr>
         </tfoot>

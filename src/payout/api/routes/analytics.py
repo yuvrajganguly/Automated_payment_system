@@ -659,24 +659,38 @@ def money_story_by(
                 [wf, wt, *co_args],
             ).fetchall()
             out = [dict(r) for r in rows if r["company"]]
-            # live outstanding per company (person's deduction company)
+            # live outstanding per company (person's deduction company),
+            # split active vs silent: an ex-EV holder with no open EV is
+            # dormant in either bucket — their debt is kept silently.
             live = {
-                r["co"]: (int(r["out"] or 0), int(r["dues"] or 0))
+                r["co"]: (int(r["out"] or 0), int(r["dues"] or 0), int(r["silent"] or 0))
                 for r in conn.execute(
                     "SELECT pr.deduction_company AS co, "
-                    "  SUM(COALESCE(ea.outstanding, 0)) AS out, "
+                    "  SUM(CASE WHEN oa.person_id IS NOT NULL "
+                    "      THEN COALESCE(ea.outstanding, 0) ELSE 0 END) AS out, "
                     "  SUM(CASE WHEN COALESCE(b.current_balance,0) < 0 "
-                    "      THEN -b.current_balance ELSE 0 END) AS dues "
+                    "       AND (oa.person_id IS NOT NULL OR ra.person_id IS NULL) "
+                    "      THEN -b.current_balance ELSE 0 END) AS dues, "
+                    "  SUM(CASE WHEN oa.person_id IS NULL THEN COALESCE(ea.outstanding, 0) "
+                    "      ELSE 0 END "
+                    "    + CASE WHEN oa.person_id IS NULL AND ra.person_id IS NOT NULL "
+                    "       AND COALESCE(b.current_balance,0) < 0 "
+                    "      THEN -b.current_balance ELSE 0 END) AS silent "
                     "FROM person_registry pr "
                     "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
                     "LEFT JOIN balances b ON b.person_id = pr.person_id "
+                    "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+                    "           WHERE returned_date IS NULL) oa ON oa.person_id = pr.person_id "
+                    "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+                    "           WHERE returned_date IS NOT NULL) ra ON ra.person_id = pr.person_id "
                     "GROUP BY pr.deduction_company"
                 )
             }
             for r in out:
-                o = live.get(r["company"], (0, 0))
+                o = live.get(r["company"], (0, 0, 0))
                 r["outstanding"] = o[0]
                 r["dues"] = o[1]
+                r["silent"] = o[2]
             return {"window": {"from": wf, "to": wt, "days": days}, "dim": dim, "rows": out}
 
         if dim == "rider":
@@ -698,20 +712,37 @@ def money_story_by(
                 " SUM(CASE WHEN t.event_type='DEPOSIT_APPLIED' THEN t.amount ELSE 0 END) "
                 "   AS deposit_applied, "
                 " COALESCE(MAX(ea.outstanding), 0) AS outstanding, "
-                " COALESCE(MAX(b.current_balance), 0) AS balance "
+                " COALESCE(MAX(b.current_balance), 0) AS balance, "
+                " MAX(CASE WHEN oa.person_id IS NOT NULL THEN 1 ELSE 0 END) AS has_open_ev, "
+                " MAX(CASE WHEN ra.person_id IS NOT NULL THEN 1 ELSE 0 END) AS ever_returned "
                 "FROM transactions t "
                 "JOIN person_registry pr ON pr.person_id = t.person_id "
                 "LEFT JOIN ev_arrears ea ON ea.person_id = t.person_id "
                 "LEFT JOIN balances b ON b.person_id = t.person_id "
+                "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+                "           WHERE returned_date IS NULL) oa ON oa.person_id = t.person_id "
+                "LEFT JOIN (SELECT DISTINCT person_id FROM ev_assignments "
+                "           WHERE returned_date IS NOT NULL) ra ON ra.person_id = t.person_id "
                 f"WHERE {_TXN_WINDOW}{co_sql} "
                 "GROUP BY t.person_id, pr.display_name "
                 "ORDER BY 6 DESC LIMIT ?",  # 6 = rent_charged (PG: no aliases in ORDER BY exprs)
                 [wf, wt, *co_args, limit],
             ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                has_ev = bool(d.pop("has_open_ev"))
+                ever_ret = bool(d.pop("ever_returned"))
+                # Dormant = no open EV, debt in either bucket (dues count only
+                # for ex-EV holders — never-EV riders' dues clear normally).
+                d["dormant"] = (not has_ev) and (
+                    d["outstanding"] > 0 or (d["balance"] < 0 and ever_ret)
+                )
+                out.append(d)
             return {
                 "window": {"from": wf, "to": wt, "days": days},
                 "dim": dim,
-                "rows": [dict(r) for r in rows],
+                "rows": out,
             }
 
         if dim == "ev":

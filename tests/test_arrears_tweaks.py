@@ -325,3 +325,47 @@ def test_story_position_reports_dormant_dues_split(db):
     assert p["dues"] == 750.0  # dormant 450 + active bike 300
     assert p["ev_arrears_dormant"] == 1250.0
     assert p["dormant_riders"] == 2
+
+
+def test_story_by_rider_flags_dormant_rows(db):
+    """The Riders analytics tab must tag no-open-EV debtors as dormant so the
+    UI can show them silently and keep them out of the chase total."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from payout.api import ratelimit
+    from payout.api.app import app
+    from payout.auth import hash_password
+
+    dormant = _dormant_rider(db, rid="D3", arrears=125000)  # EV-arrears bucket
+    dues_dormant = _dues_only_ex_ev_rider(db, rid="G3", dues=45000)  # dues bucket
+    active = make_person(db, "Holder3", balance=0, arrears=30000)
+    make_rider(db, active, "A3", "Blitz", "Holder3")
+    make_ev(db, "EV-H3", provider="Raft", model="Regular")
+    assign(db, active, "EV-H3", charged_through="2026-05-31")
+    # put all three inside the window via a PAYOUT txn
+    for pid in (dormant, dues_dormant, active):
+        db.execute(
+            "INSERT INTO transactions (person_id, company, cycle_start, cycle_end, "
+            "event_type, amount, balance_after, created_at) "
+            "VALUES (?, 'Blitz', '2026-08-01', '2026-08-07', 'PAYOUT', 100000, 0, "
+            "'2026-08-03 10:00:00')",
+            (pid,),
+        )
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
+        ("adm4@t.test", hash_password("Admin-pass-1"), "admin"),
+    )
+    db.commit()
+    ratelimit.reset()
+    with TestClient(app) as c:
+        c.post("/api/auth/login", data={"username": "adm4@t.test", "password": "Admin-pass-1"})
+        rows = {
+            r["person_id"]: r
+            for r in c.get(
+                "/api/dashboard/story/by?dim=rider&date_from=2026-08-01&date_to=2026-08-07"
+            ).json()["rows"]
+        }
+    assert rows[dormant]["dormant"] is True
+    assert rows[dues_dormant]["dormant"] is True
+    assert rows[active]["dormant"] is False
