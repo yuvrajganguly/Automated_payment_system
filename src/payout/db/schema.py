@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS cod_holds (
     -- Hub/store code and worker name exactly as the company's COD sheet
     -- states them. A COD rider need not be in the payout (or on the roster),
     -- so the file is the only source for these.
-    hub          TEXT,
+    hub          TEXT,           -- hub NAME (code resolved via hub_codes when known)
+    hub_code     TEXT,           -- the code exactly as the COD sheet stated it
     worker_name  TEXT,
     cleared_at   TEXT,           -- NULL until the operator marks the COD collected
     cleared_by   TEXT,
@@ -178,6 +179,19 @@ CREATE TABLE IF NOT EXISTS cod_holds (
 );
 CREATE INDEX IF NOT EXISTS idx_cod_cycle
     ON cod_holds (company, cycle_start, cycle_end, rider_id);
+
+-- ── hub_codes ───────────────────────────────────────────────────────────────
+-- Store/hub code → name, learnt from every payout file that carries both
+-- (Spencer's store_ids + store_names). COD sheets state only the code; this
+-- is how the HOLD sheet shows "South City" instead of "H012". Codes are
+-- stored lower-cased; the latest file wins.
+CREATE TABLE IF NOT EXISTS hub_codes (
+    company    TEXT NOT NULL,
+    code       TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (company, code)
+);
 
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).

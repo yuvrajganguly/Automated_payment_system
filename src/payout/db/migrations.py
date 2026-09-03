@@ -239,6 +239,15 @@ def _0007_cod_hub_and_spencers_layout(conn: Any) -> None:
         )
 
 
+def _0008_cod_hub_code(conn: Any) -> None:
+    """``cod_holds.hub`` now holds the hub NAME (resolved through the new
+    ``hub_codes`` table, created by apply_schema); the code the COD sheet
+    stated moves to ``hub_code``. Rows written before this carry the raw code
+    in ``hub`` — copy it across so nothing is lost."""
+    if add_column(conn, "cod_holds", "hub_code", "TEXT"):
+        conn.execute("UPDATE cod_holds SET hub_code = hub WHERE hub_code IS NULL")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -247,6 +256,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0005_deposit_for_closed_evs", _0005_deposit_for_closed_evs),
     ("0006_collapse_bluedart", _0006_collapse_bluedart),
     ("0007_cod_hub_and_spencers_layout", _0007_cod_hub_and_spencers_layout),
+    ("0008_cod_hub_code", _0008_cod_hub_code),
 ]
 
 _TRACKING_DDL = (

@@ -13,6 +13,7 @@ never auto-deducted from the payout.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
@@ -30,7 +31,8 @@ class HoldLine:
     order_number: str | None = None
     payment_mode: str | None = None
     txn_status: str | None = None
-    hub: str | None = None  # hub/store code as the COD sheet states it
+    hub: str | None = None  # hub NAME — the code resolved when the map knows it
+    hub_code: str | None = None  # hub/store code exactly as the COD sheet states it
     name: str | None = None  # worker name as the COD sheet states it
 
 
@@ -59,8 +61,54 @@ def _is_pending(status, pending_statuses) -> bool:
     return str(status).strip().lower() in pending_statuses
 
 
-def compute_holds(parse_result: ParseResult, pending_statuses=_PENDING) -> HoldResult:
-    """Roll a parsed file's COD data into per-rider hold totals + line detail."""
+def _split_multi(text: str) -> list[str]:
+    return [p.strip() for p in re.split(r"[,;/|]", text) if p.strip()]
+
+
+def hub_names_from_file(parse_result: ParseResult) -> dict[str, str]:
+    """code (lower-cased) → hub name, from payout rows that carry both.
+
+    A rider working two stores has "e005, s111" / "Marlin, Tolly DS" — the
+    lists are paired up position by position when their lengths agree."""
+    out: dict[str, str] = {}
+    for rec in parse_result.records:
+        codes = _split_multi(rec.hub_code or "")
+        names = _split_multi(rec.hub or "")
+        if not codes or not names:
+            continue
+        if len(codes) != len(names):
+            if len(codes) == 1:
+                names = [(rec.hub or "").strip()]
+            else:
+                continue  # can't tell which name goes with which code
+        for code, name in zip(codes, names, strict=True):
+            code = code.lower()
+            if name and name.lower() != code:
+                out[code] = name
+    return out
+
+
+def resolve_hub(raw: str | None, hub_names: dict[str, str] | None) -> str | None:
+    """The hub name for a COD-sheet hub cell: the mapped name when the code is
+    known ("H012" → "South City"), else the cell as written."""
+    if not raw:
+        return raw
+    if hub_names:
+        return hub_names.get(raw.strip().lower(), raw)
+    return raw
+
+
+def compute_holds(
+    parse_result: ParseResult,
+    pending_statuses=_PENDING,
+    hub_names: dict[str, str] | None = None,
+) -> HoldResult:
+    """Roll a parsed file's COD data into per-rider hold totals + line detail.
+
+    ``hub_names`` maps hub CODES to names (this file's own store_ids →
+    store_names pairs merged with what earlier files taught); COD sheets only
+    state the code."""
+    hub_names = {**hub_names_from_file(parse_result), **(hub_names or {})}
     per_rider: dict[str, float] = {}
     lines: list[HoldLine] = []
     skipped = 0
@@ -85,7 +133,8 @@ def compute_holds(parse_result: ParseResult, pending_statuses=_PENDING) -> HoldR
                 order_number=cl.order_number,
                 payment_mode=cl.payment_mode,
                 txn_status=cl.txn_status,
-                hub=cl.hub,
+                hub=resolve_hub(cl.hub, hub_names),
+                hub_code=cl.hub,
                 name=cl.name,
             )
         )
@@ -110,9 +159,31 @@ def compute_holds(parse_result: ParseResult, pending_statuses=_PENDING) -> HoldR
         if rec.rider_id in per_rider or rec.rider_id in cod_ids:
             _note(rec.rider_id, rec.name, rec.hub)
     for cl in parse_result.cod_lines:
-        _note(cl.worker_code, cl.name, cl.hub)
+        _note(cl.worker_code, cl.name, resolve_hub(cl.hub, hub_names))
 
     return HoldResult(per_rider=per_rider, lines=lines, skipped_nonpending=skipped, rider_info=info)
+
+
+def load_hub_names(conn: sqlite3.Connection, company: str) -> dict[str, str]:
+    """code → name learnt from earlier files of this company (hub_codes)."""
+    return {
+        r["code"]: r["name"]
+        for r in conn.execute(
+            "SELECT code, name FROM hub_codes WHERE company=?", (company,)
+        ).fetchall()
+    }
+
+
+def learn_hub_names(conn: sqlite3.Connection, company: str, pairs: dict[str, str]) -> None:
+    """Remember this file's code → name pairs; the latest file wins."""
+    for code, name in pairs.items():
+        conn.execute(
+            "INSERT INTO hub_codes (company, code, name, updated_at) "
+            "VALUES (?,?,?,datetime('now')) "
+            "ON CONFLICT(company, code) DO UPDATE SET name=excluded.name, "
+            "updated_at=excluded.updated_at",
+            (company, code, name),
+        )
 
 
 def persist_holds(
@@ -140,8 +211,8 @@ def persist_holds(
         conn.execute(
             "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, "
             "person_id, worker_code, order_number, amount, payment_mode, txn_status, source, "
-            "hub, worker_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "hub, hub_code, worker_name) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 cs,
                 ce,
@@ -155,6 +226,7 @@ def persist_holds(
                 ln.txn_status,
                 ln.source,
                 ln.hub,
+                ln.hub_code,
                 ln.name,
             ),
         )

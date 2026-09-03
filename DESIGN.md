@@ -187,8 +187,12 @@ Two input styles, same outcome (mark rider HOLD, show pending amount, write to
   column is picked up by name even when the config names none). Match worker
   code to the payout sheet's rider id — both are normalised the same way, so
   `'+91 98765 43210` on a hand-typed COD row still matches `9876543210`.
-  `HUB CODE` and `WORKER NAME` are stored with each line (`cod_holds.hub`,
-  `worker_name`).
+  `HUB CODE` and `WORKER NAME` are stored with each line (`cod_holds.hub_code`,
+  `worker_name`); `cod_holds.hub` holds the hub *name* — the code resolved
+  through `hub_codes`, a code → name map every payout file teaches from its
+  own `store_ids` / `store_names` pairs (multi-store cells like
+  "e005, s111" / "Marlin, Tolly DS" are paired up; latest file wins). A code
+  no file has named yet stays as written.
 - **Myntra** — inline `COD-Pending` column on the payout row.
 
 The output's **HOLD sheet** has two blocks: COD riders who are in the payout

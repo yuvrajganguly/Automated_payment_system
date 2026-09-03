@@ -61,6 +61,8 @@ _HUB_ALIASES = (
     "store_id",
     "store id",
 )
+# The store/hub CODE column that sits beside the name (store_ids → store_names).
+_HUB_CODE_ALIASES = ("store_ids", "store ids", "store_id", "store id", "hub code", "hub_code")
 
 
 _PHONEISH_RE = re.compile(r"^\+?\d[\d\s\-]*$")
@@ -151,10 +153,15 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     # modal (instead of just "id 8906377190 — who's that?").
     name_col = match_column(df.columns, *_NAME_ALIASES)
     hub_col = match_column(df.columns, *_HUB_ALIASES)
+    hub_code_col = match_column(df.columns, *_HUB_CODE_ALIASES)
+    if hub_code_col == hub_col:
+        hub_code_col = None  # the code IS the hub column; nothing to map
     if name_col:
         matched["name"] = name_col
     if hub_col:
         matched["hub"] = hub_col
+    if hub_code_col:
+        matched["hub_code"] = hub_code_col
 
     records: list[RiderRecord] = []
     seen: dict[str, int] = {}
@@ -202,6 +209,7 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 orders=orders_val,
                 name=_cell(name_col),
                 hub=_cell(hub_col),
+                hub_code=_cell(hub_code_col),
                 payout_invalid=payout_invalid,
             )
         )

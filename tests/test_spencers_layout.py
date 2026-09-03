@@ -123,6 +123,7 @@ def test_parser_reads_new_spencers_layout(db):
     assert res.matched_columns["payout"] == "Total Payable"
     assert res.matched_columns["orders"] == "total_orders_delivered"
     assert res.matched_columns["hub"] == "store_names"
+    assert res.matched_columns["hub_code"] == "store_ids"
     assert res.matched_columns["hold_sheet"] == "COD HOLD"
     by_id = {r.rider_id: r for r in res.records}
     assert set(by_id) == {"6295515978", "8355007139"}
@@ -130,6 +131,7 @@ def test_parser_reads_new_spencers_layout(db):
     assert by_id["6295515978"].orders == 300
     assert by_id["6295515978"].name == "Pradip Ray"
     assert by_id["6295515978"].hub == "NTS"
+    assert by_id["6295515978"].hub_code == "h069"
     # COD lines: numeric worker codes normalised like rider ids, hub + name kept,
     # and the status column picked up without any config for it.
     assert [(c.worker_code, c.hub, c.name, c.txn_status) for c in res.cod_lines] == [
@@ -270,11 +272,19 @@ def test_hold_sheet_separates_cod_riders_not_in_payout(db):
         "rider_id": "7439823275",
         "amount": (609 + 583) * 100,
         "name": "Anish Biswas",
-        "hub": "H049",  # the file's hub, not the roster's
+        "hub": "H049",  # the file's hub code (unknown code → as written), not the roster's
         "in_payout": False,
     }
     assert hold["9999999999"]["name"] == "Stranger" and hold["9999999999"]["hub"] == "H012"
     assert hold["9999999999"]["amount"] == 250 * 100
+
+    # The COD line for the rider in the payout resolved H069 → NTS via the
+    # payout sheet's own store_ids/store_names pair.
+    line = db.execute(
+        "SELECT hub, hub_code FROM cod_holds WHERE rider_id='6295515978' AND company=?",
+        ("Spencer's",),
+    ).fetchone()
+    assert tuple(line) == ("NTS", "H069")
 
     rows = _sheet_rows(build_output(r).getvalue(), "HOLD")
     assert rows[0] == ["Rider ID", "Name", "Hub", "COD Total", "In Payout"]
@@ -296,3 +306,79 @@ def test_hold_sheet_separates_cod_riders_not_in_payout(db):
     lines = {(x[0], x[3]): x for x in rows[li + 2 :]}
     assert lines[("9999999999", "3008270000")][1:3] == ["Stranger", "H012"]
     assert lines[("7439823275", "3008273151")][2] == "H049"
+    assert lines[("6295515978", "3008272746")][2] == "NTS"
+
+
+def test_hub_names_from_file_pairs_multi_store_rows():
+    from payout.domain.holds import hub_names_from_file
+    from payout.domain.models import ParseResult, RiderRecord
+
+    pr = ParseResult(
+        company="Spencer's",
+        records=[
+            RiderRecord("1", 0, hub="Marlin, Tolly DS", hub_code="e005, s111"),
+            RiderRecord("2", 0, hub="NTS", hub_code="h069"),
+            RiderRecord("3", 0, hub="One Name", hub_code="a1, a2"),  # ambiguous → skipped
+            RiderRecord("4", 0, hub="h030", hub_code="h030"),  # name == code → nothing learnt
+            RiderRecord("5", 0, hub=None, hub_code="h100"),
+        ],
+    )
+    assert hub_names_from_file(pr) == {"e005": "Marlin", "s111": "Tolly DS", "h069": "NTS"}
+
+
+def test_hub_codes_learnt_from_earlier_files_resolve_cod_hubs(db):
+    """Week 1's payout sheet teaches h049 → Axis Hyper and h012 → South City.
+    Week 2's COD sheet mentions H049 / H012 for riders who are not in week 2's
+    payout — the HOLD sheet still names the hub."""
+    pid = make_person(db, "Akash Kirtania")
+    make_rider(db, pid, "7439440187", "Spencer's", "Akash Kirtania")
+    pid2 = make_person(db, "Pradip Ray")
+    make_rider(db, pid2, "6295515978", "Spencer's", "Pradip Ray")
+    db.commit()
+    week1 = _new_layout(
+        [
+            [
+                7439440187,
+                "Akash Kirtania",
+                "FULL_TIME",
+                "Santanu",
+                "h049",
+                "Axis Hyper",
+                1,
+                1,
+                1,
+                100,
+            ],
+            [6295515978, "Pradip Ray", "FULL_TIME", "Rupesh", "h012", "South City", 1, 1, 1, 100],
+        ],
+        [],
+    )
+    process_cycle("Spencer's", date(2026, 8, 3), date(2026, 8, 9), week1, commit=True)
+    learnt = {
+        r[0]: r[1]
+        for r in db.execute("SELECT code, name FROM hub_codes WHERE company=?", ("Spencer's",))
+    }
+    assert learnt == {"h049": "Axis Hyper", "h012": "South City"}
+
+    week2 = _new_layout(
+        [[6295515978, "Pradip Ray", "FULL_TIME", "Rupesh", "h012", "South City", 1, 1, 1, 100]],
+        [
+            [1, "H049", 7439440187, "Akash Kirtania", 500, "Pending", "COD"],
+            [2, "H012", 9999999999, "Stranger", 250, "Pending", "COD"],
+            [3, "D375", 8888888888, "Nobody Knows", 100, "Pending", "COD"],
+        ],
+    )
+    r = process_cycle("Spencer's", date(2026, 8, 10), date(2026, 8, 16), week2, commit=True)
+    hold = {h["rider_id"]: h for h in r.hold_rows}
+    assert hold["7439440187"]["hub"] == "Axis Hyper"  # learnt last week
+    assert hold["9999999999"]["hub"] == "South City"  # this week's sheet
+    assert hold["8888888888"]["hub"] == "D375"  # never seen with a name → code
+
+    rows = _sheet_rows(build_output(r).getvalue(), "HOLD")
+    block = rows[rows.index([NOT_IN_PAYOUT_TITLE]) + 2 :]
+    block = block[: block.index(next(x for x in block if x[1] == "TOTAL"))]
+    assert sorted(x[:3] for x in block) == [
+        ["7439440187", "Akash Kirtania", "Axis Hyper"],
+        ["8888888888", "Nobody Knows", "D375"],
+        ["9999999999", "Stranger", "South City"],
+    ]

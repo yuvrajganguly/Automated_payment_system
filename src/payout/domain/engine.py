@@ -19,7 +19,13 @@ from payout.domain.ev_daily import (
 from payout.domain.ev_daily import (
     materialize_cycle_for_person as _ev_materialize_cycle,
 )
-from payout.domain.holds import compute_holds, persist_holds
+from payout.domain.holds import (
+    compute_holds,
+    hub_names_from_file,
+    learn_hub_names,
+    load_hub_names,
+    persist_holds,
+)
 from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from payout.money import to_rupees
 from payout.parsers import parse_file
@@ -348,7 +354,6 @@ def process_cycle(
 ) -> CycleResult:
     overrides = overrides or CycleOverrides()
     parsed = parse_file(company, file_bytes)
-    holds = compute_holds(parsed)
     result = CycleResult(
         company=company,
         cycle_start=cycle_start,
@@ -380,6 +385,13 @@ def process_cycle(
                     (company, _iso(cycle_start), _iso(cycle_end), "", created_by),
                 )
 
+        # Hub codes: what this file teaches (store_ids → store_names) plus what
+        # earlier files taught, so COD rows — which only state the code — get
+        # a hub name. The file's own pairs win over remembered ones.
+        file_hubs = hub_names_from_file(parsed)
+        learn_hub_names(conn, company, file_hubs)
+        hub_names = {**load_hub_names(conn, company), **file_hubs}
+        holds = compute_holds(parsed, hub_names=hub_names)
         persist_holds(conn, company, cycle_start, cycle_end, holds)
 
         shared_from = _shared_rider_source(conn, company)

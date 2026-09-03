@@ -20,6 +20,7 @@ _NEW_COLUMNS = [
     ("companies", "rider_ids_shared_with"),
     ("cod_holds", "hub"),
     ("cod_holds", "worker_name"),
+    ("cod_holds", "hub_code"),
 ]
 
 
@@ -60,12 +61,13 @@ def test_pre_runner_database_gets_every_migration():
         "    -- Hub/store code and worker name exactly as the company's COD sheet\n"
         "    -- states them. A COD rider need not be in the payout (or on the roster),\n"
         "    -- so the file is the only source for these.\n"
-        "    hub          TEXT,\n"
+        "    hub          TEXT,           -- hub NAME (code resolved via hub_codes when known)\n"
+        "    hub_code     TEXT,           -- the code exactly as the COD sheet stated it\n"
         "    worker_name  TEXT,\n",
         "",
     )
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
-    assert "worker_name" not in old_schema
+    assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema
 
     import payout.db.schema as schema_mod
 

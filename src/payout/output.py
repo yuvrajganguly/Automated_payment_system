@@ -343,10 +343,10 @@ def _hold_sheet(wb, conn, cycle_result):
     1. Riders whose COD is pending AND who are in the payout sheet — their
        payout is held.
     2. Riders with pending COD who are NOT in the payout sheet — there is
-       nothing to hold, so the office has to chase them; the hub (as the
-       company's COD sheet states it) says where.
+       nothing to hold, so the office has to chase them; the hub says where.
     Name and hub come from the file first (a COD-only rider may not be on the
-    roster at all), then the roster.
+    roster at all), then the roster. COD sheets state hub CODES; cod_holds.hub
+    already carries the name when the code is known (see hub_codes).
     """
     company, cs, ce = cycle_result.company, cycle_result.cycle_start, cycle_result.cycle_end
     in_file = set(getattr(cycle_result, "file_rider_ids", None) or [])
@@ -417,7 +417,7 @@ def _hold_sheet(wb, conn, cycle_result):
 
     row = _block(1, held)
     if not_in_payout:
-        row = _block(row + 1, not_in_payout, title=NOT_IN_PAYOUT_TITLE, fill=FLAG_FILL)
+        row = _block(row + 1, not_in_payout, title=NOT_IN_PAYOUT_TITLE)
 
     start = row + 1
     ws.cell(row=start, column=1, value="Line Items").font = _body_font(bold=True)
@@ -449,7 +449,7 @@ def _hold_sheet(wb, conn, cycle_result):
             ws.cell(row=i, column=col, value=v).alignment = Alignment(
                 horizontal="left" if col in (2, 3) else "center"
             )
-        _style_row(ws, i, len(LINE_HEADERS), fill=None if r["rider_id"] in in_file else FLAG_FILL)
+        _style_row(ws, i, len(LINE_HEADERS))
         _money_cell(ws, i, LINE_NUM_COL)
     _auto_width(ws)
 
