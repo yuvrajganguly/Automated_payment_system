@@ -17,6 +17,7 @@ from openpyxl import Workbook
 
 from payout.api.auth import get_current_user
 from payout.db import get_connection
+from payout.domain.dormancy import dormant_person_sql
 from payout.exports import add_styled_sheet, workbook_response
 from payout.money import to_rupees
 
@@ -395,19 +396,22 @@ def dashboard_summary(
                 f"  WHERE rm.company IN ({ph}) AND rm.is_active=1) "
             )
             arr_co_params = list(cos)
+        _dormant = dormant_person_sql("pr.person_id")
         top_arrears_rows = conn.execute(
             f"""
             SELECT pr.person_id, pr.display_name,
                    COALESCE(ar.outstanding, 0) AS ev_arrears,
                    CASE WHEN COALESCE(b.current_balance, 0) < 0
-                        THEN -b.current_balance ELSE 0 END AS dues
+                        THEN -b.current_balance ELSE 0 END AS dues,
+                   CASE WHEN {_dormant} THEN 1 ELSE 0 END AS dormant
             FROM person_registry pr
             LEFT JOIN balances   b  ON b.person_id  = pr.person_id
             LEFT JOIN ev_arrears ar ON ar.person_id = pr.person_id
             WHERE (COALESCE(b.current_balance, 0) < 0
                    OR COALESCE(ar.outstanding, 0) > 0)
               {arr_co_filter}
-            ORDER BY (COALESCE(ar.outstanding, 0) +
+            ORDER BY CASE WHEN {_dormant} THEN 1 ELSE 0 END,
+                     (COALESCE(ar.outstanding, 0) +
                       CASE WHEN COALESCE(b.current_balance, 0) < 0
                            THEN -b.current_balance ELSE 0 END) DESC
             """,
@@ -420,6 +424,7 @@ def dashboard_summary(
                 "ev_arrears": round(float(r["ev_arrears"] or 0), 2),
                 "dues": round(float(r["dues"] or 0), 2),
                 "arrears_total": round(float(r["ev_arrears"] or 0) + float(r["dues"] or 0), 2),
+                "dormant": bool(r["dormant"]),
             }
             for r in top_arrears_rows
         ]
@@ -945,10 +950,12 @@ def dashboard_breakdown(
             rows = [dict(r) for r in conn.execute(sql, scope_params + [limit])]
 
         elif metric == "total_arrears":
-            title = "All riders carrying arrears or dues (live)"
-            columns = ["person_id", "name", "ev_arrears", "dues", "arrears_total"]
+            title = "All riders carrying arrears or dues (live) — silent = EV returned, pay held"
+            columns = ["person_id", "name", "status", "ev_arrears", "dues", "arrears_total"]
+            dormant = dormant_person_sql("pr.person_id")
             sql = (
                 "SELECT pr.person_id, pr.display_name AS name, "
+                f"      CASE WHEN {dormant} THEN 'silent' ELSE 'active' END AS status, "
                 "       COALESCE(ar.outstanding, 0) AS ev_arrears, "
                 "       CASE WHEN COALESCE(b.current_balance, 0) < 0 "
                 "            THEN -b.current_balance ELSE 0 END AS dues "
@@ -957,7 +964,9 @@ def dashboard_breakdown(
                 "LEFT JOIN ev_arrears ar ON ar.person_id = pr.person_id "
                 "WHERE COALESCE(b.current_balance, 0) < 0 "
                 "   OR COALESCE(ar.outstanding, 0) > 0 "
-                "ORDER BY (COALESCE(ar.outstanding, 0) + "
+                # active debtors first (the chase list), silent ones after
+                f"ORDER BY CASE WHEN {dormant} THEN 1 ELSE 0 END, "
+                "         (COALESCE(ar.outstanding, 0) + "
                 "          CASE WHEN COALESCE(b.current_balance, 0) < 0 "
                 "               THEN -b.current_balance ELSE 0 END) DESC "
                 "LIMIT ?"
@@ -1196,13 +1205,15 @@ def dashboard_export(
         )
 
         # 3. All riders with arrears or dues (MAIN FOCUS, live)
+        dormant_sql = dormant_person_sql("pr.person_id")
         arr_rows = list(
             conn.execute(
-                """
+                f"""
             SELECT pr.person_id, pr.display_name,
                    COALESCE(ar.outstanding, 0) AS ev_arrears,
                    CASE WHEN COALESCE(b.current_balance, 0) < 0
                         THEN -b.current_balance ELSE 0 END AS dues,
+                   CASE WHEN {dormant_sql} THEN 'Silent' ELSE 'Active' END AS status,
                    (SELECT GROUP_CONCAT(DISTINCT rm.company) FROM rider_master rm
                       WHERE rm.person_id = pr.person_id AND rm.is_active=1) AS companies,
                    (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm
@@ -1213,7 +1224,8 @@ def dashboard_export(
             LEFT JOIN ev_arrears ar ON ar.person_id = pr.person_id
             WHERE COALESCE(b.current_balance, 0) < 0
                OR COALESCE(ar.outstanding, 0) > 0
-            ORDER BY (COALESCE(ar.outstanding, 0) +
+            ORDER BY CASE WHEN {dormant_sql} THEN 1 ELSE 0 END,
+                     (COALESCE(ar.outstanding, 0) +
                       CASE WHEN COALESCE(b.current_balance, 0) < 0
                            THEN -b.current_balance ELSE 0 END) DESC
             """
@@ -1225,6 +1237,7 @@ def dashboard_export(
             headers=[
                 "Person ID",
                 "Name",
+                "Status",
                 "Companies",
                 "Hub",
                 "EV Arrears",
@@ -1235,6 +1248,7 @@ def dashboard_export(
                 (
                     r["person_id"],
                     r["display_name"],
+                    r["status"],
                     r["companies"] or "",
                     r["hubs"] or "",
                     float(r["ev_arrears"]),
@@ -1243,10 +1257,10 @@ def dashboard_export(
                 )
                 for r in arr_rows
             ],
-            numeric_cols=(5, 6, 7),
-            money_cols=(5, 6, 7),
-            totals_cols=(5, 6, 7),
-            left_align_cols=(2, 3, 4),
+            numeric_cols=(6, 7, 8),
+            money_cols=(6, 7, 8),
+            totals_cols=(6, 7, 8),
+            left_align_cols=(2, 3, 4, 5),
         )
 
         # 4. Active EVs

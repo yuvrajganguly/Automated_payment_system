@@ -210,6 +210,16 @@ function cellValue(col: string, v: unknown, i: number) {
   if (col === 'person_id' && typeof v === 'number') {
     return <Link key={i} to={'/persons/' + v} className="text-brand-300 hover:underline">#{v}</Link>
   }
+  if (col === 'status' && v === 'silent') {
+    return (
+      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded
+                       bg-amber-500/10 text-amber-400 border border-amber-500/20"
+            title="EV returned — debt kept silently, payouts held">
+        silent
+      </span>
+    )
+  }
+  if (col === 'status' && v === 'active') return <span className="text-xs text-slate-500">active</span>
   if (typeof v === 'number' && !_PLAIN_COLS.has(col)) return '₹' + moneyWhole(v)
   return String(v ?? '—')
 }
@@ -271,7 +281,9 @@ function BreakdownDrawer({ metric, suffix, onClose }: {
               </thead>
               <tbody>
                 {data.rows.map((r, i) => (
-                  <tr key={i} className="border-t border-edge-soft hover:bg-white/[0.02]">
+                  <tr key={i}
+                      className={'border-t border-edge-soft hover:bg-white/[0.02]' +
+                        (r.status === 'silent' ? ' opacity-55' : '')}>
                     {data.columns.map((c) => (
                       <td key={c} className={'px-2.5 py-1.5 whitespace-nowrap ' +
                         (typeof r[c] === 'number' && !_PLAIN_COLS.has(c) ? 'text-right tabular-nums' : '')}>

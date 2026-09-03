@@ -369,3 +369,40 @@ def test_story_by_rider_flags_dormant_rows(db):
     assert rows[dormant]["dormant"] is True
     assert rows[dues_dormant]["dormant"] is True
     assert rows[active]["dormant"] is False
+
+
+def test_breakdown_drawer_marks_silent_riders_and_sorts_them_last(db):
+    """The dashboard card drill-down (breakdown/total_arrears) must tag
+    no-open-EV debtors 'silent' and list active debtors first."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from payout.api import ratelimit
+    from payout.api.app import app
+    from payout.auth import hash_password
+
+    dormant = _dormant_rider(db, rid="D4", arrears=480000)  # ₹4,800 — biggest debt
+    dues_dormant = _dues_only_ex_ev_rider(db, rid="G4", dues=293300)
+    active = make_person(db, "Holder4", balance=0, arrears=10000)  # ₹100 — smallest
+    make_rider(db, active, "A4", "Blitz", "Holder4")
+    make_ev(db, "EV-H4", provider="Raft", model="Regular")
+    assign(db, active, "EV-H4", charged_through="2026-05-31")
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
+        ("adm5@t.test", hash_password("Admin-pass-1"), "admin"),
+    )
+    db.commit()
+    ratelimit.reset()
+    with TestClient(app) as c:
+        c.post("/api/auth/login", data={"username": "adm5@t.test", "password": "Admin-pass-1"})
+        payload = c.get("/api/dashboard/breakdown/total_arrears").json()
+    assert "status" in payload["columns"]
+    rows = payload["rows"]
+    by_pid = {r["person_id"]: r for r in rows}
+    assert by_pid[dormant]["status"] == "silent"
+    assert by_pid[dues_dormant]["status"] == "silent"
+    assert by_pid[active]["status"] == "active"
+    # active debtors first, however small their debt
+    statuses = [r["status"] for r in rows]
+    assert statuses.index("silent") > statuses.index("active")
+    assert "silent" not in statuses[: statuses.index("silent")]
