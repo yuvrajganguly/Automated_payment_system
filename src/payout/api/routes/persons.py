@@ -103,8 +103,9 @@ def get_person(person_id: int, _: dict = Depends(get_current_user)) -> PersonOut
         arrears_outstanding=pr["arrears_outstanding"],
         riders=riders,
         ev=ev_summary,
+        ev_history=ev_history,
     )
-    return {**out.model_dump(), "ev_history": ev_history}
+    return out
 
 
 @router.post("/{person_id}/split")

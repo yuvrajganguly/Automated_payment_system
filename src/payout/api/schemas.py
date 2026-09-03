@@ -92,6 +92,17 @@ class EvSummary(BaseModel):
     rent_charged_through: str | None = None
 
 
+class EvHistoryItem(BaseModel):
+    assignment_id: int
+    ev_id: str
+    provider: str | None = None
+    model: str | None = None
+    weekly_rate: float
+    handover_date: str | None = None
+    returned_date: str | None = None
+    rent_charged_through: str | None = None
+
+
 class PersonOut(BaseModel):
     person_id: int
     display_name: str
@@ -101,6 +112,11 @@ class PersonOut(BaseModel):
     arrears_outstanding: float
     riders: list[RiderOut] = Field(default_factory=list)
     ev: EvSummary | None = None
+    # Closed + open EV assignments, newest first. Carried on the model so the
+    # `-> PersonOut` response filter doesn't strip it (it used to: the handler
+    # merged ev_history on top of the model and FastAPI dropped the unknown
+    # key, so no rider ever showed EV history).
+    ev_history: list[EvHistoryItem] = Field(default_factory=list)
 
 
 class SplitRiderSpec(BaseModel):
