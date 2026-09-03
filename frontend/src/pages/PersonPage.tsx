@@ -236,6 +236,7 @@ export function PersonPage() {
 
       {isAdmin && <RentPaymentForm personId={person.person_id} onPosted={load} />}
       {isAdmin && <AdjustmentForm personId={person.person_id} onPosted={load} />}
+      {isAdmin && <WriteOffArrearsCard personId={person.person_id} onPosted={load} />}
 
       {splitOpen && person && (
         <SplitPersonModal
@@ -343,6 +344,62 @@ function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: (
             {msg}
           </span>
         )}
+      </form>
+    </div>
+  )
+}
+
+function WriteOffArrearsCard({ personId, onPosted }: { personId: number; onPosted: () => void }) {
+  const [amount, setAmount] = useState('')
+  const [reason, setReason] = useState('')
+  const [chargeFrom, setChargeFrom] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const body: Record<string, unknown> = { reason }
+      if (amount) body.amount = Number(amount)
+      if (chargeFrom) body.charge_rent_from = chargeFrom
+      const r = await api.post<{ written_off: number; rent_charged_through: string | null }>(
+        `/persons/${personId}/arrears/write-off`, body)
+      setMsg(`Done — ₹${r.written_off.toLocaleString('en-IN')} written off` +
+        (r.rent_charged_through ? `; rent counts from ${chargeFrom}` : ''))
+      setAmount(''); setReason(''); setChargeFrom(''); onPosted()
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="panel p-4 mt-6 border-l-[3px] border-l-amber-400/80">
+      <h3 className="font-semibold mb-1">Write Off EV Arrears</h3>
+      <p className="text-xs text-slate-500 mb-3">
+        For rent that should never have been charged (e.g. company-sponsored EV). Shrinks the
+        arrears with an audited RENT_REVERSAL entry and waives the matching missed days — it
+        does NOT count as collected money. Optionally reset when rent starts counting.
+      </p>
+      <form onSubmit={submit} className="grid sm:grid-cols-3 gap-2 text-sm items-end">
+        <label className="block">
+          <span className="block text-xs text-slate-500">Amount ₹ (blank = all)</span>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)}
+                 type="number" min="0" step="0.01" className="w-full border rounded px-2 py-1.5" />
+        </label>
+        <label className="block sm:col-span-2">
+          <span className="block text-xs text-slate-500">Reason (required)</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder="e.g. BlueDart-sponsored EV — rent not chargeable"
+                 className="w-full border rounded px-2 py-1.5" />
+        </label>
+        <label className="block">
+          <span className="block text-xs text-slate-500">Charge rent from (optional)</span>
+          <input value={chargeFrom} onChange={(e) => setChargeFrom(e.target.value)}
+                 type="date" className="w-full border rounded px-2 py-1.5" />
+        </label>
+        <div className="sm:col-span-2 flex items-center gap-3">
+          <button type="submit" disabled={busy || !reason} className="btn-primary">
+            {busy ? '…' : 'Write off'}
+          </button>
+          {msg && <span className="text-xs text-slate-500">{msg}</span>}
+        </div>
       </form>
     </div>
   )

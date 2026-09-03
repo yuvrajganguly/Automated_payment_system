@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS ev_daily_ledger (
     assigned_person_id     INTEGER REFERENCES person_registry(person_id),
     daily_cost             INTEGER NOT NULL DEFAULT 0,             -- = weekly_rate / 7 when the day is billable to a rider
     provider_cost          INTEGER NOT NULL DEFAULT 0,             -- always weekly_rate/7 — what we owe the EV provider regardless
-    billing_status         TEXT,                                -- billed | missed | recovered | pending
+    billing_status         TEXT,                                -- billed | missed | recovered | pending | waived
     cycle_event_id         INTEGER,                             -- the RENT / RENT_MISSED row that produced this billing_status
     recovery_event_id      INTEGER,                             -- the RENT_RECOVERED / XC_RENT_RECOVERED row that healed a 'missed' day
     last_updated           TEXT DEFAULT (datetime('now')),

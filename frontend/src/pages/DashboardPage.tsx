@@ -535,15 +535,15 @@ function StoryTab({ s, suffix, setTab }: {
 
       {/* 3 · where the debt stands TODAY (live, not window-scoped) */}
       <div className="flex flex-wrap items-stretch gap-3 mb-5">
-        <Big label="Rent debt outstanding (today)" value={r0(p.ev_arrears)}
+        <Big label="Rent dues — active EV holders" value={r0(p.ev_arrears_active)}
              onClick={() => setDrill('total_arrears')}
-             tone={p.ev_arrears > 0 ? 'bad' : 'good'}
+             tone={p.ev_arrears_active > 0 ? 'bad' : 'good'}
              sub={
                <>
-                 {r0(p.ev_arrears_active)} owed by current EV holders
+                 the number to chase — owed by riders who still hold an EV
                  {p.ev_arrears_dormant > 0 && (
-                   <> · {r0(p.ev_arrears_dormant)} dormant ({p.dormant_riders} rider
-                   {p.dormant_riders === 1 ? '' : 's'} who returned the EV — future payouts held)</>
+                   <> · {r0(p.ev_arrears_dormant)} more kept silently on {p.dormant_riders} rider
+                   {p.dormant_riders === 1 ? '' : 's'} without an EV (their pay is held)</>
                  )}
                </>
              } />

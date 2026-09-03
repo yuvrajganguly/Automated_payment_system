@@ -187,3 +187,59 @@ def test_story_flow_reports_deposit_applied(db):
     db.commit()
     c = _client(db)
     assert c.get("/api/dashboard/story").json()["flow"]["deposit_applied"] == 1000.0
+
+
+def test_manual_arrears_write_off(db):
+    """POST /persons/{id}/arrears/write-off: sponsored-EV debt zeroed with a
+    reason, missed ledger days waived (not counted as collected), and the
+    rent meter reset so billing starts on the given day."""
+    wk = date(2026, 6, 1)
+    pid = make_person(db, "Sponsored", balance=0, arrears=0)
+    make_rider(db, pid, "SP1", "Blitz", "Sponsored")
+    make_ev(db, "EV-SP", provider="Raft", model="Regular")
+    assign(db, pid, "EV-SP", charged_through="2026-05-31")
+    db.execute(
+        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='SP1' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+    process_cycle("Blitz", wk, date(2026, 6, 7), _file([("X", 10)]), commit=True)
+    assert _out(db, pid) == 125000
+
+    c = _client(db)
+    r = c.post(
+        f"/api/persons/{pid}/arrears/write-off",
+        json={
+            "reason": "BlueDart-sponsored EV — rent not chargeable",
+            "charge_rent_from": "2026-09-01",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["written_off"] == 1250.0  # rupees at the edge
+    assert body["rent_charged_through"] == "2026-08-31"
+    assert _out(db, pid) == 0
+    # meter reset -> rent counts from 1 Sept
+    m = db.execute(
+        "SELECT rent_charged_through FROM ev_assignments WHERE person_id=? "
+        "AND returned_date IS NULL",
+        (pid,),
+    ).fetchone()[0]
+    assert m == "2026-08-31"
+    # missed days waived, NOT recovered/collected
+    statuses = {
+        r2["billing_status"]
+        for r2 in db.execute(
+            "SELECT billing_status FROM ev_daily_ledger WHERE assigned_person_id=?", (pid,)
+        )
+    }
+    assert "missed" not in statuses and "waived" in statuses
+    # audited + surfaces in the corrections feed
+    feed = c.get("/api/corrections").json()
+    assert any(
+        x["event_type"] == "RENT_REVERSAL" and "BlueDart-sponsored" in (x["remarks"] or "")
+        for x in feed
+    )
+    # reason is mandatory
+    assert c.post(f"/api/persons/{pid}/arrears/write-off", json={}).status_code == 400

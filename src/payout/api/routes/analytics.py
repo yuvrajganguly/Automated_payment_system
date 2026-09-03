@@ -228,12 +228,17 @@ def collection_efficiency(
             )
 
         # Arrears aging: age of each debtor's OLDEST still-missed day.
+        # ACTIVE EV holders only — riders who returned their EV are dormant
+        # (debt kept silently, payouts held); they are chased differently and
+        # would only inflate the chase-list here.
         aging_rows = conn.execute(
             "SELECT ea.person_id, ea.outstanding, "
             "       (SELECT MIN(l.day) FROM ev_daily_ledger l "
             "        WHERE l.assigned_person_id = ea.person_id "
             "          AND l.billing_status='missed') AS oldest_missed_day "
-            "FROM ev_arrears ea WHERE ea.outstanding > 0"
+            "FROM ev_arrears ea WHERE ea.outstanding > 0 "
+            "  AND EXISTS (SELECT 1 FROM ev_assignments a "
+            "              WHERE a.person_id = ea.person_id AND a.returned_date IS NULL)"
         ).fetchall()
         aging = [
             {"bucket": name, "riders": 0, "outstanding": 0} for name, _lo, _hi in _AGING_BUCKETS

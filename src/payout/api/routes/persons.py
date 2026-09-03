@@ -412,3 +412,110 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
         drop_person_singletons(conn, secondary)
         conn.commit()
     return {"merged": True, "into_person_id": primary, "from_person_id": secondary}
+
+
+@router.post("/{person_id}/arrears/write-off")
+def write_off_arrears(person_id: int, payload: dict, user: dict = Depends(require_admin)) -> dict:
+    """Write off EV-rent arrears that should never have been charged, with a
+    mandatory reason (e.g. 'BlueDart-sponsored EV — rent not chargeable').
+
+    Body: {"amount": rupees (optional; default = full outstanding),
+           "reason": str (required),
+           "charge_rent_from": ISO date (optional) — resets the open
+           assignment's rent meter so billing starts on that day}
+
+    Books: outstanding (and lifetime total_missed) shrink by the amount via a
+    RENT_REVERSAL audit row; the oldest still-'missed' day-ledger rows are
+    marked 'waived' (they leave the missed/aging numbers WITHOUT counting as
+    collected money). Appears in the Corrections feed automatically.
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from payout.money import to_paise
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "A write-off requires a reason.")
+    charge_from = payload.get("charge_rent_from")
+    with get_connection() as conn:
+        pr = conn.execute(
+            "SELECT display_name FROM person_registry WHERE person_id=?", (person_id,)
+        ).fetchone()
+        if not pr:
+            raise HTTPException(404, "Person not found")
+        row = conn.execute(
+            "SELECT outstanding, total_missed FROM ev_arrears WHERE person_id=?", (person_id,)
+        ).fetchone()
+        out = int(row["outstanding"]) if row else 0
+        amt = min(to_paise(payload["amount"]) if payload.get("amount") else out, out)
+        if amt <= 0 and not charge_from:
+            raise HTTPException(400, "Nothing to write off and no rent-start date given.")
+
+        txn_id = None
+        if amt > 0:
+            # Scalar MAX/GREATEST differs across backends — compute in Python.
+            new_tm = max(0, int(row["total_missed"]) - amt) if row else 0
+            conn.execute(
+                "UPDATE ev_arrears SET outstanding = outstanding - ?, "
+                "total_missed = ?, last_updated=? WHERE person_id=?",
+                (amt, new_tm, _date.today().isoformat(), person_id),
+            )
+            bal = conn.execute(
+                "SELECT current_balance FROM balances WHERE person_id=?", (person_id,)
+            ).fetchone()
+            txn_id = conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, cycle_start, "
+                "cycle_end, event_type, amount, balance_after, remarks, created_by) "
+                "VALUES (?,?,?,?,?,'RENT_REVERSAL',?,?,?,?)",
+                (
+                    person_id,
+                    "",
+                    "",
+                    _date.today().isoformat(),
+                    _date.today().isoformat(),
+                    amt,
+                    bal["current_balance"] if bal else 0,
+                    f"Arrears written off — {reason}",
+                    user["email"],
+                ),
+            ).lastrowid
+            # Waive the oldest missed day-rows: they leave the missed/aging
+            # metrics without pretending the money was collected.
+            remaining = amt
+            for r in conn.execute(
+                "SELECT ev_id, day, daily_cost FROM ev_daily_ledger "
+                "WHERE assigned_person_id=? AND billing_status='missed' ORDER BY day",
+                (person_id,),
+            ).fetchall():
+                dc = int(r["daily_cost"] or 0)
+                if dc <= 0 or remaining < dc:
+                    if dc > 0:
+                        break
+                    continue
+                conn.execute(
+                    "UPDATE ev_daily_ledger SET billing_status='waived', recovery_event_id=?, "
+                    "last_updated=datetime('now') WHERE ev_id=? AND day=?",
+                    (txn_id, r["ev_id"], r["day"]),
+                )
+                remaining -= dc
+
+        meter_set = None
+        if charge_from:
+            try:
+                cf = _date.fromisoformat(str(charge_from))
+            except ValueError:
+                raise HTTPException(400, "charge_rent_from must be an ISO date")  # noqa: B904
+            meter_set = (cf - _td(days=1)).isoformat()
+            conn.execute(
+                "UPDATE ev_assignments SET rent_charged_through=? "
+                "WHERE person_id=? AND returned_date IS NULL",
+                (meter_set, person_id),
+            )
+        conn.commit()
+    return {
+        "written_off": amt,
+        "reason": reason,
+        "rent_charged_through": meter_set,
+        "person_id": person_id,
+    }
