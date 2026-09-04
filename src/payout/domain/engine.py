@@ -180,6 +180,25 @@ def _sync_hub(conn, rec, company, person, result):
     )
 
 
+def _warn_gap(result, rinfo, rider_id, company, cycle_start):
+    """Surface gap catch-up so the operator sees why a cycle billed more days
+    than it has (and knows about unbilled days it could NOT reach)."""
+    if rinfo is None or not rinfo.has_ev:
+        return
+    if rinfo.catchup_days:
+        result.warnings.append(
+            f"Rent catch-up: {rider_id}@{company} had {rinfo.catchup_days} EV day(s) before "
+            f"{_iso(cycle_start)} that no cycle ever billed (from {_iso(rinfo.rent_from)}); "
+            f"billed in this cycle."
+        )
+    if rinfo.orphan_gap_days:
+        result.warnings.append(
+            f"Unbilled EV days: {rider_id}@{company} has {rinfo.orphan_gap_days} older day(s) "
+            f"behind an already-billed stretch that this cycle cannot reach — record them "
+            f"with the back-rent flow or `payout-manage unbilled-days`."
+        )
+
+
 def _lookup(conn, rider_id, company):
     row = conn.execute(
         # Vehicle is derived from EV-assignment status so it's consistent across
@@ -533,6 +552,7 @@ def process_cycle(
                 )
                 rent, rent_days = rinfo.rent, rinfo.days
                 ev_id, model = rinfo.ev_id, rinfo.model
+                _warn_gap(result, rinfo, rec.rider_id, company, cycle_start)
                 # Soft cap: a catch-up window longer than 21 days almost
                 # always means a previous cycle was skipped or someone joined
                 # late and missed updates. Flag for manual review but bill it.
@@ -949,6 +969,7 @@ def process_cycle(
             if pid in present_person_ids:
                 continue
             rinfo = resolve_rent(conn, pid, cycle_start, cycle_end)
+            _warn_gap(result, rinfo, a["deduction_rider_id"] or str(pid), company, cycle_start)
             # NOTE: absence alone no longer collapses a pending_xc_rent bucket.
             # Under the new model, pending stays alive across every company
             # run in the cycle window — it only falls to general carryforward

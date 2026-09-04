@@ -1,9 +1,10 @@
 """Backdated-handover back-rent → EV arrears (manual flow).
 
 When an EV is assigned with a past handover date, the days the rider held it
-before the current cycle were never billed (the engine no longer catches up —
-see rent.chargeable_window). Those owed days are captured here as a one-time
-EV-arrears entry, on operator confirmation.
+before the current cycle were never billed: with no meter yet the engine does
+not reach back (see rent.chargeable_window; the gap catch-up in resolve_rent
+only runs behind an existing meter). Those owed days are captured here as a
+one-time EV-arrears entry, on operator confirmation.
 """
 
 from __future__ import annotations

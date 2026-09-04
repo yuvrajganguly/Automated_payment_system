@@ -209,6 +209,55 @@ def cmd_reset_cycles(args) -> None:
         print("  Balances + arrears rewound to seed-opening state.")
 
 
+def cmd_unbilled_days(args) -> None:
+    """List (and with --apply, book to arrears) EV days behind a meter that no
+    cycle ever billed — the 2026-09-04 rent-gap sweep."""
+    from payout.db.connection import get_connection
+    from payout.domain.unbilled import apply_unbilled, scan_unbilled
+
+    conn = get_connection()
+    try:
+        found = scan_unbilled(conn, lookback_days=args.lookback)
+        if args.person:
+            found = [f for f in found if f["person_id"] in args.person]
+        if not found:
+            print("No unbilled EV days found.")
+            return
+        total = 0
+        for f in found:
+            print(
+                f"#{f['person_id']} {f['name']}  {f['ev_id']}  handover={f['handover']}  "
+                f"meter={f['meter']}  returned={f['returned'] or '-'}"
+            )
+            for r in f["runs"]:
+                print(f"    {r['from']}..{r['to']}  {r['days']:>3}d  Rs.{r['amount'] / 100:,.2f}")
+            total += f["amount"]
+        print(f"{len(found)} assignment(s), Rs.{total / 100:,.2f} unbilled in total.")
+        if not args.apply:
+            print("Dry run. Re-run with --apply (optionally --person ID ...) to book to arrears.")
+            return
+        booked = 0
+        for f in found:
+            for r in f["runs"]:
+                amt = apply_unbilled(
+                    conn,
+                    person_id=f["person_id"],
+                    ev_id=f["ev_id"],
+                    day_from=r["from"],
+                    day_to=r["to"],
+                    created_by=args.created_by,
+                )
+                booked += amt
+                print(
+                    f"  booked #{f['person_id']} {f['name']} {r['from']}..{r['to']} "
+                    f"Rs.{amt / 100:,.2f}"
+                )
+        conn.commit()
+        print(f"Booked Rs.{booked / 100:,.2f} to EV arrears (RENT_MISSED).")
+    finally:
+        conn.close()
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="payout-manage", description="Payout System - setup & import")
     sub = p.add_subparsers(dest="command")
@@ -229,6 +278,15 @@ def main() -> None:
     pr.add_argument(
         "--force", action="store_true", help="Proceed even if no transactions are matched"
     )
+    pu = sub.add_parser(
+        "unbilled-days", help="EV days behind a meter that no cycle billed (report; --apply books)"
+    )
+    pu.add_argument("--apply", action="store_true", help="Book the runs to EV arrears")
+    pu.add_argument("--lookback", type=int, default=120, help="Days back to scan (default 120)")
+    pu.add_argument(
+        "--person", type=int, nargs="*", help="Only these person ids (default: everyone)"
+    )
+    pu.add_argument("--created-by", default="unbilled-days")
     args = p.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -238,6 +296,8 @@ def main() -> None:
         cmd_rollback(args)
     elif args.command == "reset-cycles":
         cmd_reset_cycles(args)
+    elif args.command == "unbilled-days":
+        cmd_unbilled_days(args)
     else:
         p.print_help()
 

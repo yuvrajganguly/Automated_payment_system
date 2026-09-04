@@ -20,7 +20,12 @@
   idempotent) AND in `schema.py` (for fresh databases). Never `ALTER TABLE` anywhere else.
 - **The ledger is append-only.** Corrections are new offsetting rows, never edits.
 - **The rent meter (`rent_charged_through`) only moves forward, per assignment**, via
-  `advance_rent_charged_through`. A cycle bills only its own days (no catch-up).
+  `advance_rent_charged_through`. A cycle bills its own days **plus** any contiguous run
+  of days behind the meter that nothing ever billed (`rent.unbilled_gap`; the 2026-09-04
+  Jeet Ghosh fix — days between two companies' cycles used to be written off). A day is
+  "accounted" when the day-ledger says so or a rent row's billed window covers it
+  (`rent._day_accounted`). A backdated handover with no meter still does not reach back:
+  that is the back-rent flow. `payout-manage unbilled-days [--apply]` sweeps old gaps.
 - Every route that writes uses `require_admin` / `require_creator`. Tests enforce that
   anonymous callers get 401 on every mutating route.
 - **Roles: creator > admin > recruiter > user** (`api/auth.py`). Roster/fleet writes take

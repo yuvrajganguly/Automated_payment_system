@@ -147,8 +147,14 @@ def materialize_cycle_for_person(
         # has no chargeable days in this cycle — we still write the handover/
         # return overlay rows below so the calendar reflects truth, but no
         # billing_status is attributed.
-        win_lo = max(cs, leg.rent_from) if leg.rent_from else None
+        # A leg's window may start BEFORE cycle_start: gap catch-up (see
+        # rent.unbilled_gap) bills days behind the meter that no cycle ever
+        # accounted for. Those days get their billing rows here too, so the
+        # day-ledger reconciles to the RENT row and the gap can't be billed
+        # twice.
+        win_lo = leg.rent_from if leg.rent_from else None
         win_hi = min(ce, leg.rent_through) if leg.rent_through else None
+        lo_bound = min(cs, win_lo) if win_lo else cs
         # Pre-collect maintenance days for this ev across the whole cycle so
         # we mark them properly even if outside the billable window.
         maint = []
@@ -160,7 +166,7 @@ def materialize_cycle_for_person(
             hi = _parse(m["to_date"]) if m["to_date"] else ce
             if not lo:
                 continue
-            maint.append((max(lo, cs), min(hi, ce)))
+            maint.append((max(lo, lo_bound), min(hi, ce)))
 
         def in_maint(day):
             return any(lo <= day <= hi for lo, hi in maint)  # noqa: B023
@@ -168,7 +174,7 @@ def materialize_cycle_for_person(
         # For every day of the leg's overlap with the cycle, classify it, then
         # split the leg's (exact, prorated) rent across the in-window billable
         # days so the day-ledger reconciles to the RENT row to the paisa.
-        leg_lo = max(cs, hod) if hod else cs
+        leg_lo = max(lo_bound, hod) if hod else lo_bound
         leg_hi = min(ce, ret) if ret else ce
         rows = []  # [day, state, this_billing, this_event, kind]
         for day in _iter_days(leg_lo, leg_hi):

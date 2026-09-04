@@ -1,9 +1,20 @@
 """EV rent calculation.
 
-Rent is a continuous daily meter. Each cycle it is billed from the day after
-``rent_charged_through`` (the last date already billed) up to the cycle end —
-so gaps are caught up, overlaps and re-runs never double-charge, and the meter
-advances whether a day was charged (rider present) or missed to arrears (absent).
+Rent is a continuous daily meter. Each cycle bills its own days — from the
+day after ``rent_charged_through`` (the last date already billed) up to the
+cycle end — and the meter advances whether a day was charged (rider present)
+or missed to arrears (absent).
+
+Gap catch-up (2026-09-04, the Jeet Ghosh case): a rider present at Spencer's
+15–21 (meter → 21) and then at Myntra 24–30 was billed 7 days by Myntra and
+the meter jumped to 30, so 22–23 were never billed by anyone — Spencer's
+22–31 then found the meter at 30 and billed only the 31st. Days behind the
+meter that no rent event ever accounted for are now billed by the next cycle
+that processes the rider (see ``unbilled_gap``): the walk back from
+``cycle_start - 1`` stops at the first day that IS accounted for — a
+day-ledger row with a billing status, or (where the day-ledger predates the
+row) a RENT / RENT_MISSED window — so the stuck-meter double charge the old
+"no reach-back" rule guarded against still cannot happen.
 
 Multi-assignment handling: a rider can swap EVs mid-cycle (return one, take
 another the same day). For a given (person, cycle) we sum rent across every
@@ -44,6 +55,9 @@ class AssignmentLeg:
     rent: float
     rent_from: date | None
     rent_through: date | None
+    # Days before cycle_start that were behind the meter and unaccounted for,
+    # billed by this cycle (see unbilled_gap). 0 in the normal case.
+    catchup_days: int = 0
 
 
 @dataclass
@@ -62,6 +76,11 @@ class RentInfo:
     rent_from: date | None = None
     charged_through: date | None = None
     legs: list[AssignmentLeg] = field(default_factory=list)
+    catchup_days: int = 0  # total across legs
+    # Unaccounted days further back than the contiguous catch-up run (an
+    # accounted day sits between them and the cycle). Never billed here —
+    # surfaced as a warning for the back-rent flow.
+    orphan_gap_days: int = 0
 
 
 def chargeable_window(
@@ -71,11 +90,13 @@ def chargeable_window(
     ``None`` if zero days.
 
     Billing model:
-      * ``start = max(charged_through + 1, cycle_start)`` — a cycle only ever
-        charges its own days. A meter behind ``cycle_start`` does NOT catch up
-        (no reach-back), which structurally prevents the stuck-meter double
-        charge. Backdated handovers' earlier un-billed days are handled once as
-        back-rent EV arrears via the manual back-rent flow, not re-billed here.
+      * ``start = max(charged_through + 1, cycle_start)`` — this helper
+        charges the cycle's own days. A meter behind ``cycle_start`` is
+        handled separately by ``resolve_rent`` via ``unbilled_gap``, which
+        reaches back only over days no rent event ever accounted for (so
+        the stuck-meter double charge cannot recur). A brand-new assignment
+        with a backdated handover and NO meter still does not reach back:
+        those days go through the manual back-rent flow.
       * Brand-new assignment with no meter: ``handover_date + 1`` when
         handover lands mid-cycle; else ``cycle_start``.
       * Return day is free: ``end = min(cycle_end, returned_date - 1)``.
@@ -150,6 +171,90 @@ def _parse_date(s):
     return date.fromisoformat(s) if s else None
 
 
+_GAP_LOOKBACK_DAYS = 90
+
+
+def _day_accounted(conn, person_id, ev_id, day) -> bool:
+    """Has this EV-day already been billed, missed to arrears, paid by hand,
+    or otherwise settled? The day-ledger answers first: a row with a billing
+    status, a free state, or another rider's name on it means yes. A row
+    without a status (or no row at all) is not proof of an unbilled day —
+    manual rent payments left such rows behind — so the person's rent
+    transactions are consulted next. A rent row with a ``days`` count covers
+    the last ``days`` days of its cycle window (a cycle that billed one day
+    of a ten-day window covers only that day); a row without one (a manual
+    rent payment, a reversal) covers its whole window. Maintenance days are
+    never owed."""
+    row = conn.execute(
+        "SELECT billing_status, state, assigned_person_id FROM ev_daily_ledger "
+        "WHERE ev_id=? AND day=?",
+        (ev_id, day.isoformat()),
+    ).fetchone()
+    if row is not None:
+        if row["assigned_person_id"] not in (None, person_id):
+            return True  # the EV was someone else's that day
+        if row["state"] in ("maintenance", "handover_free", "return_free", "unassigned"):
+            return True  # a free day is not owed
+        if row["billing_status"] is not None:
+            return True
+    # The window a rent row really billed: its last ``days`` days, counted
+    # back from the cycle end or, for a unit returned mid-cycle, from the day
+    # before the return (the last chargeable day). Old catch-up rows can carry
+    # more days than their cycle window, so look at rows ending up to 60 days
+    # after this day rather than only rows whose window contains it.
+    iso = day.isoformat()
+    ret = conn.execute(
+        "SELECT returned_date FROM ev_assignments WHERE person_id=? AND ev_id=? "
+        "AND (handover_date IS NULL OR handover_date <= ?) "
+        "AND (returned_date IS NULL OR returned_date > ?) "
+        "ORDER BY assignment_id DESC LIMIT 1",
+        (person_id, ev_id, iso, iso),
+    ).fetchone()
+    ret_day = _parse_date(ret["returned_date"]) if ret and ret["returned_date"] else None
+    for t in conn.execute(
+        "SELECT event_type, cycle_start, cycle_end, days FROM transactions WHERE person_id=? "
+        "AND event_type IN ('RENT','RENT_MISSED','RENT_COLLECTED','RENT_REVERSAL') "
+        "AND cycle_end>=? AND cycle_end<=?",
+        (person_id, iso, (day + timedelta(days=60)).isoformat()),
+    ):
+        c_start = _parse_date(str(t["cycle_start"])[:10])
+        c_end = _parse_date(str(t["cycle_end"])[:10])
+        n = t["days"]
+        if n and t["event_type"] != "RENT_REVERSAL":
+            last = c_end if ret_day is None else min(c_end, ret_day - timedelta(days=1))
+            lo = last - timedelta(days=int(n) - 1)
+        else:
+            lo = c_start
+        if lo <= day <= c_end:
+            return True
+    return maintenance_days_in_window(conn, ev_id, day, day) > 0
+
+
+def unbilled_gap(conn, person_id, ev_id, gap_lo, gap_hi):
+    """Days in ``[gap_lo, gap_hi]`` (the stretch between the meter and the
+    cycle) that nothing ever billed. Returns ``(catchup_start, orphan_days)``:
+    ``catchup_start`` is the first day of the contiguous unaccounted run that
+    ends at ``gap_hi`` (None when ``gap_hi`` itself is accounted for), and
+    ``orphan_days`` counts unaccounted days further back, behind an accounted
+    day, which are NOT caught up here."""
+    if gap_lo is None or gap_hi is None or gap_lo > gap_hi:
+        return None, 0
+    lo = max(gap_lo, gap_hi - timedelta(days=_GAP_LOOKBACK_DAYS))
+    catchup_start = None
+    orphans = 0
+    day = gap_hi
+    contiguous = True
+    while day >= lo:
+        if _day_accounted(conn, person_id, ev_id, day):
+            contiguous = False
+        elif contiguous:
+            catchup_start = day
+        else:
+            orphans += 1
+        day -= timedelta(days=1)
+    return catchup_start, orphans
+
+
 def resolve_rent(
     conn, person_id, cycle_start, cycle_end, *, waive_days=0, waive_all=False, rent_override=None
 ):
@@ -168,7 +273,7 @@ def resolve_rent(
     """
     rows = conn.execute(
         """
-        SELECT a.assignment_id, a.ev_id, a.handover_date, a.returned_date,
+        SELECT a.assignment_id, a.person_id, a.ev_id, a.handover_date, a.returned_date,
                a.rent_charged_through, m.provider, m.model_name, m.weekly_rate
         FROM ev_assignments a
         JOIN ev_units  u ON u.ev_id = a.ev_id
@@ -195,6 +300,21 @@ def resolve_rent(
         ret = _parse_date(r["returned_date"])
         charged = _parse_date(r["rent_charged_through"])
         win = chargeable_window(cycle_start, cycle_end, hod, charged, ret)
+        # Gap catch-up: the meter sits behind cycle_start and the days in
+        # between were never accounted for by any cycle (see module doc).
+        catchup_days = 0
+        orphans = 0
+        if charged is not None and charged + timedelta(days=1) < cycle_start:
+            gap_lo = charged + timedelta(days=1)
+            if hod is not None:
+                gap_lo = max(gap_lo, hod + timedelta(days=1))
+            gap_hi = cycle_start - timedelta(days=1)
+            if ret is not None:
+                gap_hi = min(gap_hi, ret - timedelta(days=1))
+            catch_from, orphans = unbilled_gap(conn, r["person_id"], r["ev_id"], gap_lo, gap_hi)
+            if catch_from is not None:
+                catchup_days = (gap_hi - catch_from).days + 1
+                win = (catch_from, gap_hi) if win is None else (catch_from, win[1])
         if win is None:
             base = maint = 0
             rfrom = rthrough = None
@@ -212,6 +332,8 @@ def resolve_rent(
                 "rent_through": rthrough,
                 "base": base,
                 "maint": maint,
+                "catchup": catchup_days,
+                "orphans": orphans,
             }
         )
 
@@ -232,6 +354,7 @@ def resolve_rent(
 
     built_legs: list[AssignmentLeg] = []
     total_base = total_maint = total_waived = total_days = 0
+    total_catchup = total_orphans = 0
     total_rent = 0
     rent_from_overall: date | None = None
     rent_through_overall: date | None = None
@@ -257,9 +380,12 @@ def resolve_rent(
             rent=leg_rent,
             rent_from=leg["rent_from"],
             rent_through=leg["rent_through"],
+            catchup_days=leg["catchup"],
         )
         built_legs.append(built)
         total_days += eff_days
+        total_catchup += leg["catchup"]
+        total_orphans += leg["orphans"]
         total_base += leg["base"]
         total_maint += leg["maint"]
         total_waived += leg["waived"]
@@ -308,6 +434,8 @@ def resolve_rent(
         rent_from=rent_from_overall,
         charged_through=rent_through_overall,
         legs=built_legs,
+        catchup_days=total_catchup,
+        orphan_gap_days=total_orphans,
     )
 
 
