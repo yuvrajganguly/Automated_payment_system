@@ -5,22 +5,35 @@ HTTPS (automatic Let's Encrypt), the app and Postgres run on an internal
 network with nothing else exposed, and a sidecar takes nightly dumps into
 `deploy/backups/`. Lightsail disks are encrypted at rest by default.
 
-Sizing: the **Small plan — $12/mo, 2 vCPU / 2 GB / 60 GB SSD** — carries this
-workload including the coming 12–20-user team app. Mumbai (`ap-south-1`)
-includes 1.5 TB transfer/month, which is ~100× what this system uses. If the
-first `docker compose build` feels tight on 2 GB, add swap (step 2) rather
-than upsizing.
+Sizing: the **Micro plan — $7/mo, 2 vCPU / 1 GB / 40 GB SSD** — carries this
+workload including the coming 12–20-user recruiter app. The stack idles at
+300–400 MB; what used to need 2 GB was building the Docker image on the
+server, and that now happens in GitHub Actions (the `docker` job publishes to
+GHCR on every push to `main` / `review/hardening`). The server only pulls.
+Mumbai (`ap-south-1`) includes 2 TB transfer/month, ~100× what this uses.
+Never run `--build` on the Micro; if you must build on the box, take the $12
+Small instead.
 
 ---
 
 ## 0. Before anything: get the code onto GitHub
 
-The server pulls from GitHub, so the branch must be pushed first. On your
-machine:
+The server pulls the code *and* the image from GitHub, so the branch must be
+pushed first and CI must have gone green once (Actions tab → the "Docker ·
+image builds" job publishes `ghcr.io/yuvrajganguly/automated_payment_system`).
+On your machine:
 
 ```powershell
 git push -u origin review/hardening
 ```
+
+**Image visibility.** GHCR packages start private. Either make the package
+public (github.com → your profile → Packages → `automated_payment_system` →
+Package settings → Change visibility) — the image holds only code that is
+already in the repo, no secrets — or keep it private and give the server a
+read-only token: GitHub → Settings → Developer settings → Personal access
+tokens (classic) → scope `read:packages` only; you will `docker login` with
+it in step 5.
 
 ## 1. AWS account basics (one time — do these before any server exists)
 
@@ -37,7 +50,7 @@ git push -u origin review/hardening
 
 1. https://lightsail.aws.amazon.com → Create instance.
 2. Region: **Mumbai (ap-south-1)** — rider data stays in India.
-3. Image: **OS only → Ubuntu 24.04 LTS**. Plan: **$12 Small (2 GB)**.
+3. Image: **OS only → Ubuntu 24.04 LTS**. Plan: **$7 Micro (1 GB)**.
 4. SSH key: download the default key, or upload your own
    (`ssh-keygen -t ed25519` in PowerShell, then paste
    `C:\Users\Yuvraj\.ssh\id_ed25519.pub` under "Upload key").
@@ -55,8 +68,8 @@ sudo -i
 git clone https://github.com/yuvrajganguly/Automated_payment_system.git payout
 cd payout && git checkout review/hardening
 bash deploy/setup-server.sh          # firewall, docker, auto-updates
-# 2 GB plan: add swap so builds never OOM
-fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile \
+# 1 GB plan: 1 GB of swap is headroom for Postgres + a busy payout run
+fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile \
   && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ```
 
@@ -91,9 +104,14 @@ nano .env                            # paste both; SITE_ADDRESS=payout.qwikserve
 ## 5. First boot
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+# private package only: docker login ghcr.io -u yuvrajganguly   (paste the read:packages token)
+docker compose -f docker-compose.prod.yml pull app
+docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml ps        # all healthy?
 ```
+
+(`pull app` first, always. Without it Compose would try to *build* the image
+because the file also carries a `build:` fallback — and a build on 1 GB dies.)
 
 Open `https://payout.qwikserve.in` (or the sslip.io name) — the certificate
 appears automatically once DNS resolves to the server. The database is empty;
@@ -136,10 +154,17 @@ someone leaves, deactivate their account the same day.
 
 ## 8. Updating the deployment later
 
+Push to the branch, wait for CI to publish the image, then on the server:
+
 ```bash
-cd ~/payout && git pull
-cd deploy && docker compose -f docker-compose.prod.yml up -d --build
+cd ~/payout && git pull                      # compose files / runbook / scripts
+cd deploy && docker compose -f docker-compose.prod.yml pull app \
+          && docker compose -f docker-compose.prod.yml up -d
+docker image prune -f                        # drop the previous image
 ```
+
+To hold or roll back a version, set `PAYOUT_IMAGE_TAG=<short sha>` in
+`deploy/.env` (every push is also tagged with its commit SHA) and `up -d`.
 
 ## 9. Backups
 
