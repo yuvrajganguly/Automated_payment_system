@@ -437,6 +437,111 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
     }
 
 
+@router.post("/{person_id}/rent-meter")
+def set_rent_meter(person_id: int, payload: dict, user: dict = Depends(require_admin)) -> dict:
+    """Set the open assignment's last billed day by hand.
+
+    Body: {"through": ISO date (required), "reason": str (required)}
+
+    Moves ``rent_charged_through`` forward to ``through`` and marks every day
+    in between (old meter + 1 .. through) as accounted for: a RENT_WAIVED
+    audit row (amount 0, ``days`` = days settled) and day-ledger rows with
+    status 'waived' for days that had none. Nothing is collected, nothing is
+    added to arrears — the days simply stop being owed, so neither the next
+    cycle's catch-up nor the unbilled-days sweep will raise them again.
+    Days already billed / missed / free are left as they are. Forward only:
+    to make rent count again from an earlier day use the write-off card's
+    "charge rent from".
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from payout.domain.ev_daily import _upsert_row
+    from payout.domain.rent import _day_accounted, advance_rent_charged_through
+
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "Setting the last billed day requires a reason.")
+    try:
+        through = _date.fromisoformat(str(payload.get("through") or ""))
+    except ValueError:
+        raise HTTPException(400, "through must be an ISO date")  # noqa: B904
+    if through > _date.today():
+        raise HTTPException(400, "The last billed day cannot be in the future.")
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT a.assignment_id, a.ev_id, a.handover_date, a.rent_charged_through, "
+            "       m.weekly_rate, pr.display_name, pr.deduction_company, pr.deduction_rider_id "
+            "FROM ev_assignments a "
+            "JOIN ev_units u ON u.ev_id = a.ev_id "
+            "JOIN ev_models m ON m.model_id = u.model_id "
+            "JOIN person_registry pr ON pr.person_id = a.person_id "
+            "WHERE a.person_id=? AND a.returned_date IS NULL",
+            (person_id,),
+        ).fetchone()
+        if not a:
+            raise HTTPException(404, "No open EV assignment for this person.")
+        cur = a["rent_charged_through"] or a["handover_date"]
+        cur_d = _date.fromisoformat(str(cur)[:10]) if cur else None
+        if cur_d is not None and through <= cur_d:
+            raise HTTPException(
+                400,
+                f"Rent is already billed through {cur_d.isoformat()}. The last billed day only "
+                "moves forward; to bill again from an earlier day use the write-off card's "
+                "'charge rent from'.",
+            )
+        first = (cur_d + _td(days=1)) if cur_d else through
+        waived = []
+        day = first
+        while day <= through:
+            if not _day_accounted(conn, person_id, a["ev_id"], day):
+                waived.append(day)
+            day += _td(days=1)
+        bal = conn.execute(
+            "SELECT current_balance FROM balances WHERE person_id=?", (person_id,)
+        ).fetchone()
+        txn_id = conn.execute(
+            "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
+            "event_type, amount, balance_after, days, remarks, created_by) "
+            "VALUES (?,?,?,?,?,'RENT_WAIVED',0,?,?,?,?)",
+            (
+                person_id,
+                a["deduction_rider_id"] or "",
+                a["deduction_company"] or "",
+                first.isoformat(),
+                through.isoformat(),
+                bal["current_balance"] if bal else 0,
+                len(waived),
+                f"Last billed day set to {through.isoformat()} ({a['ev_id']}; "
+                f"{len(waived)} day(s) waived) — {reason}",
+                user["email"],
+            ),
+        ).lastrowid
+        daily = round(int(a["weekly_rate"]) / 7)
+        for day in waived:
+            _upsert_row(
+                conn,
+                ev_id=a["ev_id"],
+                day=day,
+                state="billable",
+                person_id=person_id,
+                daily_cost=daily,
+                provider_cost=daily,
+                billing_status="waived",
+                cycle_event_id=txn_id,
+            )
+        advance_rent_charged_through(conn, person_id, through.isoformat())
+        conn.commit()
+    return {
+        "person_id": person_id,
+        "ev_id": a["ev_id"],
+        "rent_charged_through": through.isoformat(),
+        "previous": cur_d.isoformat() if cur_d else None,
+        "days_waived": len(waived),
+        "transaction_id": txn_id,
+    }
+
+
 @router.post("/{person_id}/arrears/write-off")
 def write_off_arrears(person_id: int, payload: dict, user: dict = Depends(require_admin)) -> dict:
     """Write off EV-rent arrears that should never have been charged, with a

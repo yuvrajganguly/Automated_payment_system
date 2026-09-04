@@ -171,7 +171,7 @@ def _parse_date(s):
     return date.fromisoformat(s) if s else None
 
 
-_GAP_LOOKBACK_DAYS = 90
+_GAP_LOOKBACK_DAYS = 7  # one cycle: older gaps are a human decision, not a surprise
 
 
 def _day_accounted(conn, person_id, ev_id, day) -> bool:
@@ -213,7 +213,7 @@ def _day_accounted(conn, person_id, ev_id, day) -> bool:
     ret_day = _parse_date(ret["returned_date"]) if ret and ret["returned_date"] else None
     for t in conn.execute(
         "SELECT event_type, cycle_start, cycle_end, days FROM transactions WHERE person_id=? "
-        "AND event_type IN ('RENT','RENT_MISSED','RENT_COLLECTED','RENT_REVERSAL') "
+        "AND event_type IN ('RENT','RENT_MISSED','RENT_COLLECTED','RENT_REVERSAL','RENT_WAIVED') "
         "AND cycle_end>=? AND cycle_end<=?",
         (person_id, iso, (day + timedelta(days=60)).isoformat()),
     ):

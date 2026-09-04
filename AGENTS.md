@@ -24,8 +24,11 @@
   of days behind the meter that nothing ever billed (`rent.unbilled_gap`; the 2026-09-04
   Jeet Ghosh fix — days between two companies' cycles used to be written off). A day is
   "accounted" when the day-ledger says so or a rent row's billed window covers it
-  (`rent._day_accounted`). A backdated handover with no meter still does not reach back:
-  that is the back-rent flow. `payout-manage unbilled-days [--apply]` sweeps old gaps.
+  (`rent._day_accounted`); the reach-back is capped at 7 days. A backdated handover with
+  no meter still does not reach back: that is the back-rent flow. `payout-manage
+  unbilled-days [--apply]` sweeps old gaps. "Set Last Billed Day" on the Person page
+  (`POST /persons/{id}/rent-meter`, RENT_WAIVED) moves the meter forward by hand and marks
+  the days in between accounted for; it replaced the manual rent payment form.
 - Every route that writes uses `require_admin` / `require_creator`. Tests enforce that
   anonymous callers get 401 on every mutating route.
 - **Roles: creator > admin > recruiter > user** (`api/auth.py`). Roster/fleet writes take

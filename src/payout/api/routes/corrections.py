@@ -32,7 +32,8 @@ def corrections_feed(
     Cycle output (PAYOUT/RENT/RENT_MISSED/...) is excluded even though it
     carries the committing operator's email — a committed cycle isn't a
     correction. What IS one: balance adjustments, arrears reversals from
-    backdated returns, opening balances, and manual rent payments (their
+    backdated returns, manual last-billed-day sets (RENT_WAIVED), opening
+    balances, and manual rent payments (their
     RENT_RECOVERED / RENT_COLLECTED rows are tagged "manual rent" in remarks).
     Migration sweeps are excluded.
     """
@@ -43,7 +44,8 @@ def corrections_feed(
         "       t.days, t.remarks, t.created_at, t.created_by "
         "FROM transactions t "
         "JOIN person_registry pr ON pr.person_id = t.person_id "
-        "WHERE (t.event_type IN ('ADJUSTMENT', 'RENT_REVERSAL', 'DEPOSIT_APPLIED', 'OPENING') "
+        "WHERE (t.event_type IN ('ADJUSTMENT', 'RENT_REVERSAL', 'RENT_WAIVED', "
+        "                        'DEPOSIT_APPLIED', 'OPENING') "
         "       OR t.remarks LIKE 'manual rent%') "
         "  AND COALESCE(t.created_by, '') NOT LIKE 'migration:%' "
     )

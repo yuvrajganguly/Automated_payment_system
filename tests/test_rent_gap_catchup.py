@@ -186,3 +186,62 @@ def test_scan_and_apply_unbilled_days_for_pre_fix_data(db):
         (pid,),
     ).fetchone()[0]
     assert rec == 2 * DAY
+
+
+def test_set_last_billed_day_marks_gap_accounted_and_blocks_catchup(db):
+    """POST /persons/{id}/rent-meter: the meter moves forward, the days in
+    between get 'waived' day-rows + a RENT_WAIVED audit row, and neither the
+    next cycle's catch-up nor the sweep raises them again. Forward only."""
+    from datetime import date as _date
+
+    from payout.domain.unbilled import scan_unbilled
+    from tests.test_deposit import _client
+
+    pid = _setup(db)
+    process_cycle("Blitz", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True)
+    c = _client(db)
+    r = c.post(
+        f"/api/persons/{pid}/rent-meter",
+        json={"through": "2026-08-23", "reason": "paid the owner in cash"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "person_id": pid,
+        "ev_id": "EV1",
+        "rent_charged_through": "2026-08-23",
+        "previous": "2026-08-21",
+        "days_waived": 2,
+        "transaction_id": r.json()["transaction_id"],
+    }
+    led = {
+        x["day"]: x["billing_status"]
+        for x in db.execute("SELECT day, billing_status FROM ev_daily_ledger WHERE ev_id='EV1'")
+    }
+    assert led["2026-08-22"] == "waived" and led["2026-08-23"] == "waived"
+    tx = db.execute(
+        "SELECT amount, days, cycle_start, cycle_end FROM transactions "
+        "WHERE person_id=? AND event_type='RENT_WAIVED'",
+        (pid,),
+    ).fetchone()
+    assert (tx["amount"], tx["days"], tx["cycle_start"], tx["cycle_end"]) == (
+        0,
+        2,
+        "2026-08-22",
+        "2026-08-23",
+    )
+    # Backwards is refused.
+    r = c.post(f"/api/persons/{pid}/rent-meter", json={"through": "2026-08-20", "reason": "x"})
+    assert r.status_code == 400
+    # Myntra 24-30 now finds nothing to catch up; the sweep is clean.
+    res = process_cycle(
+        "Myntra", date(2026, 8, 24), date(2026, 8, 30), _myntra([("M1", 5000, 0)]), commit=True
+    )
+    assert not [w for w in res.warnings if "catch-up" in w.lower()]
+    last = _rent_rows(db, pid)[-1]
+    assert (last["company"], last["days"]) == ("Myntra", 7)
+    assert scan_unbilled(db, today=_date(2026, 9, 4)) == []
+    # Arrears untouched: nothing was owed, nothing was added.
+    assert (
+        db.execute("SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)).fetchone()
+        or {"outstanding": 0}
+    )["outstanding"] == 0

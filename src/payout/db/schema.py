@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS ev_arrears (
 -- Immutable, append-only audit trail. Never UPDATE/DELETE; corrections are new
 -- offsetting rows. amount: positive = credit, negative = debit.
 --   event_type: PAYOUT | RENT | RENT_MISSED | RENT_RECOVERED | RENT_REVERSAL |
+--               RENT_WAIVED (last billed day set by hand; amount 0, days = days
+--               settled without money — see routes/persons.set_rent_meter) |
 --               DEPOSIT_APPLIED (security deposit vs debt on EV closure) |
 --               DUES_CARRY | ADJUSTMENT | DEDUCTION_SWITCH | EV_SWAP | OPENING
 --   (RENT_REVERSAL: arrears written off because a backdated EV return proved

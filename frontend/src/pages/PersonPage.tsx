@@ -245,7 +245,7 @@ export function PersonPage() {
         />
       )}
 
-      {isAdmin && <RentPaymentForm personId={person.person_id} onPosted={load} />}
+      {isAdmin && <SetLastBilledDayCard personId={person.person_id} onPosted={load} />}
       {isAdmin && <AdjustmentForm personId={person.person_id} onPosted={load} />}
       {isAdmin && <WriteOffArrearsCard personId={person.person_id} onPosted={load} />}
 
@@ -260,48 +260,26 @@ export function PersonPage() {
   )
 }
 
-function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: () => void }) {
-  const today = todayISO()   // local date; the UTC version was yesterday before 05:30 IST
-  const [amount, setAmount] = useState('')
-  const [paidOn, setPaidOn] = useState(today)
-  const [periodStart, setPeriodStart] = useState('')
-  const [periodEnd, setPeriodEnd] = useState('')
-  const [remarks, setRemarks] = useState('')
+function SetLastBilledDayCard({ personId, onPosted }: { personId: number; onPosted: () => void }) {
+  const [through, setThrough] = useState('')
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [tone, setTone] = useState<'ok' | 'err'>('ok')
 
-  // Both period dates are optional, but must come together if either is set.
-  const periodValid =
-    (!periodStart && !periodEnd) ||
-    (!!periodStart && !!periodEnd && periodStart <= periodEnd)
-
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const amt = parseFloat(amount)
-      if (!amt || amt <= 0 || isNaN(amt)) throw new Error('Amount must be positive.')
-      if (!periodValid) throw new Error('Coverage period must have both dates with end ≥ start.')
-      const body: Record<string, unknown> = {
-        person_id: personId, amount: amt, paid_on: paidOn, remarks,
-      }
-      if (periodStart && periodEnd) {
-        body.period_start = periodStart
-        body.period_end = periodEnd
-      }
       const r = await api.post<{
-        applied_to_arrears: number; applied_to_rent: number; new_balance: number
-        rent_charged_through_advanced_to: string | null
-      }>('/ledger/rent-payment', body)
+        rent_charged_through: string; previous: string | null; days_waived: number; ev_id: string
+      }>(`/persons/${personId}/rent-meter`, { through, reason })
       setTone('ok')
       setMsg(
-        `Recorded. ${r.applied_to_arrears > 0 ? `Arrears: ${fmt(r.applied_to_arrears)} · ` : ''}` +
-        `Rent: ${fmt(r.applied_to_rent)} · New balance: ${fmt(r.new_balance)}` +
-        (r.rent_charged_through_advanced_to
-          ? ` · Rent meter → ${r.rent_charged_through_advanced_to}`
-          : ''),
+        `Rent meter → ${r.rent_charged_through}` +
+        (r.previous ? ` (was ${r.previous})` : '') +
+        ` · ${r.days_waived} day${r.days_waived === 1 ? '' : 's'} marked accounted for on ${r.ev_id}`,
       )
-      setAmount(''); setRemarks(''); setPeriodStart(''); setPeriodEnd(''); onPosted()
+      setThrough(''); setReason(''); onPosted()
     } catch (err) {
       setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed')
     } finally { setBusy(false) }
@@ -309,46 +287,29 @@ function RentPaymentForm({ personId, onPosted }: { personId: number; onPosted: (
 
   return (
     <div className="panel p-4 mt-6 border-l-[3px] border-l-emerald-400">
-      <h3 className="font-semibold mb-1">Log Manual Rent Payment</h3>
+      <h3 className="font-semibold mb-1">Set Last Billed Day</h3>
       <p className="text-xs text-slate-500 mb-3">
-        Use when a rider pays rent in cash / UPI outside the bank reconciliation.
-        Goes against outstanding EV arrears first, then current-cycle rent —
-        so it shows up correctly in the EV Rent Details tab.
-        Fill in the optional <b>coverage period</b> to mark which days the
-        payment covers; the EV's rent meter will advance to the end date so the
-        engine doesn't re-charge for those days.
+        Moves the EV rent meter forward to this date. Every day up to it that nothing has
+        billed yet is marked accounted for (no money recorded, nothing added to arrears), so
+        the next cycle will not catch those days up and the unbilled-days sweep will not raise
+        them. Use it when rent for those days was settled outside the system or is not owed.
+        Forward only — to bill again from an earlier day use the write-off card below.
       </p>
       <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
         <label className="block text-sm">
-          <span className="block text-xs">Amount paid *</span>
-          <input value={amount} onChange={(e) => setAmount(e.target.value)}
-                 type="number" step="0.01" min="0"
-                 className="border rounded px-3 py-1.5 w-32" />
-        </label>
-        <label className="block text-sm">
-          <span className="block text-xs">Paid on</span>
-          <input value={paidOn} onChange={(e) => setPaidOn(e.target.value)}
-                 type="date" className="border rounded px-3 py-1.5" />
-        </label>
-        <label className="block text-sm">
-          <span className="block text-xs">Covers from</span>
-          <input value={periodStart} onChange={(e) => setPeriodStart(e.target.value)}
-                 type="date" className="border rounded px-3 py-1.5" />
-        </label>
-        <label className="block text-sm">
-          <span className="block text-xs">Covers to</span>
-          <input value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)}
-                 type="date" className="border rounded px-3 py-1.5" />
+          <span className="block text-xs">Billed through *</span>
+          <input value={through} onChange={(e) => setThrough(e.target.value)}
+                 type="date" max={todayISO()} className="border rounded px-3 py-1.5" />
         </label>
         <label className="block text-sm flex-1 min-w-[200px]">
-          <span className="block text-xs">Remarks (optional)</span>
-          <input value={remarks} onChange={(e) => setRemarks(e.target.value)}
-                 placeholder="e.g. UPI to owner, ref# 12345"
+          <span className="block text-xs">Reason *</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder="e.g. paid in cash to owner on 3 Sep, ref# 12345"
                  className="w-full border rounded px-3 py-1.5" />
         </label>
-        <button type="submit" disabled={busy || !amount || !periodValid}
+        <button type="submit" disabled={busy || !through || !reason.trim()}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
-          {busy ? 'Posting…' : 'Record rent payment'}
+          {busy ? 'Saving…' : 'Set last billed day'}
         </button>
         {msg && (
           <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>
