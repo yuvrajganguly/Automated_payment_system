@@ -248,6 +248,22 @@ def _0008_cod_hub_code(conn: Any) -> None:
         conn.execute("UPDATE cod_holds SET hub_code = hub WHERE hub_code IS NULL")
 
 
+def _0009_suspected_return_dismissals(conn: Any) -> None:
+    """Operators can now mark a suspected EV return as 'not a return'
+    (rider absent / sponsored EV). New table; apply_schema creates it for
+    fresh databases, this creates it for existing ones."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS suspected_return_dismissals ("
+        "  assignment_id      INTEGER PRIMARY KEY REFERENCES ev_assignments(assignment_id),"
+        "  kind               TEXT NOT NULL,"
+        "  reason             TEXT NOT NULL,"
+        "  missed_cycles_then INTEGER NOT NULL DEFAULT 0,"
+        "  dismissed_by       TEXT,"
+        "  dismissed_at       TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -257,6 +273,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0006_collapse_bluedart", _0006_collapse_bluedart),
     ("0007_cod_hub_and_spencers_layout", _0007_cod_hub_and_spencers_layout),
     ("0008_cod_hub_code", _0008_cod_hub_code),
+    ("0009_suspected_return_dismissals", _0009_suspected_return_dismissals),
 ]
 
 _TRACKING_DDL = (

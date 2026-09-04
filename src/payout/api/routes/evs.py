@@ -476,8 +476,16 @@ def close_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     return return_ev(body, _)
 
 
+_DISMISS_KINDS = ("absent", "sponsored", "other")
+_REFLAG_AFTER_CYCLES = 4  # an 'absent' dismissal resurfaces after this many more missed cycles
+
+
 @router.get("/suspected-returns")
-def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) -> list[dict]:
+def suspected_returns(
+    min_cycles: int = 2,
+    include_dismissed: bool = False,
+    _: dict = Depends(get_current_user),
+) -> list[dict]:
     """EV holders who look like they've returned the vehicle without telling
     anyone: an open assignment, but no payout for ``min_cycles``+ cycles while
     rent kept falling to arrears.
@@ -485,6 +493,13 @@ def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) 
     ``suggested_return_date`` is the first missed cycle's start — recording the
     return with that date reverses the entire missed streak (the return day
     itself is free).
+
+    An operator who knows better can dismiss a row (POST
+    /suspected-returns/dismiss): the rider is genuinely absent, or the EV is
+    sponsored and its rent written off. Dismissed rows are hidden; a
+    'sponsored' dismissal is permanent, any other kind resurfaces once the
+    missed streak has grown by ``_REFLAG_AFTER_CYCLES`` more cycles (marked
+    ``reflagged``). ``include_dismissed=1`` lists them all with the dismissal.
     """
     out: list[dict] = []
     with get_connection() as conn:
@@ -492,12 +507,15 @@ def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) 
             "SELECT a.assignment_id, a.ev_id, a.handover_date, pr.person_id, pr.display_name, "
             "       pr.deduction_company AS company, pr.deduction_rider_id AS rider_id, "
             "       m.model_name AS model, m.weekly_rate, "
-            "       COALESCE(ea.outstanding, 0) AS arrears_outstanding "
+            "       COALESCE(ea.outstanding, 0) AS arrears_outstanding, "
+            "       d.kind AS dismiss_kind, d.reason AS dismiss_reason, "
+            "       d.missed_cycles_then, d.dismissed_by, d.dismissed_at "
             "FROM ev_assignments a "
             "JOIN person_registry pr ON pr.person_id = a.person_id "
             "JOIN ev_units u  ON u.ev_id = a.ev_id "
             "JOIN ev_models m ON m.model_id = u.model_id "
             "LEFT JOIN ev_arrears ea ON ea.person_id = pr.person_id "
+            "LEFT JOIN suspected_return_dismissals d ON d.assignment_id = a.assignment_id "
             "WHERE a.returned_date IS NULL"
         ).fetchall()
         for h in holders:
@@ -516,8 +534,24 @@ def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) 
             ).fetchone()
             if (streak["n"] or 0) < min_cycles:
                 continue
+            dismissed = None
+            if h["dismiss_kind"]:
+                grown = int(streak["n"] or 0) - int(h["missed_cycles_then"] or 0)
+                reflagged = h["dismiss_kind"] != "sponsored" and grown >= _REFLAG_AFTER_CYCLES
+                dismissed = {
+                    "kind": h["dismiss_kind"],
+                    "reason": h["dismiss_reason"],
+                    "by": h["dismissed_by"],
+                    "at": h["dismissed_at"],
+                    "missed_cycles_then": h["missed_cycles_then"],
+                    "reflagged": reflagged,
+                }
+                if not reflagged and not include_dismissed:
+                    continue
             out.append(
                 {
+                    "assignment_id": h["assignment_id"],
+                    "dismissed": dismissed,
                     "person_id": pid,
                     "display_name": h["display_name"],
                     "rider_id": h["rider_id"],
@@ -535,6 +569,92 @@ def suspected_returns(min_cycles: int = 2, _: dict = Depends(get_current_user)) 
             )
     out.sort(key=lambda r: (-(r["missed_cycles"] or 0), -(r["missed_amount"] or 0)))
     return out
+
+
+@router.post("/suspected-returns/dismiss")
+def dismiss_suspected_return(
+    payload: dict = Body(...), user: dict = Depends(require_admin)
+) -> dict:
+    """The rider still holds the EV — stop suggesting a return.
+
+    Body: {"ev_id": str, "kind": "absent" | "sponsored" | "other", "reason": str}
+    Rent keeps accruing exactly as before; only the suggestion goes away
+    (see suspected_returns for when it comes back)."""
+    ev_id = (payload.get("ev_id") or "").strip()
+    kind = (payload.get("kind") or "").strip().lower()
+    reason = (payload.get("reason") or "").strip()
+    if kind not in _DISMISS_KINDS:
+        raise HTTPException(400, f"kind must be one of {', '.join(_DISMISS_KINDS)}")
+    if not reason:
+        raise HTTPException(400, "A reason is required.")
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT a.assignment_id, a.person_id, pr.display_name FROM ev_assignments a "
+            "JOIN person_registry pr ON pr.person_id = a.person_id "
+            "WHERE a.ev_id=? AND a.returned_date IS NULL",
+            (ev_id,),
+        ).fetchone()
+        if not a:
+            raise HTTPException(404, "No open assignment for that EV.")
+        last_payout = conn.execute(
+            "SELECT MAX(cycle_end) AS m FROM transactions "
+            "WHERE person_id=? AND event_type='PAYOUT'",
+            (a["person_id"],),
+        ).fetchone()["m"]
+        n = conn.execute(
+            "SELECT COUNT(*) AS n FROM transactions WHERE person_id=? AND event_type='RENT_MISSED' "
+            "AND cycle_start > ?",
+            (a["person_id"], last_payout or "0000-00-00"),
+        ).fetchone()["n"]
+        conn.execute(
+            "DELETE FROM suspected_return_dismissals WHERE assignment_id=?", (a["assignment_id"],)
+        )
+        conn.execute(
+            "INSERT INTO suspected_return_dismissals "
+            "(assignment_id, kind, reason, missed_cycles_then, dismissed_by) VALUES (?,?,?,?,?)",
+            (a["assignment_id"], kind, reason, int(n or 0), user["email"]),
+        )
+        record_activity(
+            conn,
+            user,
+            "ev.suspected_return.dismiss",
+            entity_type="ev",
+            entity_id=ev_id,
+            label=a["display_name"],
+            person_id=a["person_id"],
+            details={"kind": kind, "reason": reason, "missed_cycles": int(n or 0)},
+        )
+        conn.commit()
+    return {"ev_id": ev_id, "assignment_id": a["assignment_id"], "kind": kind, "dismissed": True}
+
+
+@router.post("/suspected-returns/undismiss")
+def undismiss_suspected_return(
+    payload: dict = Body(...), user: dict = Depends(require_admin)
+) -> dict:
+    """Put a dismissed EV back on the suspected-returns list."""
+    ev_id = (payload.get("ev_id") or "").strip()
+    with get_connection() as conn:
+        a = conn.execute(
+            "SELECT assignment_id, person_id FROM ev_assignments WHERE ev_id=? "
+            "AND returned_date IS NULL",
+            (ev_id,),
+        ).fetchone()
+        if not a:
+            raise HTTPException(404, "No open assignment for that EV.")
+        n = conn.execute(
+            "DELETE FROM suspected_return_dismissals WHERE assignment_id=?", (a["assignment_id"],)
+        ).rowcount
+        record_activity(
+            conn,
+            user,
+            "ev.suspected_return.undismiss",
+            entity_type="ev",
+            entity_id=ev_id,
+            person_id=a["person_id"],
+        )
+        conn.commit()
+    return {"ev_id": ev_id, "dismissed": False, "removed": int(n or 0)}
 
 
 @router.post("/amend-return")

@@ -479,6 +479,19 @@ CREATE INDEX IF NOT EXISTS idx_pl_person ON payment_lines (person_id);
 -- ── ev_maintenance ──────────────────────────────────────────────────────────
 -- EV downtime windows. The rent engine excludes any chargeable day that falls
 -- inside a window for that EV (auto-applied every cycle).
+-- "Suspected EV return" dismissals: the operator confirmed the rider still
+-- holds the unit (genuinely absent, sponsored EV whose rent is written off,
+-- ...). kind='sponsored' hides the assignment for good; other kinds resurface
+-- it once the missed streak grows by 4 more cycles past missed_cycles_then.
+CREATE TABLE IF NOT EXISTS suspected_return_dismissals (
+    assignment_id      INTEGER PRIMARY KEY REFERENCES ev_assignments(assignment_id),
+    kind               TEXT NOT NULL,          -- absent | sponsored | other
+    reason             TEXT NOT NULL,
+    missed_cycles_then INTEGER NOT NULL DEFAULT 0,
+    dismissed_by       TEXT,
+    dismissed_at       TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ev_maintenance (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     ev_id      TEXT NOT NULL REFERENCES ev_units(ev_id),

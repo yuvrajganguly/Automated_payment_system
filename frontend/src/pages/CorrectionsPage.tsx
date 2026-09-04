@@ -30,6 +30,15 @@ interface Suspect {
   missed_amount: number
   arrears_outstanding: number
   suggested_return_date: string | null
+  assignment_id?: number
+  dismissed?: {
+    kind: 'absent' | 'sponsored' | 'other'
+    reason: string
+    by: string | null
+    at: string | null
+    missed_cycles_then: number
+    reflagged: boolean
+  } | null
 }
 
 interface Correction {
@@ -61,9 +70,28 @@ const EVENT_TONE: Record<string, string> = {
 
 function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
   const [date, setDate] = useState(s.suggested_return_date ?? '')
-  const [busy, setBusy] = useState<'return' | 'spare' | null>(null)
+  const [busy, setBusy] = useState<'return' | 'spare' | 'dismiss' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
+  const [keepOpen, setKeepOpen] = useState(false)
+  const [kind, setKind] = useState<'absent' | 'sponsored' | 'other'>('absent')
+  const [reason, setReason] = useState('')
+
+  const dismiss = async () => {
+    if (!reason.trim()) { setError('Say why — it goes in the activity log.'); return }
+    setBusy('dismiss'); setError(null)
+    try {
+      await api.post('/evs/suspected-returns/dismiss', { ev_id: s.ev_id, kind, reason })
+      setResult(kind === 'sponsored'
+        ? 'Noted — sponsored EV, will not be suggested again.'
+        : 'Noted — rent keeps accruing; this comes back if 4 more cycles go silent.')
+      setTimeout(onDone, 2000)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const act = async (kind: 'return' | 'spare') => {
     if (!date) { setError('Pick the real return date first.'); return }
@@ -101,11 +129,33 @@ function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
         {s.missed_since ? <> since <span className="font-medium">{s.missed_since}</span></> : null}
         {' — '}{rupees(s.missed_amount)}
         {s.last_payout_end ? <span className="text-slate-400"> · last payout {s.last_payout_end}</span> : null}
+        {s.dismissed?.reflagged && (
+          <div className="text-xs text-amber-300 mt-0.5">
+            Dismissed as "{s.dismissed.kind}" at {s.dismissed.missed_cycles_then} cycles ({s.dismissed.reason}) —
+            still silent {s.missed_cycles - s.dismissed.missed_cycles_then} cycles later.
+          </div>
+        )}
       </div>
       {result ? (
         <div className="text-sm text-emerald-300">{result}</div>
+      ) : keepOpen ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 text-sm">
+            <option value="absent">Genuinely absent — still has the EV</option>
+            <option value="sponsored">Sponsored EV — rent written off</option>
+            <option value="other">Other</option>
+          </select>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder="reason (required)"
+                 className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-56" />
+          <button onClick={dismiss} disabled={busy !== null} className="btn-primary">
+            {busy === 'dismiss' ? '…' : 'Confirm'}
+          </button>
+          <button onClick={() => setKeepOpen(false)} disabled={busy !== null} className="btn-ghost">Cancel</button>
+        </div>
       ) : (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-slate-500">Returned on</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                  className="border border-slate-300 rounded-lg px-2 py-1 text-sm" />
@@ -115,6 +165,10 @@ function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
           <button onClick={() => act('spare')} disabled={busy !== null} className="btn-ghost">
             {busy === 'spare' ? '…' : 'Back as spare'}
           </button>
+          <button onClick={() => setKeepOpen(true)} disabled={busy !== null}
+                  className="btn-ghost" title="Not a return: the rider still holds this EV">
+            Still has it
+          </button>
         </div>
       )}
       {error && <div className="w-full text-sm text-critical">{error}</div>}
@@ -122,8 +176,47 @@ function SuspectRow({ s, onDone }: { s: Suspect; onDone: () => void }) {
   )
 }
 
+/** EVs an operator said are NOT returns (rider absent / sponsored). Hidden
+ *  from the list above; one click puts one back. */
+function DismissedList({ rows, onChanged }: { rows: Suspect[]; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  if (!rows.length) return null
+  const undo = async (ev_id: string) => {
+    setBusy(ev_id)
+    try { await api.post('/evs/suspected-returns/undismiss', { ev_id }); onChanged() }
+    finally { setBusy(null) }
+  }
+  return (
+    <div className="border-t border-slate-100 bg-slate-50/40">
+      <button onClick={() => setOpen((o) => !o)}
+              className="w-full text-left px-4 py-2 text-xs text-slate-500 hover:text-slate-300">
+        {open ? '▾' : '▸'} {rows.length} marked "still has it" — not suggested as returns
+      </button>
+      {open && rows.map((s) => (
+        <div key={s.ev_id} className="px-4 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm border-t border-slate-100">
+          <Link to={`/persons/${s.person_id}`} className="font-medium text-slate-900 hover:text-brand-600">
+            {s.display_name}
+          </Link>
+          <Link to={`/evs/${s.ev_id}`} className="text-slate-500 hover:text-brand-600">{s.ev_id}</Link>
+          <span className="text-slate-500 flex-1 min-w-[200px]">
+            {s.dismissed?.kind === 'sponsored' ? 'Sponsored EV' : s.dismissed?.kind === 'absent' ? 'Absent' : 'Other'}
+            {' — '}{s.dismissed?.reason}
+            <span className="text-slate-400"> · {s.missed_cycles} cycles silent · {rupees(s.missed_amount)}</span>
+          </span>
+          <button onClick={() => undo(s.ev_id)} disabled={busy === s.ev_id}
+                  className="text-xs underline text-brand">
+            {busy === s.ev_id ? '…' : 'Suggest again'}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function CorrectionsPage() {
   const suspects = useApi<Suspect[]>('/evs/suspected-returns')
+  const dismissed = useApi<Suspect[]>('/evs/suspected-returns?include_dismissed=1')
   const [eventType, setEventType] = useUrlString('type')
   const feed = useApi<Correction[]>(
     `/corrections?limit=200${eventType ? `&event_type=${eventType}` : ''}`,
@@ -154,8 +247,12 @@ export function CorrectionsPage() {
             Nothing suspicious — every EV holder is showing up in payouts.
           </div>
         ) : (
-          suspects.data.map((s) => <SuspectRow key={s.ev_id} s={s} onDone={() => { suspects.reload(); feed.reload() }} />)
+          suspects.data.map((s) => <SuspectRow key={s.ev_id} s={s} onDone={() => { suspects.reload(); feed.reload(); dismissed.reload() }} />)
         )}
+        <DismissedList
+          rows={(dismissed.data ?? []).filter((d) => d.dismissed && !d.dismissed.reflagged)}
+          onChanged={() => { suspects.reload(); dismissed.reload() }}
+        />
       </section>
 
       <section className="panel overflow-hidden">
