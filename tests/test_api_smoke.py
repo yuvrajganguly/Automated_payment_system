@@ -61,6 +61,7 @@ _QUERY = {
 _EXPECTED_STATUS = {
     "/api/providers/{provider}/bills/{bill_id}": 404,  # no bills in the demo seed
     "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
+    "/api/documents/{doc_id}/download": 404,  # no documents in the demo seed
 }
 if DB_URL:
     # No single file to stream on Postgres; the route says to use pg_dump.
@@ -105,6 +106,8 @@ def smoke():
             "{email}": "admin@demo.com",
             "{upload_id}": "1",
             "{bill_id}": "1",
+            "{doc_id}": "1",
+            "{request_id}": "1",
         }
         yield client, app, subs
 

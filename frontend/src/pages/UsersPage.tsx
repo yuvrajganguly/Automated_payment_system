@@ -5,7 +5,7 @@ import { Spinner } from '../components/Spinner'
 
 interface UserRow {
   email: string
-  role: 'user' | 'admin' | 'creator'
+  role: 'user' | 'recruiter' | 'admin' | 'creator'
   is_active: boolean
   created_at: string | null
 }
@@ -96,8 +96,10 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
                   className={'text-xs border rounded px-2 py-0.5 ' +
                     (row.role === 'creator' ? 'bg-purple-500/15'
                      : row.role === 'admin' ? 'bg-emerald-500/15'
+                     : row.role === 'recruiter' ? 'bg-sky-500/15'
                      :                        'bg-slate-100')}>
             <option value="user">user</option>
+            <option value="recruiter">recruiter</option>
             <option value="admin">admin</option>
             <option value="creator">creator</option>
           </select>
@@ -105,6 +107,7 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
           <span className={'text-xs px-1.5 py-0.5 rounded ' +
             (row.role === 'creator' ? 'bg-purple-500/15'
              : row.role === 'admin' ? 'bg-emerald-500/15'
+             : row.role === 'recruiter' ? 'bg-sky-500/15'
              :                        'bg-slate-100')}>{row.role}</span>
         )}
       </Td>
@@ -175,6 +178,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
                     onChange={(e) => setForm({ ...form, role: e.target.value })}
                     className="w-full border rounded px-2 py-1">
               <option value="user">user</option>
+              <option value="recruiter">recruiter</option>
               <option value="admin">admin</option>
               <option value="creator">creator</option>
             </select>

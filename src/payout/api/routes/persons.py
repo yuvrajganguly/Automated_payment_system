@@ -8,6 +8,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import EvSummary, LinkRidersIn, PersonOut, RiderOut, SplitPersonIn
 from payout.db import get_connection
 from payout.db.references import drop_person_singletons
+from payout.domain.activity import record_activity
 from payout.domain.placeholders import retire_placeholders_everywhere
 
 router = APIRouter()
@@ -20,7 +21,7 @@ def _rider_dict(row) -> dict:
 
 
 @router.get("/{person_id}")
-def get_person(person_id: int, _: dict = Depends(get_current_user)) -> PersonOut:
+def get_person(person_id: int, user: dict = Depends(get_current_user)) -> PersonOut:
     with get_connection() as conn:
         pr = conn.execute(
             "SELECT pr.person_id, pr.display_name, pr.deduction_company, pr.deduction_rider_id, "
@@ -95,13 +96,16 @@ def get_person(person_id: int, _: dict = Depends(get_current_user)) -> PersonOut
         }
         for h in history_rows
     ]
+    # Recruiters onboard people and manage the fleet; balances are not theirs
+    # to see. The Android app hides the fields; the API must not leak them.
+    money_visible = user.get("role") != "recruiter"
     out = PersonOut(
         person_id=pr["person_id"],
         display_name=pr["display_name"],
         deduction_company=pr["deduction_company"],
         deduction_rider_id=pr["deduction_rider_id"],
-        current_balance=pr["current_balance"],
-        arrears_outstanding=pr["arrears_outstanding"],
+        current_balance=pr["current_balance"] if money_visible else None,
+        arrears_outstanding=pr["arrears_outstanding"] if money_visible else None,
         riders=riders,
         ev=ev_summary,
         ev_history=ev_history,
@@ -269,7 +273,7 @@ def split_person(person_id: int, body: SplitPersonIn, user: dict = Depends(requi
 
 
 @router.post("/link")
-def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
+def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict:
     """Merge the secondary person into the primary. Primary keeps their
     person_id, display_name and history; all of secondary's rider_master rows,
     transactions, balance and arrears collapse into primary.
@@ -415,6 +419,15 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
         # If one half carried a QSPEND placeholder where the other has the
         # real id, the placeholder has served its purpose.
         retired = retire_placeholders_everywhere(conn, primary)
+        record_activity(
+            conn,
+            user,
+            "person.merge",
+            entity_type="person",
+            entity_id=primary,
+            person_id=primary,
+            details={"merged_from_person_id": secondary, "placeholders_retired": retired},
+        )
         conn.commit()
     return {
         "merged": True,

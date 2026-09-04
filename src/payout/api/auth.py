@@ -128,10 +128,38 @@ def get_current_user(
     return {"email": user["email"], "role": user["role"]}
 
 
+# Role ladder: creator > admin > recruiter > user.
+#   user      read-only operator (money pages included)
+#   recruiter field staff: onboard riders, hubs, bank details, documents, EVs
+#             (add/assign/return/spare/maintenance). No money — they may only
+#             REQUEST a credit/debit, which an admin decides.
+#   admin     everything operational, incl. payouts and money
+#   creator   admin + user management + system control (invisible below itself)
+ROLE_RANK = {"user": 0, "recruiter": 1, "admin": 2, "creator": 3}
+VALID_ROLES = tuple(ROLE_RANK)
+
+
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """Allow admin AND creator (creator is a strict super-set of admin)."""
     if user.get("role") not in ("admin", "creator"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+def require_recruiter(user: dict = Depends(get_current_user)) -> dict:
+    """Recruiter, admin or creator — the roster/fleet write set."""
+    if user.get("role") not in ("recruiter", "admin", "creator"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Recruiter access required"
+        )
+    return user
+
+
+def no_recruiter(user: dict = Depends(get_current_user)) -> dict:
+    """Money-side routers are mounted with this: a recruiter sees riders and
+    the fleet, never balances, payouts, arrears, COD or the ledger."""
+    if user.get("role") == "recruiter":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
     return user
 
 

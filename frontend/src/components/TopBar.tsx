@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { WORKSPACES, workspaceFor, workspaceUrl } from './workspaces'
+import { workspaceFor, workspaceUrl, workspacesFor } from './workspaces'
 import emblem from '../assets/qwikserve-emblem.png'
 
 /** The command bar: brand mark · workspace switcher · ⌘K · identity.
@@ -30,7 +30,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       {/* Workspace switcher — the app's spine. */}
       <nav className="flex items-center gap-0.5 mx-auto rounded-xl p-1
                       bg-white/[0.03] border border-edge">
-        {WORKSPACES.map((ws) => {
+        {workspacesFor(user?.role).map((ws) => {
           const isActive = ws.key === active.key
           // Live URL for the workspace you're in (its memory effect runs
           // after render); stored last-visited URL for the others.

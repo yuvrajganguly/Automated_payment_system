@@ -40,6 +40,20 @@ services:
       - PAYOUT_JWT_SECRET=${PAYOUT_JWT_SECRET:?set in deploy/.env}
       - PAYOUT_SEED_DEMO=0                   # real deployment: no demo login/data
       - PAYOUT_COOKIE_SECURE=true            # HTTPS-only cookies behind Caddy
+      # Rider documents (KYC uploads from the recruiter app). Default: the
+      # payout_docs volume below, copied by the backup sidecar. To use an
+      # S3-compatible bucket instead (Cloudflare R2's free tier is enough),
+      # set the four PAYOUT_DOCS_S3_* values in deploy/.env — the volume is
+      # then unused.
+      - PAYOUT_DOCS_DIR=/data/documents
+      - PAYOUT_DOCS_S3_BUCKET=${PAYOUT_DOCS_S3_BUCKET:-}
+      - PAYOUT_DOCS_S3_ENDPOINT=${PAYOUT_DOCS_S3_ENDPOINT:-}
+      - PAYOUT_DOCS_S3_KEY=${PAYOUT_DOCS_S3_KEY:-}
+      - PAYOUT_DOCS_S3_SECRET=${PAYOUT_DOCS_S3_SECRET:-}
+      # The Android recruiter app calls the API from its own origin.
+      - PAYOUT_CORS_ORIGINS=${PAYOUT_CORS_ORIGINS:-}
+    volumes:
+      - payout_docs:/data/documents
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
       interval: 30s
@@ -76,11 +90,14 @@ services:
     volumes:
       - ./backups:/backups
       - ./backup-loop.sh:/backup-loop.sh:ro
+      - payout_docs:/documents:ro            # tarred nightly next to the dump
     entrypoint: ["sh", "/backup-loop.sh"]
     restart: unless-stopped
 
 volumes:
   payout_pg:
     name: payout_pg
+  payout_docs:
+    name: payout_docs
   caddy_data:
   caddy_config:

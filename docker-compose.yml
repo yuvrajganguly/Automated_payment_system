@@ -30,6 +30,9 @@ services:
     environment:
       - PAYOUT_DB_URL=postgresql://payout:${POSTGRES_PASSWORD:-payout}@db:5432/payout
       - PAYOUT_SEED_DEMO=0                    # real deployment: no demo login/data
+      - PAYOUT_DOCS_DIR=/data/documents       # rider KYC uploads (see payout/documents.py)
+    volumes:
+      - payout_docs:/data/documents
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
       interval: 30s
@@ -41,3 +44,5 @@ services:
 volumes:
   payout_pg:
     name: payout_pg
+  payout_docs:
+    name: payout_docs

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { WORKSPACES } from './workspaces'
+import { WORKSPACES, workspacesFor } from './workspaces'
 
 /** ⌘K — jump anywhere. Pages always; riders and EVs load once per open so
  *  "kunal" or "RAFT14" takes you straight to the profile. */
@@ -46,8 +46,13 @@ const SYSTEM_ITEM: Item = { key: 'page:/system', group: 'Pages', label: 'System'
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const isCreator = user?.role === 'creator'
-  const pageItems = useMemo(() => (isCreator ? [...PAGE_ITEMS, SYSTEM_ITEM] : PAGE_ITEMS), [isCreator])
+  const role = user?.role
+  const pageItems = useMemo(() => {
+    if (role === 'creator') return [...PAGE_ITEMS, SYSTEM_ITEM]
+    if (role !== 'recruiter') return PAGE_ITEMS
+    const allowed = new Set(workspacesFor(role).flatMap((ws) => ws.pages.map((p) => p.to)))
+    return PAGE_ITEMS.filter((p) => allowed.has(p.to))
+  }, [role])
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const [riders, setRiders] = useState<RiderRow[] | null>(null)

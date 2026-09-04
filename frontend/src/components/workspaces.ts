@@ -15,6 +15,8 @@ export interface Workspace {
   /** Route prefixes (besides the pages) that belong to this workspace. */
   extra?: string[]
   creatorOnly?: boolean
+  /** Money / payout workspaces are hidden from recruiters (field staff). */
+  noRecruiter?: boolean
 }
 
 export const WORKSPACES: Workspace[] = [
@@ -25,11 +27,13 @@ export const WORKSPACES: Workspace[] = [
       { to: '/', label: 'Process Payout', end: true },
       { to: '/corrections', label: 'Corrections' },
     ],
+    noRecruiter: true,
   },
   {
     key: 'analytics',
     label: 'Analytics',
     pages: [{ to: '/dashboard', label: 'Dashboard' }],
+    noRecruiter: true,
   },
   {
     key: 'people',
@@ -58,6 +62,7 @@ export const WORKSPACES: Workspace[] = [
       { to: '/payments', label: 'Payments' },
       { to: '/transactions', label: 'Transactions' },
     ],
+    noRecruiter: true,
   },
   {
     key: 'admin',
@@ -67,8 +72,34 @@ export const WORKSPACES: Workspace[] = [
       { to: '/settings', label: 'Settings' },
     ],
     extra: ['/system'],
+    noRecruiter: true,
   },
 ]
+
+/** Recruiters see riders and the fleet; '/inactive' is a money view. */
+const RECRUITER_HIDDEN_PAGES = new Set(['/inactive'])
+
+/** The workspaces (and pages) a role may use. */
+export function workspacesFor(role: string | undefined): Workspace[] {
+  if (role !== 'recruiter') return WORKSPACES
+  return WORKSPACES.filter((ws) => !ws.noRecruiter).map((ws) => ({
+    ...ws,
+    pages: ws.pages.filter((p) => !RECRUITER_HIDDEN_PAGES.has(p.to)),
+  }))
+}
+
+/** Where a role lands after login / on a route it may not use. */
+export function homeFor(role: string | undefined): string {
+  return role === 'recruiter' ? '/riders' : '/'
+}
+
+/** May this role open this pathname? */
+export function canVisit(role: string | undefined, pathname: string): boolean {
+  if (role !== 'recruiter') return true
+  const ws = workspaceFor(pathname)
+  if (ws.noRecruiter) return false
+  return !RECRUITER_HIDDEN_PAGES.has(pathname)
+}
 
 /** Which workspace owns this pathname. */
 export function workspaceFor(pathname: string): Workspace {

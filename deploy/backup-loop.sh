@@ -15,7 +15,18 @@ while :; do
     rm -f "/backups/payout-${ts}.dump.tmp"
     echo "backup FAILED at ${ts}" >&2
   fi
+  # rider documents (local store only; an S3 bucket is its own backup)
+  if [ -d /documents ] && [ -n "$(ls -A /documents 2>/dev/null)" ]; then
+    if tar -czf "/backups/documents-${ts}.tgz.tmp" -C /documents .; then
+      mv "/backups/documents-${ts}.tgz.tmp" "/backups/documents-${ts}.tgz"
+      echo "documents ok: documents-${ts}.tgz"
+    else
+      rm -f "/backups/documents-${ts}.tgz.tmp"
+      echo "documents backup FAILED at ${ts}" >&2
+    fi
+  fi
   # rotate
   find /backups -name 'payout-*.dump' -mtime +"${KEEP_DAYS}" -delete
+  find /backups -name 'documents-*.tgz' -mtime +"${KEEP_DAYS}" -delete
   sleep 86400
 done

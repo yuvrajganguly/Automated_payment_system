@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { rememberedPath } from '../state/useRouteMemory'
-import { workspaceFor } from './workspaces'
+import { workspaceFor, workspacesFor } from './workspaces'
 
 /** The workspace's page rail, under the command bar: pages as quiet text
  *  links with one glowing indicator that SLIDES between them. */
@@ -13,7 +13,8 @@ export function SubNav() {
   const railRef = useRef<HTMLElement>(null)
   const [bar, setBar] = useState<{ left: number; width: number } | null>(null)
 
-  const pages = [...ws.pages]
+  const visible = workspacesFor(user?.role).find((w) => w.key === ws.key)
+  const pages = [...(visible ?? ws).pages]
   if (ws.key === 'admin' && user?.role === 'creator') {
     pages.push({ to: '/system', label: 'System' })
   }

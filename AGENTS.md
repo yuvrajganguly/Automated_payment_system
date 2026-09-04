@@ -23,6 +23,11 @@
   `advance_rent_charged_through`. A cycle bills only its own days (no catch-up).
 - Every route that writes uses `require_admin` / `require_creator`. Tests enforce that
   anonymous callers get 401 on every mutating route.
+- **Roles: creator > admin > recruiter > user** (`api/auth.py`). Roster/fleet writes take
+  `require_recruiter`; money-side routers are mounted with `no_recruiter`; money-changing
+  writes stay `require_admin`. Every recruiter-reachable write calls
+  `domain/activity.record_activity` in the same transaction — that log is how admins review
+  field staff. The API surface is documented in `docs/RECRUITER_API.md`; keep it current.
 - **The creator tier is invisible below creator.** Non-creators see creators as `admin`
   (`users.visible_role`), creator-only refusals say just "Not permitted", `/docs` and
   `/openapi.json` are creator-only, and the SPA never renders the word for anyone else.

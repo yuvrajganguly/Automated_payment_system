@@ -6,7 +6,7 @@ from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from payout.api.auth import get_current_user, require_admin
+from payout.api.auth import get_current_user, require_admin, require_recruiter
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -21,6 +21,7 @@ from payout.api.schemas import (
     MaintenanceOut,
 )
 from payout.db import get_connection
+from payout.domain.activity import record_activity
 from payout.domain.adjustments import log_maintenance
 from payout.domain.arrears import settle_from_deposit
 from payout.domain.backrent import apply_backrent, compute_backrent, latest_cycle_end_for
@@ -157,7 +158,7 @@ def list_ev_units(
 
 
 @router.post("", response_model=EvUnitOut, status_code=201)
-def create_ev_unit(body: EvUnitIn, _: dict = Depends(require_admin)) -> EvUnitOut:
+def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> EvUnitOut:
     with get_connection() as conn:
         if conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone():
             raise HTTPException(409, "EV already exists")
@@ -184,6 +185,16 @@ def create_ev_unit(body: EvUnitIn, _: dict = Depends(require_admin)) -> EvUnitOu
                 raise HTTPException(404, f"Person {body.person_id} not found")
             handover = _open_assignment(conn, body.ev_id, body.person_id, body.handover_date)
             status_, current_person_id = "in_use", body.person_id
+        record_activity(
+            conn,
+            user,
+            "ev.create",
+            entity_type="ev",
+            entity_id=body.ev_id,
+            label=f"{body.provider} {body.model}",
+            person_id=current_person_id,
+            details={"assigned_to": current_person_id, "handover_date": handover},
+        )
         conn.commit()
     return EvUnitOut(
         ev_id=body.ev_id,
@@ -230,7 +241,7 @@ def _open_assignment(conn, ev_id: str, pid: int, handover_date: date | None) -> 
 
 
 @router.post("/assign")
-def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
+def assign_ev(body: EvAssignIn, user: dict = Depends(require_recruiter)) -> dict:
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone():
             raise HTTPException(404, "EV not found")
@@ -251,6 +262,15 @@ def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
         else:
             raise HTTPException(400, "Provide person_id, or (rider_id + company)")
         hod = _open_assignment(conn, body.ev_id, pid, body.handover_date)
+        record_activity(
+            conn,
+            user,
+            "ev.assign",
+            entity_type="ev",
+            entity_id=body.ev_id,
+            person_id=pid,
+            details={"handover_date": hod, "rider_id": body.rider_id, "company": body.company},
+        )
         conn.commit()
     return {"assigned": True, "person_id": pid, "ev_id": body.ev_id, "handover_date": hod}
 
@@ -308,7 +328,7 @@ def _close_open_maintenance(conn, ev_id: str, today: str) -> None:
 
 
 @router.post("/return")
-def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     """Return an EV to the provider (retire it) - whether it is currently with a
     rider OR sitting as a spare.
 
@@ -349,6 +369,19 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
                 raise HTTPException(404, f"EV {ev_id!r} not found")
         conn.execute("UPDATE ev_units SET status='returned' WHERE ev_id=?", (ev_id,))
         _close_open_maintenance(conn, ev_id, today)
+        record_activity(
+            conn,
+            _,
+            "ev.return",
+            entity_type="ev",
+            entity_id=ev_id,
+            person_id=person_id,
+            details={
+                "returned_date": today,
+                "from_rider": person_id is not None,
+                "heal": {k: v for k, v in (heal or {}).items() if k != "events"},
+            },
+        )
         conn.commit()
     out = {"returned": True, "ev_id": ev_id, "person_id": person_id, "returned_date": today}
     if heal:
@@ -357,7 +390,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
 
 
 @router.post("/to-spare")
-def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     """Take an EV back from its rider and keep it as a SPARE (available for
     reassignment) instead of retiring it.
 
@@ -381,6 +414,14 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
             if unit["status"] == "spare":
                 raise HTTPException(409, f"EV {body.ev_id!r} is already spare.")
             conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (body.ev_id,))
+            record_activity(
+                conn,
+                _,
+                "ev.spare",
+                entity_type="ev",
+                entity_id=body.ev_id,
+                details={"previous_status": unit["status"], "as_of": today},
+            )
             conn.commit()
             return {
                 "spare": True,
@@ -405,6 +446,19 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
         )
         conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (a["ev_id"],))
         _close_open_maintenance(conn, a["ev_id"], today)
+        record_activity(
+            conn,
+            _,
+            "ev.spare",
+            entity_type="ev",
+            entity_id=a["ev_id"],
+            person_id=a["person_id"],
+            details={
+                "as_of": today,
+                "from_rider": True,
+                "heal": {k: v for k, v in (heal or {}).items() if k != "events"},
+            },
+        )
         conn.commit()
     return {
         "spare": True,
@@ -416,7 +470,7 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
 
 
 @router.post("/close")
-def close_ev(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
+def close_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     """Deprecated alias for /return, which now retires spares as well. Kept so
     older clients / the existing 'Close' button keep working."""
     return return_ev(body, _)
@@ -596,7 +650,7 @@ def list_maintenance(
 
 
 @router.post("/maintenance", response_model=MaintenanceOut, status_code=201)
-def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_admin)) -> MaintenanceOut:
+def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_recruiter)) -> MaintenanceOut:
     """Log an EV in maintenance. ``to_date`` is optional — leave it blank if
     you don't know when it'll come back, and close the window later with
     PATCH /evs/maintenance/{id}."""
@@ -620,6 +674,19 @@ def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_admin)) ->
         # Flip the EV's status so the dashboard reflects it immediately.
         conn.execute("UPDATE ev_units SET status='maintenance' WHERE ev_id=?", (body.ev_id,))
         row_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        record_activity(
+            conn,
+            user,
+            "ev.maintenance_open",
+            entity_type="ev",
+            entity_id=body.ev_id,
+            details={
+                "maintenance_id": row_id,
+                "from_date": body.from_date.isoformat(),
+                "to_date": body.to_date.isoformat() if body.to_date else None,
+                "reason": body.reason,
+            },
+        )
         conn.commit()
         row = conn.execute(
             "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at "
@@ -631,7 +698,7 @@ def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_admin)) ->
 
 @router.patch("/maintenance/{maint_id}", response_model=MaintenanceOut)
 def close_maintenance(
-    maint_id: int, body: MaintenanceClose, _: dict = Depends(require_admin)
+    maint_id: int, body: MaintenanceClose, user: dict = Depends(require_recruiter)
 ) -> MaintenanceOut:
     """Close an open maintenance window. If ``to_date`` is omitted, defaults
     to today."""
@@ -663,6 +730,14 @@ def close_maintenance(
                 "UPDATE ev_units SET status=? WHERE ev_id=?",
                 ("in_use" if held else "spare", row["ev_id"]),
             )
+        record_activity(
+            conn,
+            user,
+            "ev.maintenance_close",
+            entity_type="ev",
+            entity_id=row["ev_id"],
+            details={"maintenance_id": maint_id, "to_date": close_to},
+        )
         conn.commit()
         out = conn.execute(
             "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at "

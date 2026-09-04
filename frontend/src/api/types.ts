@@ -125,8 +125,9 @@ export interface PersonOut {
   display_name: string
   deduction_company: string | null
   deduction_rider_id: string | null
-  current_balance: number
-  arrears_outstanding: number
+  /** null for recruiters — they never see money */
+  current_balance: number | null
+  arrears_outstanding: number | null
   riders: RiderOut[]
   ev: EvSummary | null
   ev_history?: EvHistoryEntry[]

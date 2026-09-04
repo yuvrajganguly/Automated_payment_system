@@ -7,9 +7,10 @@ from io import BytesIO
 import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
-from payout.api.auth import get_current_user, require_admin
+from payout.api.auth import get_current_user, require_admin, require_recruiter
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
+from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
@@ -165,7 +166,7 @@ def _insert_rider_into_db(
 
 
 @router.post("/rename-rider-id")
-def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> dict:
+def rename_rider_id(body: RenameRiderIdIn, user: dict = Depends(require_recruiter)) -> dict:
     """Attach a real rider_id to a placeholder QSPEND row (or rename any
     rider_id, really). Updates rider_master + every reference in transactions
     so history is preserved. The new rider_id must not already exist for
@@ -228,6 +229,15 @@ def rename_rider_id(body: RenameRiderIdIn, _: dict = Depends(require_admin)) -> 
             "UPDATE person_registry SET deduction_rider_id=? "
             "WHERE deduction_rider_id=? AND deduction_company=?",
             (new_rid, current, body.company),
+        )
+        record_activity(
+            conn,
+            user,
+            "rider.rename",
+            entity_type="rider",
+            entity_id=f"{new_rid}@{body.company}",
+            person_id=body.person_id,
+            details={"from": current, "to": new_rid},
         )
         conn.commit()
     return {
@@ -341,7 +351,10 @@ def list_riders(
 
 @router.patch("/{rider_id}", response_model=RiderOut)
 def update_rider(
-    rider_id: str, body: RiderPatch, company: str = Query(...), _: dict = Depends(require_admin)
+    rider_id: str,
+    body: RiderPatch,
+    company: str = Query(...),
+    user: dict = Depends(require_recruiter),
 ) -> RiderOut:
     """Partially update a rider — only the fields you send are changed.
 
@@ -442,13 +455,35 @@ def update_rider(
             "FROM rider_master WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()
+        changed = diff_fields(
+            dict(existing),
+            dict(row),
+            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active"),
+        )
+        if body.mob_no is not None:
+            changed["mob_no"] = [existing["mob_no"], fields.get("mob_no")]
+        if (existing["rider_id"], existing["company"]) != (row["rider_id"], row["company"]):
+            changed["rider_id"] = [
+                f"{existing['rider_id']}@{existing['company']}",
+                f"{row['rider_id']}@{row['company']}",
+            ]
+        record_activity(
+            conn,
+            user,
+            "rider.update",
+            entity_type="rider",
+            entity_id=f"{row['rider_id']}@{row['company']}",
+            label=row["name"],
+            person_id=row["person_id"],
+            details={"changed": changed},
+        )
         conn.commit()
     return RiderOut(**_rider_dict(row))
 
 
 @router.delete("/{rider_id}")
 def delete_rider(
-    rider_id: str, company: str = Query(...), _: dict = Depends(require_admin)
+    rider_id: str, company: str = Query(...), user: dict = Depends(require_admin)
 ) -> dict:
     """Delete one (rider_id, company) mapping.
 
@@ -505,6 +540,15 @@ def delete_rider(
                     "WHERE person_id=?",
                     (pid,),
                 )
+        record_activity(
+            conn,
+            user,
+            "rider.delete",
+            entity_type="rider",
+            entity_id=f"{rider_id}@{company}",
+            person_id=pid,
+            details={"remaining_rider_ids": len(remaining)},
+        )
         conn.commit()
     return {
         "deleted": {"rider_id": rider_id, "company": company},
@@ -530,7 +574,7 @@ def get_rider(
 
 
 @router.post("", response_model=RiderOut, status_code=201)
-def create_rider(body: RiderIn, _: dict = Depends(require_admin)) -> RiderOut:
+def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> RiderOut:
     """Create a rider. ``rider_id`` is optional — when blank we assign a
     placeholder (``QSPEND<NNNN>`` scoped per company). When ``person_id`` is
     supplied the new rider_master row is attached to that existing person —
@@ -557,6 +601,22 @@ def create_rider(body: RiderIn, _: dict = Depends(require_admin)) -> RiderOut:
             account_no=body.account_no,
             ifsc=body.ifsc,
             person_id=body.person_id,
+        )
+        record_activity(
+            conn,
+            user,
+            "rider.link" if body.person_id is not None else "rider.create",
+            entity_type="rider",
+            entity_id=f"{rider_id}@{body.company}",
+            label=body.name,
+            person_id=person_id,
+            details={
+                "hub": body.hub,
+                "vehicle": body.vehicle,
+                "account_no": body.account_no,
+                "ifsc": body.ifsc,
+                "placeholder": rider_id.startswith(PLACEHOLDER_PREFIX),
+            },
         )
         conn.commit()
     return RiderOut(

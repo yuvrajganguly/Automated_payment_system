@@ -1,7 +1,7 @@
 """User management — list, create, change role, deactivate.
 
 Role hierarchy:
-  creator  > admin > user
+  creator  > admin > recruiter > user
 A creator can do everything an admin can, plus change other users' roles
 and deactivate / reactivate accounts. A creator can never be deactivated
 through the API; that's an explicit safeguard so you can't lock yourself
@@ -13,14 +13,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from payout.api.auth import get_current_user, require_creator
+from payout.api.auth import VALID_ROLES, get_current_user, require_creator
 from payout.auth import hash_password
 from payout.db import get_connection
 
 router = APIRouter()
 
 
-_VALID_ROLES = ("user", "admin", "creator")
+_VALID_ROLES = VALID_ROLES
 
 
 class UserOut(BaseModel):

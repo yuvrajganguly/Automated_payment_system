@@ -144,6 +144,10 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d --build
 ## 9. Backups
 
 - Nightly `pg_dump` in `~/payout/deploy/backups/`, 14 days kept.
+- Rider documents (recruiter-app uploads) live in the `payout_docs` volume and
+  are tarred nightly into the same folder (`documents-<ts>.tgz`). If you move
+  them to an R2/S3 bucket (`PAYOUT_DOCS_S3_*` in `.env`) the bucket is the copy
+  of record and the tarball step is skipped.
 - **Off-server copy** weekly (a dump file IS the whole business — bank
   accounts included — treat it like cash: never WhatsApp/email it, never in
   git or a shared OneDrive):
@@ -158,3 +162,5 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d --build
 - The app calls the API over HTTPS at the SITE_ADDRESS URL — never the DB.
 - Different origin → set `PAYOUT_CORS_ORIGINS` in `deploy/.env`, `up -d`.
 - Each user: own account, least role; rate limiting is already server-side.
+- Recruiters get the `recruiter` role (creator creates them on the Users page).
+  The endpoints the app uses are listed in `docs/RECRUITER_API.md`.

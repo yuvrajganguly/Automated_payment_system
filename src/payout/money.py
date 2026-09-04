@@ -67,6 +67,7 @@ def split_evenly(total_paise: int, n: int) -> list[int]:
 MONEY_KEYS = frozenset(
     {
         "amount",
+        "applied_amount",
         "balance",
         "balance_after",
         "current_balance",

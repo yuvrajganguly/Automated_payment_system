@@ -108,8 +108,9 @@ class PersonOut(BaseModel):
     display_name: str
     deduction_company: str | None = None
     deduction_rider_id: str | None = None
-    current_balance: float
-    arrears_outstanding: float
+    # None for recruiters — they never see money.
+    current_balance: float | None = None
+    arrears_outstanding: float | None = None
     riders: list[RiderOut] = Field(default_factory=list)
     ev: EvSummary | None = None
     # Closed + open EV assignments, newest first. Carried on the model so the

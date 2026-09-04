@@ -43,6 +43,8 @@ export function PersonPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const isCreator = user?.role === 'creator'
+  // Recruiters get the roster/fleet view: no balances, no ledger.
+  const seesMoney = user?.role !== 'recruiter'
   const [person, setPerson] = useState<PersonOut | null>(null)
   const [txns, setTxns] = useState<TransactionOut[]>([])
   const [companies, setCompanies] = useState<CompanyOpt[]>([])
@@ -58,10 +60,10 @@ export function PersonPage() {
     setBusy(true); setError(null)
     Promise.all([
       api.get<PersonOut>('/persons/' + id),
-      api.get<TransactionOut[]>('/ledger/' + id),
+      seesMoney ? api.get<TransactionOut[]>('/ledger/' + id) : Promise.resolve([] as TransactionOut[]),
     ]).then(([p, t]) => {
       setPerson(p); setTxns(t)
-      if (p.ev?.ev_id) {
+      if (p.ev?.ev_id && seesMoney) {
         api.get<Backrent>('/evs/' + encodeURIComponent(p.ev.ev_id) + '/backrent')
           .then(setBackrent).catch(() => setBackrent(null))
       } else setBackrent(null)
@@ -96,9 +98,13 @@ export function PersonPage() {
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <Stat label="Current Balance" value={fmt(person.current_balance)} bad={person.current_balance < 0} />
-        <Stat label="Arrears Outstanding" value={fmt(person.arrears_outstanding)} bad={person.arrears_outstanding > 0} />
-        <Stat label="Total Dues" value={fmt(person.arrears_outstanding - person.current_balance)} bad={(person.arrears_outstanding - person.current_balance) > 0} />
+        {seesMoney && (
+          <>
+            <Stat label="Current Balance" value={fmt(person.current_balance ?? 0)} bad={(person.current_balance ?? 0) < 0} />
+            <Stat label="Arrears Outstanding" value={fmt(person.arrears_outstanding ?? 0)} bad={(person.arrears_outstanding ?? 0) > 0} />
+            <Stat label="Total Dues" value={fmt((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0))} bad={((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0)) > 0} />
+          </>
+        )}
         <Stat label="Rider IDs" value={person.riders.length.toString()} />
         <Stat label="Open EV"
               value={person.ev?.ev_id ?? '-'}
@@ -216,7 +222,7 @@ export function PersonPage() {
                                  onAdded={load} />
       )}
 
-      <Section title={'Transactions (' + txns.length + ')'}>
+      {seesMoney && <Section title={'Transactions (' + txns.length + ')'}>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr><Th>ID</Th><Th>Cycle</Th><Th>Event</Th><Th>Rider / Co</Th><Th right>Amount</Th><Th right>Bal After</Th><Th>Days</Th><Th>Remarks</Th>{isCreator && <Th>{''}</Th>}</tr>
@@ -228,7 +234,7 @@ export function PersonPage() {
           </tbody>
         </table>
         {txns.length === 0 && <p className="p-3 text-slate-500 text-sm">No transactions yet.</p>}
-      </Section>
+      </Section>}
 
       {isCreator && (
         <DangerZone

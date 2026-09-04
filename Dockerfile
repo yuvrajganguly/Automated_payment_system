@@ -21,7 +21,7 @@ RUN apt-get update \
 # Install the package with API extras (cached unless these change).
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
-RUN pip install --no-cache-dir -e ".[api]"
+RUN pip install --no-cache-dir -e ".[api,docs]"
 
 # Built frontend where FastAPI serves it (/app/frontend/dist), + entrypoint.
 COPY --from=frontend /app/frontend/dist ./frontend/dist
@@ -31,6 +31,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # No PAYOUT_CORS_ORIGINS here: FastAPI serves the SPA same-origin, so CORS is
 # only needed for the Vite dev server (localhost defaults in api/config.py).
 ENV PAYOUT_DB=/data/payout.db \
+    PAYOUT_DOCS_DIR=/data/documents \
     PYTHONUNBUFFERED=1
 VOLUME ["/data"]
 EXPOSE 8000

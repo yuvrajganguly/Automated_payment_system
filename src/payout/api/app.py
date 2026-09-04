@@ -11,8 +11,11 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from payout.api.auth import require_creator
+from payout.api.auth import no_recruiter, require_creator
 from payout.api.config import CORS_ORIGINS, DEMO_MODE
+from payout.api.routes import (
+    activity as activity_routes,
+)
 from payout.api.routes import (
     analytics as analytics_routes,
 )
@@ -41,6 +44,9 @@ from payout.api.routes import (
     dashboard as dashboard_routes,
 )
 from payout.api.routes import (
+    documents as documents_routes,
+)
+from payout.api.routes import (
     ev_rent as ev_rent_routes,
 )
 from payout.api.routes import (
@@ -60,6 +66,9 @@ from payout.api.routes import (
 )
 from payout.api.routes import (
     providers as providers_routes,
+)
+from payout.api.routes import (
+    requests as requests_routes,
 )
 from payout.api.routes import (
     riders as riders_routes,
@@ -157,22 +166,63 @@ from payout.api.middleware import AuditLogMiddleware, RupeeizeMiddleware  # noqa
 app.add_middleware(AuditLogMiddleware)
 app.add_middleware(RupeeizeMiddleware)
 
+# Money-side routers carry the recruiter fence: a recruiter (field staff who
+# onboard riders and manage the fleet) never sees balances, payouts, arrears,
+# COD, the ledger or the dashboards. Roster and fleet routers stay open to
+# every signed-in role; their WRITE routes are gated individually.
+_NO_RECRUITER = [Depends(no_recruiter)]
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
-app.include_router(cycle_routes.router, prefix="/api/cycles", tags=["cycles"])
+app.include_router(
+    cycle_routes.router, prefix="/api/cycles", tags=["cycles"], dependencies=_NO_RECRUITER
+)
 app.include_router(riders_routes.router, prefix="/api/riders", tags=["riders"])
 app.include_router(persons_routes.router, prefix="/api/persons", tags=["persons"])
+app.include_router(documents_routes.person_router, prefix="/api/persons", tags=["documents"])
+app.include_router(documents_routes.router, prefix="/api/documents", tags=["documents"])
 app.include_router(evs_routes.router, prefix="/api/evs", tags=["evs"])
-app.include_router(ledger_routes.router, prefix="/api/ledger", tags=["ledger"])
-app.include_router(providers_routes.router, prefix="/api/providers", tags=["providers"])
-app.include_router(arrears_routes.router, prefix="/api/arrears", tags=["arrears"])
-app.include_router(inactive_routes.router, prefix="/api/inactive", tags=["inactive"])
-app.include_router(cod_routes.router, prefix="/api/cod", tags=["cod"])
-app.include_router(ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"])
-app.include_router(payments_routes.router, prefix="/api/payments", tags=["payments"])
-app.include_router(dashboard_routes.router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(analytics_routes.router, prefix="/api/dashboard", tags=["analytics"])
-app.include_router(corrections_routes.router, prefix="/api/corrections", tags=["corrections"])
+app.include_router(
+    ledger_routes.router, prefix="/api/ledger", tags=["ledger"], dependencies=_NO_RECRUITER
+)
+app.include_router(
+    providers_routes.router,
+    prefix="/api/providers",
+    tags=["providers"],
+    dependencies=_NO_RECRUITER,
+)
+app.include_router(
+    arrears_routes.router, prefix="/api/arrears", tags=["arrears"], dependencies=_NO_RECRUITER
+)
+app.include_router(
+    inactive_routes.router, prefix="/api/inactive", tags=["inactive"], dependencies=_NO_RECRUITER
+)
+app.include_router(cod_routes.router, prefix="/api/cod", tags=["cod"], dependencies=_NO_RECRUITER)
+app.include_router(
+    ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"], dependencies=_NO_RECRUITER
+)
+app.include_router(
+    payments_routes.router, prefix="/api/payments", tags=["payments"], dependencies=_NO_RECRUITER
+)
+app.include_router(
+    dashboard_routes.router,
+    prefix="/api/dashboard",
+    tags=["dashboard"],
+    dependencies=_NO_RECRUITER,
+)
+app.include_router(
+    analytics_routes.router,
+    prefix="/api/dashboard",
+    tags=["analytics"],
+    dependencies=_NO_RECRUITER,
+)
+app.include_router(
+    corrections_routes.router,
+    prefix="/api/corrections",
+    tags=["corrections"],
+    dependencies=_NO_RECRUITER,
+)
+app.include_router(requests_routes.router, prefix="/api/requests", tags=["requests"])
+app.include_router(activity_routes.router, prefix="/api/activity", tags=["activity"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
 

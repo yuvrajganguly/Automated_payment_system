@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS companies (
 CREATE TABLE IF NOT EXISTS users (
     email         TEXT PRIMARY KEY,
     password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'user',   -- admin | user
+    role          TEXT NOT NULL DEFAULT 'user',   -- creator | admin | recruiter | user
     is_active     INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT DEFAULT (datetime('now'))
 );
@@ -336,6 +336,67 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_email ON audit_log (email);
 CREATE INDEX IF NOT EXISTS idx_audit_at    ON audit_log (at DESC);
+
+-- ── activity_log ────────────────────────────────────────────────────────────
+-- What people DID, in business terms (audit_log above is the raw HTTP trail).
+-- One row per operator action on a rider, person, EV, document or request:
+-- who, when, which action, which entity, and a JSON blob of what changed.
+-- Admins and the creator review recruiters' work here; recruiters see only
+-- their own rows.
+CREATE TABLE IF NOT EXISTS activity_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           TEXT DEFAULT (datetime('now')),
+    email        TEXT NOT NULL,
+    role         TEXT,
+    action       TEXT NOT NULL,      -- rider.create | ev.assign | document.upload | ...
+    entity_type  TEXT NOT NULL,      -- rider | person | ev | document | request
+    entity_id    TEXT NOT NULL,      -- rider_id@company, person_id, ev_id, doc id ...
+    entity_label TEXT,               -- human label (rider name, EV id) for the feed
+    person_id    INTEGER,            -- the person concerned, when there is one
+    details      TEXT                -- JSON: fields changed, before/after, notes
+);
+CREATE INDEX IF NOT EXISTS idx_activity_email  ON activity_log (email, at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_at     ON activity_log (at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_person ON activity_log (person_id);
+
+-- ── rider_documents ─────────────────────────────────────────────────────────
+-- KYC / onboarding files per person. The bytes live in the document store
+-- (local disk or an S3-compatible bucket — payout.documents); this row is
+-- the index. Deleting the row deletes the object.
+CREATE TABLE IF NOT EXISTS rider_documents (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id    INTEGER NOT NULL REFERENCES person_registry(person_id),
+    doc_type     TEXT NOT NULL,      -- aadhaar | pan | driving_licence | bank_proof | photo | agreement | other
+    filename     TEXT NOT NULL,      -- as uploaded
+    content_type TEXT NOT NULL,
+    size_bytes   INTEGER NOT NULL,
+    storage_key  TEXT NOT NULL UNIQUE,
+    notes        TEXT,
+    uploaded_by  TEXT NOT NULL,
+    uploaded_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_docs_person ON rider_documents (person_id);
+
+-- ── money_requests ──────────────────────────────────────────────────────────
+-- A recruiter cannot touch money. They can ask: "credit/debit this person
+-- ₹X because …". The request sits OPEN and highlighted until an admin
+-- approves it (which posts the ledger adjustment) or rejects it.
+CREATE TABLE IF NOT EXISTS money_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    created_by      TEXT NOT NULL,
+    person_id       INTEGER NOT NULL REFERENCES person_registry(person_id),
+    direction       TEXT NOT NULL,   -- credit | debit
+    amount          INTEGER NOT NULL, -- paise, always positive
+    reason          TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'open', -- open | approved | rejected
+    resolved_by     TEXT,
+    resolved_at     TEXT,
+    resolution_note TEXT,
+    applied_amount  INTEGER          -- paise actually posted (admin may adjust)
+);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON money_requests (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_requests_person ON money_requests (person_id);
 
 -- ── password_reset_tokens ───────────────────────────────────────────────────
 -- 6-digit OTPs the user enters to reset a forgotten password. Tokens are

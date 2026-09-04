@@ -131,6 +131,7 @@ def test_every_mutating_route_requires_auth(client):
             url = url.replace("{provider}", "Raft").replace("{bill_id}", "1")
             url = url.replace("{upload_id}", "1").replace("{email}", "x@y.z")
             url = url.replace("{model_id}", "1").replace("{txn_id}", "1").replace("{id}", "1")
+            url = url.replace("{doc_id}", "1").replace("{request_id}", "1")
             r = getattr(client, method)(url)
             if r.status_code != 401:
                 offenders.append(f"{method.upper()} {url} -> {r.status_code}")
