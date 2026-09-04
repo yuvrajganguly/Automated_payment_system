@@ -24,6 +24,7 @@ class TokenOut(BaseModel):
 class UserOut(BaseModel):
     email: str
     role: str
+    phone: str | None = None
 
 
 # ── Companies ───────────────────────────────────────────────────────────────

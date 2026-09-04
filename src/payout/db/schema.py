@@ -230,8 +230,10 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL DEFAULT 'user',   -- creator | admin | recruiter | user
     is_active     INTEGER NOT NULL DEFAULT 1,
+    phone         TEXT,                           -- E.164 (+91…); second login id
     created_at    TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone) WHERE phone IS NOT NULL;
 
 -- ── company_cycles ──────────────────────────────────────────────────────────
 -- One row per committed engine run (per company per cycle). Records the

@@ -8,6 +8,8 @@ interface AuthState {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
+  /** Re-read /auth/me (after a profile change such as the phone number). */
+  refresh: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined)
@@ -86,7 +88,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     navigate('/login', { replace: true })
   }
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading])
+  const refresh = async () => {
+    const u = await api.get<User>('/auth/me', { silent401: true })
+    setUser(u)
+    safeSet(USER_KEY, JSON.stringify(u))
+  }
+
+  const value = useMemo(() => ({ user, loading, login, logout, refresh }), [user, loading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

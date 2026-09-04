@@ -55,10 +55,11 @@ export function LoginPage() {
           <h1 className="text-xl font-display font-semibold text-white">Sign in</h1>
           <p className="text-silver-400 text-sm mb-6 mt-1">Welcome back. Enter your details.</p>
 
-          <label className="block text-xs font-medium text-silver-300 mb-1">Email</label>
+          <label className="block text-xs font-medium text-silver-300 mb-1">Email or phone number</label>
           <input
-            type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-            className={inputCls + ' mb-4'} autoComplete="email" placeholder="you@company.com"
+            type="text" required value={email} onChange={(e) => setEmail(e.target.value)}
+            className={inputCls + ' mb-4'} autoComplete="username" placeholder="you@company.com or 98765 43210"
+            inputMode="email"
           />
           <label className="block text-xs font-medium text-silver-300 mb-1">Password</label>
           <PasswordInput

@@ -8,6 +8,7 @@ interface UserRow {
   email: string
   role: 'user' | 'recruiter' | 'admin' | 'creator'
   is_active: boolean
+  phone: string | null
   created_at: string | null
 }
 
@@ -45,7 +46,7 @@ export function UsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
-              <Th>Email</Th><Th>Role</Th><Th>Active</Th><Th>Created</Th>
+              <Th>Email</Th><Th>Phone</Th><Th>Role</Th><Th>Active</Th><Th>Created</Th>
               {isCreator && <Th>Actions</Th>}
             </tr>
           </thead>
@@ -65,7 +66,7 @@ export function UsersPage() {
 
 function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
   { row: UserRow; isCreator: boolean; selfEmail: string; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'role' | 'active' | 'password' | null>(null)
+  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isSelf = row.email === selfEmail
 
@@ -75,6 +76,16 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
       await api.patch('/users/' + encodeURIComponent(row.email) + '/role', { role })
       onChanged()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(null) }
+  }
+  const [phoneOpen, setPhoneOpen] = useState(false)
+  const [phone, setPhone] = useState(row.phone ?? '')
+  async function savePhone(e: FormEvent) {
+    e.preventDefault(); setBusy('phone'); setError(null)
+    try {
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/phone', { phone })
+      setPhoneOpen(false); onChanged()
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(null) }
   }
   const [pwOpen, setPwOpen] = useState(false)
@@ -101,6 +112,26 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
   return (
     <tr className="border-t">
       <Td>{row.email}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</Td>
+      <Td>
+        {isCreator ? (
+          phoneOpen ? (
+            <form onSubmit={savePhone} className="flex items-center gap-1">
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210"
+                     className="border rounded px-2 py-1 text-xs w-36" inputMode="tel" autoFocus />
+              <button type="submit" disabled={busy === 'phone'} className="text-xs btn-primary !py-1">
+                {busy === 'phone' ? '…' : 'Save'}
+              </button>
+              <button type="button" onClick={() => { setPhoneOpen(false); setPhone(row.phone ?? '') }}
+                      className="text-xs underline text-slate-400">Cancel</button>
+            </form>
+          ) : (
+            <button onClick={() => setPhoneOpen(true)} className="text-left hover:underline"
+                    title="Edit phone number">
+              {row.phone ?? <span className="text-slate-400 text-xs">add</span>}
+            </button>
+          )
+        ) : (row.phone ?? '')}
+      </Td>
       <Td>
         {isCreator ? (
           <select value={row.role} onChange={(e) => setRole(e.target.value)}
@@ -161,7 +192,7 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
 
 function AddUserCard({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', role: 'user' })
+  const [form, setForm] = useState({ email: '', password: '', role: 'user', phone: '' })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [tone, setTone] = useState<'ok' | 'err'>('ok')
@@ -171,7 +202,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
     try {
       await api.post('/users', form)
       setTone('ok'); setMsg('User created.')
-      setForm({ email: '', password: '', role: 'user' })
+      setForm({ email: '', password: '', role: 'user', phone: '' })
       onAdded()
     } catch (e) {
       setTone('err'); setMsg(e instanceof Error ? e.message : 'Failed')
@@ -187,12 +218,18 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
         </button>
       </div>
       {open && (
-        <form onSubmit={submit} className="grid grid-cols-3 gap-2 mt-3 text-sm">
+        <form onSubmit={submit} className="grid grid-cols-4 gap-2 mt-3 text-sm">
           <label className="block">
             <span className="block text-xs text-slate-600">Email</span>
             <input type="email" value={form.email}
                    onChange={(e) => setForm({ ...form, email: e.target.value })}
                    className="w-full border rounded px-2 py-1" required />
+          </label>
+          <label className="block">
+            <span className="block text-xs text-slate-600">Phone (optional)</span>
+            <input type="tel" value={form.phone} placeholder="98765 43210"
+                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                   className="w-full border rounded px-2 py-1" />
           </label>
           <label className="block">
             <span className="block text-xs text-slate-600">Password</span>
@@ -211,7 +248,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
               <option value="creator">creator</option>
             </select>
           </label>
-          <div className="col-span-3 flex gap-2 items-center mt-1">
+          <div className="col-span-4 flex gap-2 items-center mt-1">
             <button type="submit" disabled={busy || !form.email || !form.password}
                     className="bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">
               {busy ? '…' : 'Add'}

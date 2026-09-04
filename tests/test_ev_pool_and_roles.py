@@ -329,3 +329,62 @@ def test_manage_set_password_cli(db, monkeypatch):
     from payout.auth import verify_password
 
     assert verify_password("New-pass-22", row["password_hash"]) and row["is_active"] == 1
+
+
+# ── 6. phone number as a second login id ─────────────────────────────────────
+
+
+def test_phone_login_and_management(client):
+    h = _login(client, _CREATOR)
+    # Creator sets a phone in any common spelling; it is stored as E.164.
+    r = client.patch("/api/users/user@t.test/phone", json={"phone": "98765 43210"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["phone"] == "+919876543210"
+    # Login with the phone (three spellings) and the password works; wrong password does not.
+    for ident in ("9876543210", "+91 98765-43210", "09876543210"):
+        r = client.post("/api/auth/login", data={"username": ident, "password": _USER[1]})
+        assert r.status_code == 200, (ident, r.text)
+        assert r.json()["email"] == "user@t.test"
+    assert (
+        client.post(
+            "/api/auth/login", data={"username": "9876543210", "password": "nope-nope"}
+        ).status_code
+        == 401
+    )
+    # Email login still works, and /me reports the phone.
+    hu = _login(client, _USER)
+    assert client.get("/api/auth/me", headers=hu).json()["phone"] == "+919876543210"
+    # The same number cannot go on a second account.
+    r = client.patch("/api/users/admin@t.test/phone", json={"phone": "9876543210"}, headers=h)
+    assert r.status_code == 409
+    r = client.post(
+        "/api/users",
+        json={"email": "new@t.test", "password": "New-pass-123", "phone": "9876543210"},
+        headers=h,
+    )
+    assert r.status_code == 409
+    # Garbage is refused; a user can set/clear their own number.
+    assert (
+        client.patch("/api/users/user@t.test/phone", json={"phone": "12"}, headers=h).status_code
+        == 400
+    )
+    r = client.patch("/api/auth/me/phone", json={"phone": "+91 91234 56789"}, headers=hu)
+    assert r.status_code == 200 and r.json()["phone"] == "+919123456789"
+    assert (
+        client.patch("/api/auth/me/phone", json={"phone": ""}, headers=hu).json()["phone"] is None
+    )
+    assert (
+        client.post(
+            "/api/auth/login", data={"username": "9123456789", "password": _USER[1]}
+        ).status_code
+        == 401
+    )
+    # Users list carries the phone column; admins see it too.
+    r = client.post(
+        "/api/users",
+        json={"email": "ph@t.test", "password": "New-pass-123", "phone": "+91 9000000001"},
+        headers=h,
+    )
+    assert r.status_code == 201 and r.json()["phone"] == "+919000000001"
+    rows = {u["email"]: u for u in client.get("/api/users", headers=_login(client, _ADMIN)).json()}
+    assert rows["ph@t.test"]["phone"] == "+919000000001"

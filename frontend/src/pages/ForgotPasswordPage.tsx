@@ -44,16 +44,16 @@ export function ForgotPasswordPage() {
       <div className="panel p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold mb-1">Payout System</h1>
         <p className="text-slate-500 text-sm mb-6">
-          {stage === 'request' ? 'Enter your email and we\'ll send a 6-digit code.'
+          {stage === 'request' ? 'Enter your email or phone number and we\'ll email you a 6-digit code.'
            : stage === 'reset' ? 'Check your email for the code and set a new password.'
            : 'Password updated.'}
         </p>
 
         {stage === 'request' && (
           <form onSubmit={sendOtp}>
-            <Label>Email</Label>
-            <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                   autoComplete="email" />
+            <Label>Email or phone number</Label>
+            <Input type="text" required value={email} onChange={(e) => setEmail(e.target.value)}
+                   autoComplete="username" placeholder="you@company.com or 98765 43210" />
             <Submit busy={busy} label="Send code" />
             {msg && <Msg tone={msg.tone}>{msg.text}</Msg>}
           </form>

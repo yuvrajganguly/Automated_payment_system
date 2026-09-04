@@ -67,9 +67,23 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
 
     For privacy we return the same response whether or not the email is
     registered — don't leak which addresses have accounts."""
-    email = body.email.strip().lower()
-    if not email:
-        raise HTTPException(400, "Email is required")
+    ident = body.email.strip()
+    if not ident:
+        raise HTTPException(400, "Email or phone number is required")
+    # A phone number resolves to the account's email; the code still goes by
+    # email until SMS delivery exists. Unknown numbers get the same neutral
+    # answer as unknown addresses.
+    from payout.auth.phone import looks_like_phone, normalize_phone
+
+    if looks_like_phone(ident):
+        with get_connection() as conn:
+            r = conn.execute(
+                "SELECT email FROM users WHERE phone=? AND is_active=1",
+                (normalize_phone(ident),),
+            ).fetchone()
+        email = r["email"] if r else "nobody@invalid"
+    else:
+        email = ident.lower()
     if not email_configured():
         # Checked before the account lookup so the answer is identical for
         # registered and unregistered addresses. Previously the code was printed
@@ -105,7 +119,7 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
             )
             if not send_email(email, "Payout System — password reset code", body_text):
                 raise HTTPException(503, "Could not send the reset email. Try again later.")
-    return {"ok": True, "message": "If that email is registered, a code has been sent."}
+    return {"ok": True, "message": "If that account exists, a code has been emailed to it."}
 
 
 @router.post("/reset-password", dependencies=[Depends(_reset_limit)])
@@ -178,7 +192,7 @@ def reset_password(body: ResetPasswordIn) -> dict:
 
 @router.post("/login", response_model=TokenOut, dependencies=[Depends(_login_limit)])
 def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
-    """Standard OAuth2 password flow. `username` is the user's email.
+    """Standard OAuth2 password flow. `username` is the user's email or phone.
 
     Sets the JWT as an httpOnly cookie for browser clients and also returns it
     in the body so API/script clients can use a Bearer header."""
@@ -204,6 +218,33 @@ def logout(response: Response) -> dict:
 @router.get("/me", response_model=UserOut)
 def me(user: dict = Depends(get_current_user)) -> UserOut:
     return UserOut(**user)
+
+
+class PhoneSelfIn(BaseModel):
+    phone: str | None = None
+
+
+@router.patch("/me/phone")
+def set_my_phone(body: PhoneSelfIn, user: dict = Depends(get_current_user)) -> dict:
+    """Set or clear your own phone number (second login id)."""
+    from payout.auth.phone import normalize_phone
+
+    raw = (body.phone or "").strip()
+    phone = None
+    if raw:
+        phone = normalize_phone(raw)
+        if phone is None:
+            raise HTTPException(
+                400, "That does not look like a phone number (10 digits, or +country code)."
+            )
+    with get_connection() as conn:
+        if phone:
+            other = conn.execute("SELECT email FROM users WHERE phone=?", (phone,)).fetchone()
+            if other and other["email"] != user["email"]:
+                raise HTTPException(409, "That phone number is already on another account.")
+        conn.execute("UPDATE users SET phone=? WHERE email=?", (phone, user["email"]))
+        conn.commit()
+    return {"email": user["email"], "phone": phone}
 
 
 @router.post("/change-password")

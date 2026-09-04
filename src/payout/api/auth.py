@@ -71,14 +71,30 @@ def decode_token(token: str) -> dict:
         ) from exc
 
 
-def authenticate(email: str, password: str) -> dict | None:
-    """Verify credentials against the users table (bcrypt)."""
-    email = email.strip().lower()
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT email, password_hash, role FROM users WHERE email=? AND is_active=1",
-            (email,),
+def resolve_identifier(conn, identifier: str) -> dict | None:
+    """The active user row for a login identifier — an email address or a
+    phone number in any common Indian spelling (see auth.phone)."""
+    from payout.auth.phone import looks_like_phone, normalize_phone
+
+    ident = (identifier or "").strip()
+    if not ident:
+        return None
+    if looks_like_phone(ident):
+        return conn.execute(
+            "SELECT email, password_hash, role, phone FROM users WHERE phone=? AND is_active=1",
+            (normalize_phone(ident),),
         ).fetchone()
+    return conn.execute(
+        "SELECT email, password_hash, role, phone FROM users WHERE email=? AND is_active=1",
+        (ident.lower(),),
+    ).fetchone()
+
+
+def authenticate(identifier: str, password: str) -> dict | None:
+    """Verify credentials against the users table (bcrypt). ``identifier``
+    is the email address or the phone number."""
+    with get_connection() as conn:
+        row = resolve_identifier(conn, identifier)
     if row and verify_password(password, row["password_hash"]):
         return {"email": row["email"], "role": row["role"]}
     return None
@@ -93,11 +109,16 @@ def _load_user(email: str) -> dict | None:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, role, is_active FROM users WHERE email=?", (email,)
+            "SELECT email, role, is_active, phone FROM users WHERE email=?", (email,)
         ).fetchone()
     if not row:
         return None
-    return {"email": row["email"], "role": row["role"], "is_active": bool(row["is_active"])}
+    return {
+        "email": row["email"],
+        "role": row["role"],
+        "is_active": bool(row["is_active"]),
+        "phone": row["phone"],
+    }
 
 
 def get_current_user(
@@ -125,7 +146,7 @@ def get_current_user(
             detail="Account is disabled or no longer exists",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return {"email": user["email"], "role": user["role"]}
+    return {"email": user["email"], "role": user["role"], "phone": user.get("phone")}
 
 
 # Role ladder: creator > admin > recruiter > user.

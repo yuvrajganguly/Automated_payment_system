@@ -27,6 +27,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     is_active: bool
+    phone: str | None = None
     created_at: str | None = None
 
 
@@ -34,6 +35,29 @@ class UserCreateIn(BaseModel):
     email: str
     password: str
     role: str = "user"
+    phone: str | None = None
+
+
+class PhoneIn(BaseModel):
+    phone: str | None = None  # blank / null clears it
+
+
+def _phone_or_400(raw: str | None) -> str | None:
+    from payout.auth.phone import normalize_phone
+
+    if raw is None or not raw.strip():
+        return None
+    p = normalize_phone(raw)
+    if p is None:
+        raise HTTPException(
+            400, "That does not look like a phone number (10 digits, or +country code)."
+        )
+    return p
+
+
+def _phone_taken(conn, phone: str, except_email: str | None = None) -> bool:
+    row = conn.execute("SELECT email FROM users WHERE phone=?", (phone,)).fetchone()
+    return bool(row) and row["email"] != except_email
 
 
 class RoleChangeIn(BaseModel):
@@ -56,13 +80,14 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
     anyone who is not one."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT email, role, is_active, created_at FROM users ORDER BY email"
+            "SELECT email, role, is_active, phone, created_at FROM users ORDER BY email"
         ).fetchall()
     return [
         UserOut(
             email=r["email"],
             role=visible_role(r["role"], user),
             is_active=bool(r["is_active"]),
+            phone=r["phone"],
             created_at=r["created_at"],
         )
         for r in rows
@@ -76,15 +101,33 @@ def create_user(body: UserCreateIn, _: dict = Depends(require_creator)) -> UserO
     if len(body.password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
     email = body.email.strip().lower()
+    phone = _phone_or_400(body.phone)
     with get_connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
             raise HTTPException(409, "That email already has an account.")
+        if phone and _phone_taken(conn, phone):
+            raise HTTPException(409, "That phone number is already on another account.")
         conn.execute(
-            "INSERT INTO users (email, password_hash, role) VALUES (?,?,?)",
-            (email, hash_password(body.password), body.role),
+            "INSERT INTO users (email, password_hash, role, phone) VALUES (?,?,?,?)",
+            (email, hash_password(body.password), body.role, phone),
         )
         conn.commit()
-    return UserOut(email=email, role=body.role, is_active=True)
+    return UserOut(email=email, role=body.role, is_active=True, phone=phone)
+
+
+@router.patch("/{email}/phone")
+def set_phone(email: str, body: PhoneIn, _: dict = Depends(require_creator)) -> dict:
+    """Creator sets (or clears) a user's phone number — their second login id."""
+    target = email.strip().lower()
+    phone = _phone_or_400(body.phone)
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+            raise HTTPException(404, "User not found")
+        if phone and _phone_taken(conn, phone, except_email=target):
+            raise HTTPException(409, "That phone number is already on another account.")
+        conn.execute("UPDATE users SET phone=? WHERE email=?", (phone, target))
+        conn.commit()
+    return {"email": target, "phone": phone}
 
 
 @router.patch("/{email}/role")

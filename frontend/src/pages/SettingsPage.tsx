@@ -4,7 +4,20 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 export function SettingsPage() {
-  const { user } = useAuth()
+  const { user, refresh } = useAuth()
+  const [phone, setPhone] = useState(user?.phone ?? '')
+  const [phoneBusy, setPhoneBusy] = useState(false)
+  const [phoneMsg, setPhoneMsg] = useState<string | null>(null)
+  async function savePhone(e: FormEvent) {
+    e.preventDefault(); setPhoneBusy(true); setPhoneMsg(null)
+    try {
+      const r = await api.patch<{ phone: string | null }>('/auth/me/phone', { phone })
+      setPhone(r.phone ?? '')
+      setPhoneMsg(r.phone ? `Saved — you can sign in with ${r.phone}.` : 'Phone number removed.')
+      await refresh()
+    } catch (err) { setPhoneMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setPhoneBusy(false) }
+  }
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -36,6 +49,21 @@ export function SettingsPage() {
           <dt className="text-slate-500">Email</dt><dd>{user?.email}</dd>
           <dt className="text-slate-500">Role</dt><dd>{user?.role}</dd>
         </dl>
+        <form onSubmit={savePhone} className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="block flex-1 min-w-[180px]">
+            <span className="block text-sm font-medium mb-1">Phone number</span>
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} type="tel"
+                   placeholder="98765 43210" className="w-full border rounded px-3 py-2" />
+          </label>
+          <button type="submit" disabled={phoneBusy}
+                  className="bg-brand hover:bg-brand-700 text-white px-4 py-2 rounded disabled:opacity-50">
+            {phoneBusy ? '…' : 'Save'}
+          </button>
+          <p className="w-full text-xs text-slate-500">
+            Optional. Lets you sign in with the number instead of your email. Leave blank to remove.
+            {phoneMsg && <span className="ml-2 text-emerald-300">{phoneMsg}</span>}
+          </p>
+        </form>
       </div>
 
       <form onSubmit={submit} className="panel p-4">

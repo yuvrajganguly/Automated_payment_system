@@ -264,6 +264,14 @@ def _0009_suspected_return_dismissals(conn: Any) -> None:
     )
 
 
+def _0010_users_phone(conn: Any) -> None:
+    """Users can sign in with a phone number as well as an email."""
+    add_column(conn, "users", "phone", "TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone) WHERE phone IS NOT NULL"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -274,6 +282,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0007_cod_hub_and_spencers_layout", _0007_cod_hub_and_spencers_layout),
     ("0008_cod_hub_code", _0008_cod_hub_code),
     ("0009_suspected_return_dismissals", _0009_suspected_return_dismissals),
+    ("0010_users_phone", _0010_users_phone),
 ]
 
 _TRACKING_DDL = (

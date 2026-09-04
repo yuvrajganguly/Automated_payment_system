@@ -32,7 +32,7 @@ Accounts are created by the creator: `POST /users {"email","password","role":"re
 ## Auth
 
 ```
-POST /auth/login          form: username=<email>&password=<pw>
+POST /auth/login          form: username=<email or phone>&password=<pw>   (phone: 10 digits or +country code)
                           → {"access_token","token_type":"bearer","role","email"}
 GET  /auth/me             → {"email","role"}
 POST /auth/logout
