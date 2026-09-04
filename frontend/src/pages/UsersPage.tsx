@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
+import { PasswordInput } from '../components/PasswordInput'
 
 interface UserRow {
   email: string
@@ -64,7 +65,7 @@ export function UsersPage() {
 
 function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
   { row: UserRow; isCreator: boolean; selfEmail: string; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'role' | 'active' | null>(null)
+  const [busy, setBusy] = useState<'role' | 'active' | 'password' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isSelf = row.email === selfEmail
 
@@ -74,6 +75,17 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
       await api.patch('/users/' + encodeURIComponent(row.email) + '/role', { role })
       onChanged()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(null) }
+  }
+  const [pwOpen, setPwOpen] = useState(false)
+  const [newPw, setNewPw] = useState('')
+  const [pwMsg, setPwMsg] = useState<string | null>(null)
+  async function setPassword(e: FormEvent) {
+    e.preventDefault(); setBusy('password'); setError(null); setPwMsg(null)
+    try {
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/password', { new_password: newPw })
+      setPwMsg('Password set — tell them the new one.'); setNewPw(''); setPwOpen(false)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(null) }
   }
   async function toggleActive() {
@@ -124,6 +136,22 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
                   className="text-xs underline text-brand disabled:opacity-30">
             {row.is_active ? 'Deactivate' : 'Reactivate'}
           </button>
+          <button onClick={() => setPwOpen((o) => !o)}
+                  className="text-xs underline text-brand ml-3">
+            Set password
+          </button>
+          {pwOpen && (
+            <form onSubmit={setPassword} className="flex items-center gap-2 mt-2">
+              <PasswordInput value={newPw} onChange={(e) => setNewPw(e.target.value)}
+                             className="border rounded px-2 py-1 text-xs w-44" minLength={8}
+                             required autoComplete="new-password" placeholder="min 8 characters" />
+              <button type="submit" disabled={busy === 'password' || newPw.length < 8}
+                      className="text-xs btn-primary !py-1 disabled:opacity-30">
+                {busy === 'password' ? '…' : 'Save'}
+              </button>
+            </form>
+          )}
+          {pwMsg && <div className="text-xs text-emerald-400 mt-1">{pwMsg}</div>}
           {error && <div className="text-xs text-red-400 mt-1">{error}</div>}
         </Td>
       )}
@@ -168,7 +196,7 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
           </label>
           <label className="block">
             <span className="block text-xs text-slate-600">Password</span>
-            <input type="password" value={form.password}
+            <PasswordInput value={form.password}
                    onChange={(e) => setForm({ ...form, password: e.target.value })}
                    className="w-full border rounded px-2 py-1" required minLength={8} />
           </label>

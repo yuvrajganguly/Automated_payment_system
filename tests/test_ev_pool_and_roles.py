@@ -260,3 +260,72 @@ def test_api_docs_are_creator_only(client):
     assert client.get("/docs", headers=h).status_code == 200
     r = client.get("/openapi.json", headers=h)
     assert r.status_code == 200 and "/api/creator/system/stats" in r.json()["paths"]
+
+
+# ── 5. creator sets a user's password; admins cannot ─────────────────────────
+
+
+def test_creator_sets_password_and_user_signs_in_with_it(client):
+    h = _login(client, _CREATOR)
+    r = client.patch(
+        "/api/users/user@t.test/password", json={"new_password": "Fresh-pass-9"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["password_set"] is True
+    # Old password dead, new one works.
+    assert (
+        client.post(
+            "/api/auth/login", data={"username": "user@t.test", "password": _USER[1]}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/auth/login", data={"username": "user@t.test", "password": "Fresh-pass-9"}
+        ).status_code
+        == 200
+    )
+    # Too short, unknown user, and non-creators are refused.
+    assert (
+        client.patch(
+            "/api/users/user@t.test/password", json={"new_password": "short"}, headers=h
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(
+            "/api/users/nobody@t.test/password", json={"new_password": "Fresh-pass-9"}, headers=h
+        ).status_code
+        == 404
+    )
+    ha = _login(client, _ADMIN)
+    assert (
+        client.patch(
+            "/api/users/user@t.test/password", json={"new_password": "Fresh-pass-9"}, headers=ha
+        ).status_code
+        == 403
+    )
+
+
+def test_manage_set_password_cli(db, monkeypatch):
+    import payout.cli.manage as manage
+
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,0)",
+        ("locked@t.test", hash_password("Old-pass-11"), "admin"),
+    )
+    db.commit()
+    monkeypatch.setattr("payout.db.connection.get_connection", lambda: db, raising=True)
+    db.close = lambda: None  # the command closes what it opens; keep the fixture alive
+
+    class A:
+        email = "locked@t.test"
+        password = "New-pass-22"
+
+    manage.cmd_set_password(A())
+    row = db.execute(
+        "SELECT password_hash, is_active FROM users WHERE email='locked@t.test'"
+    ).fetchone()
+    from payout.auth import verify_password
+
+    assert verify_password("New-pass-22", row["password_hash"]) and row["is_active"] == 1

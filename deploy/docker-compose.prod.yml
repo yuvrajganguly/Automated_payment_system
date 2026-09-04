@@ -57,6 +57,16 @@ services:
       - PAYOUT_DOCS_S3_SECRET=${PAYOUT_DOCS_S3_SECRET:-}
       # The Android recruiter app calls the API from its own origin.
       - PAYOUT_CORS_ORIGINS=${PAYOUT_CORS_ORIGINS:-}
+      # Password-reset emails. Leave unset and "Forgot password" tells the
+      # user to ask an administrator (creator: Users page → Set password).
+      # Gmail: host smtp.gmail.com, port 587, user = the Gmail address,
+      # pass = a 16-character App Password (Google account → Security →
+      # 2-Step Verification → App passwords), from = same address.
+      - PAYOUT_SMTP_HOST=${PAYOUT_SMTP_HOST:-}
+      - PAYOUT_SMTP_PORT=${PAYOUT_SMTP_PORT:-587}
+      - PAYOUT_SMTP_USER=${PAYOUT_SMTP_USER:-}
+      - PAYOUT_SMTP_PASS=${PAYOUT_SMTP_PASS:-}
+      - PAYOUT_SMTP_FROM=${PAYOUT_SMTP_FROM:-}
     volumes:
       - payout_docs:/data/documents
     healthcheck:

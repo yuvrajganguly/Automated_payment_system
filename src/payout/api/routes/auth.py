@@ -77,7 +77,8 @@ def forgot_password(body: ForgotPasswordIn) -> dict:
         raise HTTPException(
             503,
             "Password reset by email is not set up on this server. "
-            "Ask an administrator to reset your password.",
+            "Ask the account owner to set a new password for you "
+            "(Users page → Set password).",
         )
     with get_connection() as conn:
         row = conn.execute(

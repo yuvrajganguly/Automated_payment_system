@@ -105,6 +105,36 @@ def change_role(email: str, body: RoleChangeIn, user: dict = Depends(require_cre
     return {"email": target, "role": body.role}
 
 
+class PasswordSetIn(BaseModel):
+    new_password: str
+
+
+@router.patch("/{email}/password")
+def set_password(email: str, body: PasswordSetIn, user: dict = Depends(require_creator)) -> dict:
+    """Creator sets another user's password (no email round-trip needed).
+
+    This is the "ask an administrator" path the forgot-password screen points
+    to when SMTP is not configured. Any live reset codes for the user are
+    invalidated so an old OTP cannot undo the new password."""
+    target = email.strip().lower()
+    if len(body.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+            raise HTTPException(404, "User not found")
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE email=?",
+            (hash_password(body.new_password), target),
+        )
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at=datetime('now') "
+            "WHERE email=? AND used_at IS NULL",
+            (target,),
+        )
+        conn.commit()
+    return {"email": target, "password_set": True, "by": user["email"]}
+
+
 @router.patch("/{email}/deactivate")
 def deactivate(email: str, user: dict = Depends(require_creator)) -> dict:
     target = email.strip().lower()

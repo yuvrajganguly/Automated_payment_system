@@ -190,3 +190,19 @@ To hold or roll back a version, set `PAYOUT_IMAGE_TAG=<short sha>` in
 - Each user: own account, least role; rate limiting is already server-side.
 - Recruiters get the `recruiter` role (creator creates them on the Users page).
   The endpoints the app uses are listed in `docs/RECRUITER_API.md`.
+
+## Passwords and "Forgot password"
+
+Email reset only works once SMTP is set in `deploy/.env`
+(`PAYOUT_SMTP_HOST`, `PAYOUT_SMTP_PORT`, `PAYOUT_SMTP_USER`, `PAYOUT_SMTP_PASS`,
+`PAYOUT_SMTP_FROM`; for Gmail use smtp.gmail.com:587 with a Google App
+Password) followed by `docker compose -f docker-compose.prod.yml up -d`.
+Without it, "Forgot password" tells the user to ask the account owner, who
+resets it on the **Users page → Set password** (creator role). If nobody can
+sign in at all, on the server:
+
+    docker compose -f docker-compose.prod.yml exec app payout-manage users
+    docker compose -f docker-compose.prod.yml exec app payout-manage set-password --email you@example.com
+
+(`set-password` prompts for the new password without echoing it and
+re-activates the account.)

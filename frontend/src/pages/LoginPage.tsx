@@ -3,6 +3,7 @@ import emblem from '../assets/qwikserve-emblem.png'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useApi } from '../hooks/useApi'
+import { PasswordInput } from '../components/PasswordInput'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -60,8 +61,8 @@ export function LoginPage() {
             className={inputCls + ' mb-4'} autoComplete="email" placeholder="you@company.com"
           />
           <label className="block text-xs font-medium text-silver-300 mb-1">Password</label>
-          <input
-            type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+          <PasswordInput
+            required value={password} onChange={(e) => setPassword(e.target.value)}
             className={inputCls + ' mb-2'} autoComplete="current-password" placeholder="••••••••"
           />
 

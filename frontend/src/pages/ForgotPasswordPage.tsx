@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react'
+import { PasswordInput } from '../components/PasswordInput'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 
@@ -65,11 +66,11 @@ export function ForgotPasswordPage() {
                    inputMode="numeric" maxLength={6} required
                    placeholder="XXXXXX" />
             <Label>New password</Label>
-            <Input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)}
-                   autoComplete="new-password" required />
+            <PasswordInput value={newPw} onChange={(e) => setNewPw(e.target.value)}
+                   autoComplete="new-password" required className={pwCls} />
             <Label>Confirm new password</Label>
-            <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
-                   autoComplete="new-password" required />
+            <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)}
+                   autoComplete="new-password" required className={pwCls} />
             <Submit busy={busy} label="Set new password" />
             {msg && <Msg tone={msg.tone}>{msg.text}</Msg>}
             <p className="text-xs text-slate-500 mt-3">
@@ -95,6 +96,7 @@ export function ForgotPasswordPage() {
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-sm font-medium mb-1">{children}</label>
 }
+const pwCls = 'w-full border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand'
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props}
                 className={'w-full border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand '

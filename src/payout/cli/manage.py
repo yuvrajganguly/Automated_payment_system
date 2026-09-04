@@ -209,6 +209,48 @@ def cmd_reset_cycles(args) -> None:
         print("  Balances + arrears rewound to seed-opening state.")
 
 
+def cmd_set_password(args) -> None:
+    """Set (or reset) a user's password from the server — the escape hatch
+    when nobody can sign in and email reset is not configured."""
+    import getpass
+
+    from payout.auth import hash_password
+    from payout.db.connection import get_connection
+
+    email = args.email.strip().lower()
+    pw = args.password or getpass.getpass(f"New password for {email}: ")
+    if len(pw) < 8:
+        raise SystemExit("Password must be at least 8 characters.")
+    conn = get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+            raise SystemExit(f"No user {email}. Existing users: payout-manage users")
+        conn.execute(
+            "UPDATE users SET password_hash=?, is_active=1 WHERE email=?",
+            (hash_password(pw), email),
+        )
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at=datetime('now') "
+            "WHERE email=? AND used_at IS NULL",
+            (email,),
+        )
+        conn.commit()
+        print(f"Password set for {email} (account active).")
+    finally:
+        conn.close()
+
+
+def cmd_users(args) -> None:
+    from payout.db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        for r in conn.execute("SELECT email, role, is_active FROM users ORDER BY email"):
+            print(f"{r['email']:40} {r['role']:10} {'active' if r['is_active'] else 'inactive'}")
+    finally:
+        conn.close()
+
+
 def cmd_unbilled_days(args) -> None:
     """List (and with --apply, book to arrears) EV days behind a meter that no
     cycle ever billed — the 2026-09-04 rent-gap sweep."""
@@ -287,6 +329,10 @@ def main() -> None:
         "--person", type=int, nargs="*", help="Only these person ids (default: everyone)"
     )
     pu.add_argument("--created-by", default="unbilled-days")
+    pp = sub.add_parser("set-password", help="Set or reset a user's password (prompts if omitted)")
+    pp.add_argument("--email", required=True)
+    pp.add_argument("--password", help="Omit to be prompted without echo")
+    sub.add_parser("users", help="List users and roles")
     args = p.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -298,6 +344,10 @@ def main() -> None:
         cmd_reset_cycles(args)
     elif args.command == "unbilled-days":
         cmd_unbilled_days(args)
+    elif args.command == "set-password":
+        cmd_set_password(args)
+    elif args.command == "users":
+        cmd_users(args)
     else:
         p.print_help()
 

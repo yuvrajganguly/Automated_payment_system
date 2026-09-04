@@ -1,4 +1,5 @@
 import { FormEvent, useState } from 'react'
+import { PasswordInput } from '../components/PasswordInput'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
@@ -58,6 +59,8 @@ export function SettingsPage() {
 function Field({ label, type = 'text', v, on }: { label: string; type?: string; v: string; on: (v: string) => void }) {
   return <label className="block">
     <span className="block text-sm font-medium mb-1">{label}</span>
-    <input type={type} value={v} onChange={(e) => on(e.target.value)} className="w-full border rounded px-3 py-2" />
+    {type === 'password'
+      ? <PasswordInput value={v} onChange={(e) => on(e.target.value)} className="w-full border rounded px-3 py-2" />
+      : <input type={type} value={v} onChange={(e) => on(e.target.value)} className="w-full border rounded px-3 py-2" />}
   </label>
 }
