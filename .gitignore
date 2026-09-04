@@ -101,3 +101,4 @@ secrets/*
 !secrets/README.md
 *.pem
 *.ppk
+*.dump
