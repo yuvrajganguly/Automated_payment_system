@@ -155,6 +155,7 @@ someone leaves, deactivate their account the same day.
 ## 8. Updating the deployment later
 
 Push to the branch, wait for CI to publish the image, then on the server:
+`/root/payout/deploy/update.sh` (does all of the following), or by hand:
 
 ```bash
 cd ~/payout && git pull                      # compose files / runbook / scripts
