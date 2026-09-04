@@ -95,3 +95,9 @@ _to_delete/
 PAYOUT_SYSTEM_STUDY_GUIDE.*
 Payout_System_Operations_Guide.*
 Yuvraj_Ganguly_CV*
+
+# ─── Deployment secrets (SSH keys, tokens) ───────────────────────────────────
+secrets/*
+!secrets/README.md
+*.pem
+*.ppk
