@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
+from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
 from payout.parsers.base import match_column
@@ -28,17 +29,17 @@ def _next_placeholder_rider_id(conn, company: str) -> str:
     ID hasn't been assigned yet. Format: ``QSPEND<NNNN>`` scoped per company."""
     row = conn.execute(
         "SELECT rider_id FROM rider_master "
-        "WHERE company=? AND rider_id LIKE 'QSPEND%' "
+        "WHERE company=? AND rider_id LIKE ? "
         "ORDER BY rider_id DESC LIMIT 1",
-        (company,),
+        (company, f"{PLACEHOLDER_PREFIX}%"),
     ).fetchone()
     n = 1
     if row:
         try:
-            n = int(row["rider_id"].replace("QSPEND", "")) + 1
+            n = int(row["rider_id"].replace(PLACEHOLDER_PREFIX, "")) + 1
         except ValueError:
             n = 1
-    return f"QSPEND{n:04d}"
+    return f"{PLACEHOLDER_PREFIX}{n:04d}"
 
 
 def _find_existing_rider(
@@ -157,6 +158,9 @@ def _insert_rider_into_db(
         "account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
         (rider_id, company, person_id, name, hub, veh, account_no, ifsc),
     )
+    # A real id tagged to a person who was carrying a system placeholder at
+    # this company: the placeholder is retired (history moves onto the real id).
+    retire_placeholders(conn, person_id, company, rider_id)
     return True, rider_id, person_id
 
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { WORKSPACES } from './workspaces'
 
 /** ⌘K — jump anywhere. Pages always; riders and EVs load once per open so
@@ -37,10 +38,16 @@ const PAGE_ITEMS: Item[] = WORKSPACES.flatMap((ws) =>
     sub: ws.label,
     to: p.to,
   })),
-).concat([{ key: 'page:/system', group: 'Pages', label: 'System', sub: 'Creator', to: '/system' }])
+)
+// Creator-only page; appended for creators inside the component so nobody
+// else ever sees the entry.
+const SYSTEM_ITEM: Item = { key: 'page:/system', group: 'Pages', label: 'System', sub: 'Admin', to: '/system' }
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isCreator = user?.role === 'creator'
+  const pageItems = useMemo(() => (isCreator ? [...PAGE_ITEMS, SYSTEM_ITEM] : PAGE_ITEMS), [isCreator])
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const [riders, setRiders] = useState<RiderRow[] | null>(null)
@@ -62,7 +69,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const items = useMemo<Item[]>(() => {
     const needle = q.trim().toLowerCase()
-    const pages = PAGE_ITEMS.filter(
+    const pages = pageItems.filter(
       (p) => !needle || (p.label + ' ' + p.sub).toLowerCase().includes(needle),
     ).slice(0, needle ? 5 : 12)
     if (!needle || needle.length < 2) return pages
@@ -97,7 +104,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         to: '/evs/' + encodeURIComponent(e.ev_id),
       }))
     return [...pages, ...riderHits, ...evHits]
-  }, [q, riders, evs])
+  }, [q, riders, evs, pageItems])
 
   useEffect(() => setSel(0), [q])
   useEffect(() => {

@@ -126,6 +126,7 @@ export function EVsPage() {
               <SortableTh tag="handover_date" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Handover</SortableTh>
               <SortableTh tag="rent_charged_through" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Rent Through</SortableTh>
               <Th>Person</Th>
+              {isAdmin && <Th>{''}</Th>}
             </tr>
           </thead>
           <tbody>
@@ -158,6 +159,7 @@ export function EVsPage() {
                 <Td>{u.current_person_id
                       ? <Link to={'/persons/' + u.current_person_id} className="text-brand underline">#{u.current_person_id}</Link>
                       : '-'}</Td>
+                {isAdmin && <Td><PoolToggle unit={u} onChanged={reload} /></Td>}
               </tr>
             ))}
           </tbody>
@@ -197,9 +199,37 @@ export function EVsPage() {
   )
 }
 
+/** Flip an idle unit between the two idle states: a RETURNED (retired) EV
+ *  back into the spare pool, or a SPARE out to the provider. In-use units are
+ *  handled by the Return / Mark Spare cards (they need a rider taken off). */
+function PoolToggle({ unit, onChanged }: { unit: EvUnitOut; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  if (unit.status !== 'spare' && unit.status !== 'returned') return null
+  const toSpare = unit.status === 'returned'
+  async function flip() {
+    setBusy(true); setErr(null)
+    try {
+      await api.post(toSpare ? '/evs/to-spare' : '/evs/return', { ev_id: unit.ev_id })
+      onChanged()
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  return (
+    <span className="whitespace-nowrap">
+      <button onClick={flip} disabled={busy}
+              title={toSpare ? 'Bring this returned EV back into the spare pool' : 'Return this spare EV to the provider'}
+              className="text-xs underline text-brand disabled:opacity-40">
+        {busy ? '…' : toSpare ? 'Make spare' : 'Return'}
+      </button>
+      {err && <span className="block text-xs text-red-400">{err}</span>}
+    </span>
+  )
+}
+
 function AddEvCard({ models, onAdded }: { models: EvModelOut[]; onAdded: () => void }) {
   const empty = { ev_id: '', provider: '', model: '', notes: '',
-                  rider_id: '', company: '', handover_date: '' }
+                  person_id: '', rider_id: '', company: '', handover_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const providers = Array.from(new Set(models.map((m) => m.provider)))
@@ -208,13 +238,21 @@ function AddEvCard({ models, onAdded }: { models: EvModelOut[]; onAdded: () => v
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      // 1. Create the unit
-      await api.post('/evs', {
+      // 1. Create the unit — with a Person ID the API hands it over in the
+      //    same transaction (no orphan spare if the id is wrong).
+      const create: Record<string, string | number> = {
         ev_id: form.ev_id, provider: form.provider,
         model: form.model, notes: form.notes,
-      })
-      // 2. If a rider was given, immediately assign it
-      if (form.rider_id && form.company) {
+      }
+      if (form.person_id) {
+        create.person_id = Number(form.person_id)
+        if (form.handover_date) create.handover_date = form.handover_date
+      }
+      await api.post('/evs', create)
+      if (form.person_id) {
+        setMsg('Added & assigned to person #' + form.person_id)
+      } else if (form.rider_id && form.company) {
+        // 2. Rider ID + Company: assign as a second step.
         const assignBody: Record<string, string> = {
           ev_id: form.ev_id, rider_id: form.rider_id, company: form.company,
         }
@@ -240,17 +278,20 @@ function AddEvCard({ models, onAdded }: { models: EvModelOut[]; onAdded: () => v
                options={['', ...modelsFor(form.provider)]} />
       <Input label="Notes" v={form.notes} on={(v) => setForm({ ...form, notes: v })} />
       <div className="col-span-2 mt-2 -mb-1 pt-2 border-t border-slate-200 text-xs text-slate-500">
-        Optional: bind to a rider right away
+        Optional: hand it to a rider right away — Person ID (from the rider's profile) is the
+        unambiguous handle; or give a Rider ID + Company pair.
       </div>
+      <Input label="Person ID" v={form.person_id}
+             on={(v) => setForm({ ...form, person_id: v.replace(/\D/g, '') })} />
+      <Input label="Handover date" type="date" v={form.handover_date}
+             on={(v) => setForm({ ...form, handover_date: v })} />
       <Input label="Rider ID (system internal)" v={form.rider_id}
              on={(v) => setForm({ ...form, rider_id: v })} />
       <Input label="Company" v={form.company}
              on={(v) => setForm({ ...form, company: v })} />
-      <Input label="Handover date" type="date" v={form.handover_date}
-             on={(v) => setForm({ ...form, handover_date: v })} />
-      <div />
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
         disabled={!form.ev_id || !form.provider || !form.model
+                  || (form.person_id !== '' && (form.rider_id !== '' || form.company !== ''))
                   || (form.rider_id !== '' && form.company === '')
                   || (form.company !== '' && form.rider_id === '')}
         label="Add" />{msg && <span className="text-xs">{msg}</span>}</div>
@@ -355,7 +396,7 @@ function MarkSpareEvCard({ onChanged }: { onChanged: () => void }) {
       <Input label="Effective date" type="date" v={form.returned_date}
              on={(v) => setForm({ ...form, returned_date: v })} />
       <div className="col-span-2 text-xs text-slate-500 -mt-1">
-        Takes an EV back from its rider into the spare pool — rent stops, EV stays available for reassignment. Give the EV ID or (Rider ID + Company).
+        Takes an EV back from its rider into the spare pool — rent stops, EV stays available for reassignment. Also brings a RETURNED EV back into the pool (give its EV ID). Give the EV ID or (Rider ID + Company).
       </div>
       <div className="col-span-2 flex gap-2 items-center"><Submit busy={busy}
         disabled={!validEv && !validRid} label="Mark as Spare" />{msg && <span className="text-xs">{msg}</span>}</div>

@@ -23,6 +23,13 @@
   `advance_rent_charged_through`. A cycle bills only its own days (no catch-up).
 - Every route that writes uses `require_admin` / `require_creator`. Tests enforce that
   anonymous callers get 401 on every mutating route.
+- **The creator tier is invisible below creator.** Non-creators see creators as `admin`
+  (`users.visible_role`), creator-only refusals say just "Not permitted", `/docs` and
+  `/openapi.json` are creator-only, and the SPA never renders the word for anyone else.
+  Keep it that way when adding routes or UI.
+- **Placeholder rider ids (`QSPEND<NNNN>`) are temporary.** Tagging a real id to that
+  person at that company retires the placeholder (`domain/placeholders.py`); any path
+  that attaches a rider id to an existing person must go through it.
 - Tables that reference a person or EV are listed in `payout/db/references.py`; use its
   helpers for deletes/merges and keep it in step with `schema.py` (a test checks).
 

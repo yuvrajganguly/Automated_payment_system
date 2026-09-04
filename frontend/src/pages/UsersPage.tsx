@@ -32,7 +32,7 @@ export function UsersPage() {
       <p className="text-slate-500 text-sm mb-6">
         {isCreator
           ? "You can change roles, deactivate accounts, and add new users. The creator role is locked to you until you promote someone else first."
-          : "List of everyone with access. Only a creator (super-admin) can change roles or add users."}
+          : 'Everyone with access to the system.'}
       </p>
 
       {isCreator && <AddUserCard onAdded={reload} />}

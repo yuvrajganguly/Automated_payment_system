@@ -5,11 +5,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from payout.api.auth import require_creator
 from payout.api.config import CORS_ORIGINS, DEMO_MODE
 from payout.api.routes import (
     analytics as analytics_routes,
@@ -135,6 +137,11 @@ app = FastAPI(
     ),
     version="0.1.0",
     lifespan=lifespan,
+    # The interactive docs list every route, /api/creator included. They are
+    # served below, to creators only — nobody else learns the tier exists.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(
@@ -168,6 +175,16 @@ app.include_router(analytics_routes.router, prefix="/api/dashboard", tags=["anal
 app.include_router(corrections_routes.router, prefix="/api/corrections", tags=["corrections"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_schema(_: dict = Depends(require_creator)) -> dict:
+    return app.openapi()
+
+
+@app.get("/docs", include_in_schema=False)
+def swagger_docs(_: dict = Depends(require_creator)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="Payout System API")
 
 
 @app.get("/api/health", tags=["meta"])

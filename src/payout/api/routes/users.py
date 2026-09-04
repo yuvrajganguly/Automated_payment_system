@@ -40,10 +40,20 @@ class RoleChangeIn(BaseModel):
     role: str
 
 
+def visible_role(role: str, viewer: dict) -> str:
+    """The role as a given viewer is allowed to see it. The creator role is
+    invisible below creator level: everyone else sees creators as plain
+    admins, so admins and users have no idea the tier exists."""
+    if role == "creator" and viewer.get("role") != "creator":
+        return "admin"
+    return role
+
+
 @router.get("", response_model=list[UserOut])
-def list_users(_: dict = Depends(get_current_user)) -> list[UserOut]:
+def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
     """Everyone who's signed in can see who else has access — useful when
-    multiple operators are sharing the system."""
+    multiple operators are sharing the system. Creators appear as admins to
+    anyone who is not one."""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT email, role, is_active, created_at FROM users ORDER BY email"
@@ -51,7 +61,7 @@ def list_users(_: dict = Depends(get_current_user)) -> list[UserOut]:
     return [
         UserOut(
             email=r["email"],
-            role=r["role"],
+            role=visible_role(r["role"], user),
             is_active=bool(r["is_active"]),
             created_at=r["created_at"],
         )

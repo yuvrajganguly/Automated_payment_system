@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useUrlString } from '../state/useUrlState'
 import { api } from '../api/client'
 import { useApi } from '../hooks/useApi'
@@ -37,15 +38,8 @@ export function SystemPage() {
   const [tab, setTab] = useUrlString('tab', 'stats') as [Tab, (v: Tab) => void]
 
   if (user?.role !== 'creator') {
-    return (
-      <div className="max-w-xl mx-auto bg-amber-500/10 border border-amber-400/30 rounded p-6">
-        <h1 className="font-bold mb-2">Creator-only</h1>
-        <p className="text-sm text-amber-200">
-          You need the Creator role to access System Control.
-          Ask your existing creator to promote you on the Users page.
-        </p>
-      </div>
-    )
+    // Nobody below creator is told this page (or the role) exists.
+    return <Navigate to="/" replace />
   }
 
   return (

@@ -136,10 +136,10 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 
 def require_creator(user: dict = Depends(get_current_user)) -> dict:
-    """Only the creator (super-admin) can change roles or remove other users."""
+    """Only the creator (super-admin) can change roles or remove other users.
+
+    The refusal is deliberately generic: nobody below creator is told the
+    role exists."""
     if user.get("role") != "creator":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Creator (super-admin) access required",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
     return user

@@ -8,6 +8,7 @@ from payout.api.auth import get_current_user, require_admin
 from payout.api.schemas import EvSummary, LinkRidersIn, PersonOut, RiderOut, SplitPersonIn
 from payout.db import get_connection
 from payout.db.references import drop_person_singletons
+from payout.domain.placeholders import retire_placeholders_everywhere
 
 router = APIRouter()
 
@@ -411,8 +412,16 @@ def link_riders(body: LinkRidersIn, _: dict = Depends(require_admin)) -> dict:
         conn.execute("UPDATE payment_lines SET person_id=? WHERE person_id=?", (primary, secondary))
         # Drop secondary's now-orphaned rows + the person_registry row last.
         drop_person_singletons(conn, secondary)
+        # If one half carried a QSPEND placeholder where the other has the
+        # real id, the placeholder has served its purpose.
+        retired = retire_placeholders_everywhere(conn, primary)
         conn.commit()
-    return {"merged": True, "into_person_id": primary, "from_person_id": secondary}
+    return {
+        "merged": True,
+        "into_person_id": primary,
+        "from_person_id": secondary,
+        "placeholders_retired": retired,
+    }
 
 
 @router.post("/{person_id}/arrears/write-off")

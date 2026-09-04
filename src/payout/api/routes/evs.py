@@ -172,15 +172,61 @@ def create_ev_unit(body: EvUnitIn, _: dict = Depends(require_admin)) -> EvUnitOu
             "INSERT INTO ev_units (ev_id, model_id, status, notes) VALUES (?,?, 'spare', ?)",
             (body.ev_id, m["model_id"], body.notes),
         )
+        status_ = "spare"
+        current_person_id = None
+        handover = None
+        if body.person_id is not None:
+            # Hand the new unit straight to its rider — one transaction, so a
+            # bad person id leaves no orphan spare behind.
+            if not conn.execute(
+                "SELECT 1 FROM person_registry WHERE person_id=?", (body.person_id,)
+            ).fetchone():
+                raise HTTPException(404, f"Person {body.person_id} not found")
+            handover = _open_assignment(conn, body.ev_id, body.person_id, body.handover_date)
+            status_, current_person_id = "in_use", body.person_id
         conn.commit()
     return EvUnitOut(
         ev_id=body.ev_id,
         provider=body.provider,
         model=body.model,
         weekly_rate=float(m["weekly_rate"]),
-        status="spare",
+        status=status_,
         notes=body.notes,
+        current_person_id=current_person_id,
+        handover_date=handover,
     )
+
+
+def _open_assignment(conn, ev_id: str, pid: int, handover_date: date | None) -> str | None:
+    """Open an ev_assignments row for (person, EV) and mark the unit in_use.
+    Refuses when either side already has an open assignment."""
+    if conn.execute(
+        "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL", (pid,)
+    ).fetchone():
+        raise HTTPException(409, "Person already has an open EV assignment")
+    if conn.execute(
+        "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL", (ev_id,)
+    ).fetchone():
+        raise HTTPException(409, "EV already assigned to someone else")
+    hod = handover_date.isoformat() if handover_date else None
+    conn.execute(
+        "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
+        (pid, ev_id, hod),
+    )
+    conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev_id,))
+    # If there's a stale open maintenance window for this EV, close it
+    # to handover_date - 1. The new rider clearly has the EV from
+    # handover_date onward, so any "still in maintenance" record is
+    # wrong and would silently zero their rent.
+    if hod:
+        conn.execute(
+            "UPDATE ev_maintenance "
+            "SET to_date = date(?, '-1 day') "
+            "WHERE ev_id=? AND to_date IS NULL "
+            "  AND from_date <= date(?, '-1 day')",
+            (hod, ev_id, hod),
+        )
+    return hod
 
 
 @router.post("/assign")
@@ -204,32 +250,7 @@ def assign_ev(body: EvAssignIn, _: dict = Depends(require_admin)) -> dict:
             pid = rm["person_id"]
         else:
             raise HTTPException(400, "Provide person_id, or (rider_id + company)")
-        if conn.execute(
-            "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL", (pid,)
-        ).fetchone():
-            raise HTTPException(409, "Person already has an open EV assignment")
-        if conn.execute(
-            "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL", (body.ev_id,)
-        ).fetchone():
-            raise HTTPException(409, "EV already assigned to someone else")
-        hod = body.handover_date.isoformat() if body.handover_date else None
-        conn.execute(
-            "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
-            (pid, body.ev_id, hod),
-        )
-        conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (body.ev_id,))
-        # If there's a stale open maintenance window for this EV, close it
-        # to handover_date - 1. The new rider clearly has the EV from
-        # handover_date onward, so any "still in maintenance" record is
-        # wrong and would silently zero their rent.
-        if hod:
-            conn.execute(
-                "UPDATE ev_maintenance "
-                "SET to_date = date(?, '-1 day') "
-                "WHERE ev_id=? AND to_date IS NULL "
-                "  AND from_date <= date(?, '-1 day')",
-                (hod, body.ev_id, hod),
-            )
+        hod = _open_assignment(conn, body.ev_id, pid, body.handover_date)
         conn.commit()
     return {"assigned": True, "person_id": pid, "ev_id": body.ev_id, "handover_date": hod}
 
@@ -341,18 +362,34 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_admin)) -> dict:
     reassignment) instead of retiring it.
 
     Ends the current assignment so rent stops, and sets the unit status to
-    'spare'. The EV must currently be with a rider. Accepts an explicit ``ev_id``
-    or a (rider_id, company) pair.
+    'spare'. Accepts an explicit ``ev_id`` or a (rider_id, company) pair.
+
+    An EV that was RETURNED (retired) by mistake, or that the provider sent
+    back, can be brought back into the pool the same way: with no rider to
+    take it from, the unit simply becomes 'spare' again (the reverse of
+    /return on a spare).
     """
     today = (body.returned_date or date.today()).isoformat()
     with get_connection() as conn:
         a = _find_open_assignment(conn, body)
         if not a:
-            raise HTTPException(
-                409,
-                f"EV {body.ev_id!r} has no rider to take it back from "
-                "(it is already spare or returned).",
-            )
+            unit = conn.execute(
+                "SELECT status FROM ev_units WHERE ev_id=?", (body.ev_id,)
+            ).fetchone()
+            if not unit:
+                raise HTTPException(404, f"EV {body.ev_id!r} not found")
+            if unit["status"] == "spare":
+                raise HTTPException(409, f"EV {body.ev_id!r} is already spare.")
+            conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (body.ev_id,))
+            conn.commit()
+            return {
+                "spare": True,
+                "ev_id": body.ev_id,
+                "person_id": None,
+                "as_of": today,
+                "previous_status": unit["status"],
+                "heal": None,
+            }
         conn.execute(
             "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
             (today, a["assignment_id"]),
