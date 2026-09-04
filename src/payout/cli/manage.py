@@ -240,6 +240,31 @@ def cmd_set_password(args) -> None:
         conn.close()
 
 
+def cmd_test_email(args) -> None:
+    """Send one test email through the configured SMTP settings and say
+    exactly what went wrong if it did not go out."""
+    import logging
+
+    from payout.notifications import _smtp_settings, email_configured, send_email
+
+    host, port, user, _pwd, sender = _smtp_settings()
+    if not email_configured():
+        raise SystemExit(
+            "SMTP is not configured. Set PAYOUT_SMTP_HOST/PORT/USER/PASS (and optionally "
+            "PAYOUT_SMTP_FROM) in deploy/.env, then `docker compose ... up -d`."
+        )
+    print(f"SMTP {host}:{port} as {user}, from {sender} -> {args.to}")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    ok = send_email(
+        args.to,
+        "Payout System - test email",
+        "This is a test from payout-manage test-email. If you can read this, "
+        "password-reset emails will work.\n",
+    )
+    print("Sent." if ok else "FAILED - see the error above (wrong app password? 2-Step off?).")
+    raise SystemExit(0 if ok else 1)
+
+
 def cmd_users(args) -> None:
     from payout.db.connection import get_connection
 
@@ -333,6 +358,8 @@ def main() -> None:
     pp.add_argument("--email", required=True)
     pp.add_argument("--password", help="Omit to be prompted without echo")
     sub.add_parser("users", help="List users and roles")
+    pt = sub.add_parser("test-email", help="Send a test email via PAYOUT_SMTP_* settings")
+    pt.add_argument("--to", required=True)
     args = p.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -348,6 +375,8 @@ def main() -> None:
         cmd_set_password(args)
     elif args.command == "users":
         cmd_users(args)
+    elif args.command == "test-email":
+        cmd_test_email(args)
     else:
         p.print_help()
 

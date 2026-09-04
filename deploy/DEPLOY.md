@@ -205,4 +205,5 @@ sign in at all, on the server:
     docker compose -f docker-compose.prod.yml exec app payout-manage set-password --email you@example.com
 
 (`set-password` prompts for the new password without echoing it and
-re-activates the account.)
+re-activates the account.) After setting SMTP, verify with
+`docker compose -f docker-compose.prod.yml exec app payout-manage test-email --to you@example.com`.
