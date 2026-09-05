@@ -126,7 +126,7 @@ export function RidersPage() {
 
 function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: () => void }) {
   const [open, setOpen] = useState(false)
-  const empty = { rider_id: '', company: '', name: '', hub: '', vehicle: '', account_no: '', ifsc: '', mob_no: '' }
+  const empty = { rider_id: '', company: '', name: '', hub: '', vehicle: '', account_no: '', ifsc: '', mob_no: '', aadhaar_no: '', pan_no: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -168,6 +168,8 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
         <Input label="Account #" v={form.account_no} on={(v) => setForm({ ...form, account_no: v })} />
         <Input label="IFSC" v={form.ifsc} on={(v) => setForm({ ...form, ifsc: v.toUpperCase() })} />
         <Input label="Phone" v={form.mob_no} on={(v) => setForm({ ...form, mob_no: v })} />
+        <Input label="Aadhaar (optional)" v={form.aadhaar_no} on={(v) => setForm({ ...form, aadhaar_no: v })} />
+        <Input label="PAN (optional)" v={form.pan_no} on={(v) => setForm({ ...form, pan_no: v.toUpperCase() })} />
         <div className="col-span-2 text-xs text-slate-500 -mt-1">
           Leave Rider ID blank to auto-assign a placeholder (QSPEND…).
           A duplicate name at the same company is flagged first (you can add anyway); a duplicate bank account is always refused.

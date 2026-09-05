@@ -415,3 +415,61 @@ def test_profile_photo_latest_image_wins(db, client):
     # Only one photo document remains (the red one was replaced, file and row).
     docs = client.get(f"/api/persons/{pid}/documents", headers=h).json()
     assert [d["doc_type"] for d in docs] == ["photo"]
+
+
+def test_identity_numbers_set_validated_and_unique(db, client):
+    pid = make_person(db, "Id Rider")
+    other = make_person(db, "Other Rider")
+    db.commit()
+    h = _login(client, _RECRUITER)
+    r = client.patch(
+        f"/api/persons/{pid}/identity",
+        json={"aadhaar_no": "1234 5678-9012", "pan_no": "abcde1234f"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == {"person_id": pid, "aadhaar_no": "123456789012", "pan_no": "ABCDE1234F"}
+    p = client.get(f"/api/persons/{pid}", headers=h).json()
+    assert p["aadhaar_no"] == "123456789012" and p["pan_no"] == "ABCDE1234F"
+    # Bad formats.
+    assert (
+        client.patch(
+            f"/api/persons/{pid}/identity", json={"aadhaar_no": "12345"}, headers=h
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(
+            f"/api/persons/{pid}/identity", json={"pan_no": "ABC123"}, headers=h
+        ).status_code
+        == 400
+    )
+    # The same Aadhaar on another person is refused and names the holder.
+    r = client.patch(
+        f"/api/persons/{other}/identity", json={"aadhaar_no": "123456789012"}, headers=h
+    )
+    assert r.status_code == 409 and "Id Rider" in r.text
+    # Clearing one field leaves the other.
+    r = client.patch(f"/api/persons/{pid}/identity", json={"pan_no": ""}, headers=h)
+    assert r.json() == {"person_id": pid, "aadhaar_no": "123456789012", "pan_no": None}
+    # Onboarding card: optional numbers land on the new person.
+    r = client.post(
+        "/api/riders",
+        json={
+            "company": "Blitz",
+            "name": "New With Id",
+            "aadhaar_no": "9999 8888 7777",
+            "pan_no": "zzzzz9999z",
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    p = client.get(f"/api/persons/{r.json()['person_id']}", headers=h).json()
+    assert p["aadhaar_no"] == "999988887777" and p["pan_no"] == "ZZZZZ9999Z"
+    # ...and a known Aadhaar on a NEW rider is a duplicate warning, not a silent second person.
+    r = client.post(
+        "/api/riders",
+        json={"company": "Blitz", "name": "Someone Else", "aadhaar_no": "123456789012"},
+        headers=h,
+    )
+    assert r.status_code == 409 and "Id Rider" in r.text

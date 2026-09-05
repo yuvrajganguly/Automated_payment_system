@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { todayISO } from '../lib/dates'
@@ -97,9 +98,7 @@ export function PersonPage() {
           <h1 className="text-2xl font-bold mb-1">
             {person.display_name} <span className="text-slate-400 text-base">#{person.person_id}</span>
           </h1>
-          <p className="text-slate-500 text-sm">
-            Deduction anchor: {person.deduction_company ?? '-'} / {person.deduction_rider_id ?? '-'}
-          </p>
+          <IdentityLine person={person} canEdit={isAdmin || user?.role === 'recruiter'} onSaved={load} />
         </div>
       </div>
 
@@ -386,14 +385,69 @@ function WriteOffArrearsCard({ personId, onPosted }: { personId: number; onPoste
   )
 }
 
+/** Aadhaar / PAN numbers under the name — small, and editable in place by
+ *  admins and recruiters. Numbers only; there are no scans in the system. */
+function IdentityLine({ person, canEdit, onSaved }: { person: PersonOut; canEdit: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [aadhaar, setAadhaar] = useState(person.aadhaar_no ?? '')
+  const [pan, setPan] = useState(person.pan_no ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { setAadhaar(person.aadhaar_no ?? ''); setPan(person.pan_no ?? '') }, [person.aadhaar_no, person.pan_no])
+  const fmtAadhaar = (v: string) => v.replace(/(\d{4})(?=\d)/g, '$1 ')
+
+  async function save(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError(null)
+    try {
+      await api.patch(`/persons/${person.person_id}/identity`, { aadhaar_no: aadhaar, pan_no: pan })
+      setEditing(false); onSaved()
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={save} className="flex flex-wrap items-end gap-2 text-sm mt-1">
+        <label className="block">
+          <span className="block text-[11px] text-slate-500">Aadhaar</span>
+          <input value={aadhaar} onChange={(e) => setAadhaar(e.target.value)} inputMode="numeric"
+                 placeholder="1234 5678 9012" className="border rounded px-2 py-1 w-40 font-mono" />
+        </label>
+        <label className="block">
+          <span className="block text-[11px] text-slate-500">PAN</span>
+          <input value={pan} onChange={(e) => setPan(e.target.value.toUpperCase())}
+                 placeholder="ABCDE1234F" maxLength={10} className="border rounded px-2 py-1 w-32 font-mono uppercase" />
+        </label>
+        <button type="submit" disabled={busy} className="btn-primary !py-1">{busy ? '…' : 'Save'}</button>
+        <button type="button" onClick={() => { setEditing(false); setError(null) }} className="btn-ghost !py-1">Cancel</button>
+        {error && <span className="text-xs text-red-400 w-full">{error}</span>}
+      </form>
+    )
+  }
+  return (
+    <p className="text-slate-500 text-xs mt-0.5 flex flex-wrap items-center gap-x-3">
+      <span>Aadhaar <span className="font-mono text-slate-300">{person.aadhaar_no ? fmtAadhaar(person.aadhaar_no) : '—'}</span></span>
+      <span>PAN <span className="font-mono text-slate-300">{person.pan_no ?? '—'}</span></span>
+      {canEdit && (
+        <button type="button" onClick={() => setEditing(true)} className="text-brand underline">
+          {person.aadhaar_no || person.pan_no ? 'edit' : 'add'}
+        </button>
+      )}
+    </p>
+  )
+}
+
 /** The rider's picture: the latest 'photo' document, or initials. Admins and
  *  recruiters can upload / replace it from here; old photos stay on file. */
 function ProfilePhoto({ personId, name, canEdit }: { personId: number; name: string; canEdit: boolean }) {
   const [version, setVersion] = useState(0)
   const [missing, setMissing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')
+  const src = `/api/persons/${personId}/photo?v=${version}`
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -405,38 +459,65 @@ function ProfilePhoto({ personId, name, canEdit }: { personId: number; name: str
       form.set('file', file)
       form.set('doc_type', 'photo')
       await api.postForm(`/persons/${personId}/documents`, form)
-      setMissing(false); setVersion((v) => v + 1)
+      setMissing(false); setVersion((v) => v + 1); setOpen(false)
     } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed') }
     finally { setBusy(false) }
+  }
+  // No photo yet: the tile itself is the upload button. With a photo: it opens.
+  const onTileClick = () => {
+    if (missing) { if (canEdit) fileRef.current?.click() }
+    else setOpen(true)
   }
 
   return (
     <div className="shrink-0 flex flex-col items-center gap-1">
-      <div className="h-24 w-24 rounded-2xl overflow-hidden bg-brand-500/15 ring-1 ring-white/10 grid place-items-center">
-        {missing ? (
-          <span className="text-2xl font-semibold text-brand-300 select-none">{initials || '?'}</span>
+      <button type="button" onClick={onTileClick} disabled={busy}
+              title={missing ? (canEdit ? 'Add a photo' : name) : 'View photo'}
+              className={'h-24 w-24 rounded-2xl overflow-hidden bg-brand-500/15 ring-1 ring-white/10 grid place-items-center ' +
+                         'transition hover:ring-brand-400/60 focus:outline-none focus:ring-2 focus:ring-brand-400 ' +
+                         (missing && !canEdit ? 'cursor-default' : 'cursor-pointer')}>
+        {busy ? (
+          <span className="text-xs text-slate-400">Uploading…</span>
+        ) : missing ? (
+          <span className="flex flex-col items-center gap-0.5 select-none">
+            <span className="text-2xl font-semibold text-brand-300">{initials || '?'}</span>
+            {canEdit && <span className="text-[10px] text-slate-500">add photo</span>}
+          </span>
         ) : (
-          <img src={`/api/persons/${personId}/photo?v=${version}`} alt={name}
-               className="h-full w-full object-cover" onError={() => setMissing(true)} />
+          <img src={src} alt={name} className="h-full w-full object-cover" onError={() => setMissing(true)} />
         )}
-      </div>
-      {canEdit && (
-        <label className={'text-[11px] text-brand underline cursor-pointer ' + (busy ? 'opacity-50' : '')}>
-          {busy ? 'Uploading…' : missing ? 'Add photo' : 'Change photo'}
-          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-                 onChange={onPick} disabled={busy} />
-        </label>
-      )}
+      </button>
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+             onChange={onPick} disabled={busy} />
       {error && <span className="text-[11px] text-red-400 max-w-[8rem] text-center">{error}</span>}
+
+      {open && !missing && createPortal(
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+             onClick={() => setOpen(false)}>
+          <div className="max-w-[90vw] max-h-[90vh] flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <img src={src} alt={name} className="max-h-[75vh] max-w-full rounded-xl shadow-2xl object-contain" />
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-300">{name}</span>
+              {canEdit && (
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={busy} className="btn-primary !py-1.5">
+                  {busy ? 'Uploading…' : 'Upload a new photo'}
+                </button>
+              )}
+              <button type="button" onClick={() => setOpen(false)} className="btn-ghost !py-1.5">Close</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }
 
-/** Hand this rider an EV without leaving their page: pick from the spare
- *  pool, or add a brand-new unit and hand it over in one go. */
+/** Hand this rider an EV without leaving their page: any unit nobody holds
+ *  (spare or returned), or add a brand-new unit and hand it over in one go. */
 function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: () => void }) {
   const [mode, setMode] = useState<'spare' | 'new'>('spare')
-  const [spares, setSpares] = useState<{ ev_id: string; provider: string; model: string; weekly_rate: number }[]>([])
+  const [spares, setSpares] = useState<{ ev_id: string; provider: string; model: string; weekly_rate: number; status: string }[]>([])
   const [models, setModels] = useState<{ provider: string; model_name: string; weekly_rate: number }[]>([])
   const [evId, setEvId] = useState('')
   const [provider, setProvider] = useState('')
@@ -447,8 +528,17 @@ function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: 
   const [tone, setTone] = useState<'ok' | 'err'>('ok')
 
   useEffect(() => {
-    api.get<typeof spares & { status: string }[]>('/evs?status=spare').then((r) => setSpares(r)).catch(() => {})
-    api.get<typeof models>('/evs/models').then(setModels).catch(() => {})
+    // Every unit without a rider — spare or returned — A→Z by EV ID.
+    api.get<typeof spares>('/evs')
+      .then((r) => setSpares(
+        r.filter((u) => u.status !== 'in_use')
+         .sort((a, b) => a.ev_id.localeCompare(b.ev_id, undefined, { numeric: true, sensitivity: 'base' })),
+      ))
+      .catch(() => {})
+    api.get<typeof models>('/evs/models')
+      .then((r) => setModels([...r].sort((a, b) =>
+        a.provider.localeCompare(b.provider) || a.model_name.localeCompare(b.model_name))))
+      .catch(() => {})
   }, [])
   const providers = Array.from(new Set(models.map((m) => m.provider)))
   const modelsFor = (p: string) => models.filter((m) => m.provider === p)
@@ -475,7 +565,7 @@ function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: 
           {(['spare', 'new'] as const).map((m) => (
             <button key={m} type="button" onClick={() => { setMode(m); setEvId(''); setMsg(null) }}
                     className={'px-2 py-1 rounded ' + (mode === m ? 'bg-brand-500/20 text-white' : 'text-slate-500 hover:text-slate-800')}>
-              {m === 'spare' ? `From spares (${spares.length})` : 'New unit'}
+              {m === 'spare' ? `Idle units (${spares.length})` : 'New unit'}
             </button>
           ))}
         </div>
@@ -483,11 +573,13 @@ function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: 
       <form onSubmit={submit} className="flex flex-wrap gap-2 items-end text-sm">
         {mode === 'spare' ? (
           <label className="block">
-            <span className="block text-xs">Spare EV *</span>
-            <select value={evId} onChange={(e) => setEvId(e.target.value)} className="border rounded px-3 py-1.5 min-w-[220px]">
-              <option value="">{spares.length ? 'Pick a unit…' : 'No spare units'}</option>
+            <span className="block text-xs">EV not in use *</span>
+            <select value={evId} onChange={(e) => setEvId(e.target.value)} className="border rounded px-3 py-1.5 min-w-[260px]">
+              <option value="">{spares.length ? 'Pick a unit…' : 'Every unit is in use'}</option>
               {spares.map((u) => (
-                <option key={u.ev_id} value={u.ev_id}>{u.ev_id} — {u.provider} {u.model} · ₹{fmt(u.weekly_rate)}/wk</option>
+                <option key={u.ev_id} value={u.ev_id}>
+                  {u.ev_id} — {u.provider} {u.model} · ₹{fmt(u.weekly_rate)}/wk{u.status === 'returned' ? ' (returned)' : ''}
+                </option>
               ))}
             </select>
           </label>
@@ -523,7 +615,7 @@ function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: 
         {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
       </form>
       <p className="text-xs text-slate-500 mt-2">
-        Rent starts the day after the handover date. A backdated handover gets a back-rent prompt for admins.
+        Any unit nobody currently holds is listed — spares and returned ones alike. Rent starts the day after the handover date; a backdated handover gets a back-rent prompt for admins.
       </p>
     </div>
   )

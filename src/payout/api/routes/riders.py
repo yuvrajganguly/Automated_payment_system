@@ -606,6 +606,26 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                     f"Use 'Link Riders' to merge if this is the same person, "
                     f"or add anyway to create a separate rider with this name.",
                 )
+        # Optional identity numbers ride along; validated before anything is written.
+        from payout.domain.identity import normalize_aadhaar, normalize_pan
+
+        try:
+            aadhaar = normalize_aadhaar(body.aadhaar_no)
+            pan = normalize_pan(body.pan_no)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        for col, val, label in (("aadhaar_no", aadhaar, "Aadhaar"), ("pan_no", pan, "PAN")):
+            if not val:
+                continue
+            other = conn.execute(
+                f"SELECT person_id, display_name FROM person_registry WHERE {col}=?", (val,)
+            ).fetchone()
+            if other and other["person_id"] != body.person_id:
+                raise HTTPException(
+                    409,
+                    f"That {label} is already on #{other['person_id']} {other['display_name']}. "
+                    "Same person? Add them to this company from their profile instead.",
+                )
         _, rider_id, person_id = _insert_rider_into_db(
             conn,
             rider_id=body.rider_id,
@@ -617,6 +637,12 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             ifsc=body.ifsc,
             person_id=body.person_id,
         )
+        if aadhaar or pan:
+            conn.execute(
+                "UPDATE person_registry SET aadhaar_no=COALESCE(?, aadhaar_no), "
+                "pan_no=COALESCE(?, pan_no) WHERE person_id=?",
+                (aadhaar, pan, person_id),
+            )
         record_activity(
             conn,
             user,

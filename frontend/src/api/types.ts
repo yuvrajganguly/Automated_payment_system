@@ -125,6 +125,8 @@ export interface PersonOut {
   display_name: string
   deduction_company: string | null
   deduction_rider_id: string | null
+  aadhaar_no: string | null
+  pan_no: string | null
   /** null for recruiters — they never see money */
   current_balance: number | null
   arrears_outstanding: number | null

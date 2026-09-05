@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from payout.api.auth import get_current_user, require_admin
-from payout.api.schemas import EvSummary, LinkRidersIn, PersonOut, RiderOut, SplitPersonIn
+from payout.api.auth import get_current_user, require_admin, require_recruiter
+from payout.api.schemas import (
+    EvSummary,
+    IdentityIn,
+    LinkRidersIn,
+    PersonOut,
+    RiderOut,
+    SplitPersonIn,
+)
 from payout.db import get_connection
 from payout.db.references import drop_person_singletons
 from payout.domain.activity import record_activity
@@ -25,6 +32,7 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
     with get_connection() as conn:
         pr = conn.execute(
             "SELECT pr.person_id, pr.display_name, pr.deduction_company, pr.deduction_rider_id, "
+            "       pr.aadhaar_no, pr.pan_no, "
             "       COALESCE(b.current_balance, 0)  AS current_balance, "
             "       COALESCE(ea.outstanding, 0)     AS arrears_outstanding "
             "FROM person_registry pr "
@@ -104,6 +112,8 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
         display_name=pr["display_name"],
         deduction_company=pr["deduction_company"],
         deduction_rider_id=pr["deduction_rider_id"],
+        aadhaar_no=pr["aadhaar_no"],
+        pan_no=pr["pan_no"],
         current_balance=pr["current_balance"],
         arrears_outstanding=pr["arrears_outstanding"],
         riders=riders,
@@ -435,6 +445,69 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
         "from_person_id": secondary,
         "placeholders_retired": retired,
     }
+
+
+@router.patch("/{person_id}/identity")
+def set_identity(person_id: int, body: IdentityIn, user: dict = Depends(require_recruiter)) -> dict:
+    """Set or clear a person's Aadhaar / PAN numbers (admins and recruiters).
+    A number already on another person is refused with that person named —
+    it is the surest sign of a duplicate rider."""
+    from payout.domain.activity import record_activity
+    from payout.domain.identity import normalize_aadhaar, normalize_pan
+
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, "Nothing to change")
+    try:
+        aadhaar = normalize_aadhaar(fields["aadhaar_no"]) if "aadhaar_no" in fields else None
+        pan = normalize_pan(fields["pan_no"]) if "pan_no" in fields else None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    with get_connection() as conn:
+        cur = conn.execute(
+            "SELECT display_name, aadhaar_no, pan_no FROM person_registry WHERE person_id=?",
+            (person_id,),
+        ).fetchone()
+        if not cur:
+            raise HTTPException(404, "Person not found")
+        for col, val, label in (("aadhaar_no", aadhaar, "Aadhaar"), ("pan_no", pan, "PAN")):
+            if col not in fields or not val:
+                continue
+            other = conn.execute(
+                f"SELECT person_id, display_name FROM person_registry "
+                f"WHERE {col}=? AND person_id<>?",
+                (val, person_id),
+            ).fetchone()
+            if other:
+                raise HTTPException(
+                    409,
+                    f"That {label} is already on #{other['person_id']} {other['display_name']}. "
+                    "Same person? Use Link Riders.",
+                )
+        changes = {}
+        if "aadhaar_no" in fields:
+            conn.execute(
+                "UPDATE person_registry SET aadhaar_no=? WHERE person_id=?", (aadhaar, person_id)
+            )
+            changes["aadhaar_no"] = {"from": cur["aadhaar_no"], "to": aadhaar}
+        if "pan_no" in fields:
+            conn.execute("UPDATE person_registry SET pan_no=? WHERE person_id=?", (pan, person_id))
+            changes["pan_no"] = {"from": cur["pan_no"], "to": pan}
+        record_activity(
+            conn,
+            user,
+            "person.identity",
+            entity_type="person",
+            entity_id=person_id,
+            label=cur["display_name"],
+            person_id=person_id,
+            details=changes,
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT aadhaar_no, pan_no FROM person_registry WHERE person_id=?", (person_id,)
+        ).fetchone()
+    return {"person_id": person_id, "aadhaar_no": row["aadhaar_no"], "pan_no": row["pan_no"]}
 
 
 @router.post("/{person_id}/rent-meter")

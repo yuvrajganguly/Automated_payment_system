@@ -56,6 +56,16 @@ class RiderIn(BaseModel):
     # operator has seen the warning and wants a separate person anyway
     # (two "Amit Naskar"s). A matching bank account is never bypassed.
     allow_duplicate_name: bool = False
+    # Optional identity numbers, stored on the person.
+    aadhaar_no: str | None = None
+    pan_no: str | None = None
+
+
+class IdentityIn(BaseModel):
+    """PATCH /persons/{id}/identity — blank clears a field; omit to keep it."""
+
+    aadhaar_no: str | None = None
+    pan_no: str | None = None
 
 
 class RiderOut(BaseModel):
@@ -113,6 +123,8 @@ class PersonOut(BaseModel):
     display_name: str
     deduction_company: str | None = None
     deduction_rider_id: str | None = None
+    aadhaar_no: str | None = None  # 12 digits
+    pan_no: str | None = None  # AAAAA9999A
     # None for recruiters — they never see money.
     current_balance: float | None = None
     arrears_outstanding: float | None = None

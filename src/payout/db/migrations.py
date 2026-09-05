@@ -302,6 +302,13 @@ def _0011_collapse_raft_warrior_models(conn: Any) -> None:
         conn.execute("DELETE FROM ev_models WHERE model_id=?", (row["model_id"],))
 
 
+def _0012_person_identity_numbers(conn: Any) -> None:
+    """Aadhaar and PAN numbers on the person (numbers only — scans were
+    judged too messy to keep; 2026-09-05)."""
+    add_column(conn, "person_registry", "aadhaar_no", "TEXT")
+    add_column(conn, "person_registry", "pan_no", "TEXT")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -314,6 +321,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0009_suspected_return_dismissals", _0009_suspected_return_dismissals),
     ("0010_users_phone", _0010_users_phone),
     ("0011_collapse_raft_warrior_models", _0011_collapse_raft_warrior_models),
+    ("0012_person_identity_numbers", _0012_person_identity_numbers),
 ]
 
 _TRACKING_DDL = (

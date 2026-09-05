@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS person_registry (
     kyc_no             TEXT UNIQUE,
     deduction_company  TEXT,
     deduction_rider_id TEXT,
+    aadhaar_no         TEXT,            -- 12 digits, no spaces (numbers only; no scans)
+    pan_no             TEXT,            -- AAAAA9999A
     created_at         TEXT DEFAULT (datetime('now'))
 );
 
