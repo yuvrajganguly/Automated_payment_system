@@ -622,17 +622,30 @@ def money_story_weeks(
     companies: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    all_time: bool = False,
     _: dict = Depends(get_current_user),
 ) -> dict:
     """Week-by-week tally per company: one row per (company, cycle) whose
     window overlaps the selected dates. Beyond the usual flow it carries what
     the operator reconciles a week on: *prior dues collected* (DUES_CLEARED —
     old debt recovered out of this payout) and *carried forward* (the general
-    dues riders still owe after this cycle, from DUES_CARRY balance_after)."""
-    wf, wt = _window(date_from, date_to)
-    days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
+    dues riders still owe after this cycle, from DUES_CARRY balance_after).
+
+    ``all_time=1`` ignores the dates and returns every cycle ever processed —
+    the company page's complete history."""
     cos = _split_companies(companies)
     with get_connection() as conn:
+        if all_time:
+            co_sql, co_args = _co_clause(cos, "company")
+            first = conn.execute(
+                f"SELECT MIN(cycle_start) FROM transactions WHERE company <> ''{co_sql}", co_args
+            ).fetchone()[0]
+            wf, wt = first or date.today().isoformat(), date.today().isoformat()
+            if wf > wt:
+                wt = wf
+        else:
+            wf, wt = _window(date_from, date_to)
+        days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
         co_sql, co_args = _co_clause(cos, "t.company")
         rows = conn.execute(
             "SELECT t.company, t.cycle_start, t.cycle_end, "
@@ -674,8 +687,61 @@ def money_story_weeks(
         }
         for r in out:
             r["cod_held"] = cod.get((r["company"], r["cycle_start"], r["cycle_end"]), 0)
-            r["partial"] = r["cycle_start"] < wf or r["cycle_end"] > wt
-    return {"window": {"from": wf, "to": wt, "days": days}, "rows": out}
+            r["partial"] = (not all_time) and (r["cycle_start"] < wf or r["cycle_end"] > wt)
+    return {"window": {"from": wf, "to": wt, "days": days, "all_time": all_time}, "rows": out}
+
+
+@router.get("/story/company/{company_name}")
+def company_profile(company_name: str, _: dict = Depends(get_current_user)) -> dict:
+    """Header for the company page: the company row, lifetime totals across
+    every cycle, active rider ids there, and the live outstanding position."""
+    with get_connection() as conn:
+        co = conn.execute(
+            "SELECT company_name, orders_column, rider_ids_shared_with, is_active "
+            "FROM companies WHERE company_name=?",
+            (company_name,),
+        ).fetchone()
+        if not co:
+            raise HTTPException(404, f"Unknown company '{company_name}'")
+        life = conn.execute(
+            "SELECT COUNT(DISTINCT CASE WHEN event_type='PAYOUT' THEN person_id END) AS riders, "
+            " COUNT(DISTINCT cycle_start || '/' || cycle_end) AS cycles, "
+            " MIN(cycle_start) AS first_cycle, MAX(cycle_end) AS last_cycle, "
+            " SUM(CASE WHEN event_type='PAYOUT' THEN amount ELSE 0 END) AS gross_payout, "
+            " SUM(CASE WHEN event_type='RELEASE' THEN -amount ELSE 0 END) AS released, "
+            " SUM(CASE WHEN event_type='RENT_COLLECTED' THEN amount ELSE 0 END) AS rent_collected, "
+            " SUM(CASE WHEN event_type='RENT_MISSED' THEN -amount ELSE 0 END) AS rent_missed, "
+            " SUM(CASE WHEN event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+            "     THEN amount ELSE 0 END) AS arrears_recovered, "
+            " SUM(CASE WHEN event_type='DUES_CLEARED' THEN amount ELSE 0 END) "
+            "   AS prior_dues_collected, "
+            " SUM(CASE WHEN event_type='RENT_REVERSAL' THEN amount ELSE 0 END) AS written_off "
+            "FROM transactions WHERE company=?",
+            (company_name,),
+        ).fetchone()
+        active = conn.execute(
+            "SELECT COUNT(*) FROM rider_master WHERE company=? AND is_active=1", (company_name,)
+        ).fetchone()[0]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM rider_master WHERE company=?", (company_name,)
+        ).fetchone()[0]
+        out = dict(co)
+        out.update(dict(life))
+        for k in (
+            "gross_payout",
+            "released",
+            "rent_collected",
+            "rent_missed",
+            "arrears_recovered",
+            "prior_dues_collected",
+            "written_off",
+        ):
+            out[k] = int(out[k] or 0)
+        out["riders"] = int(out["riders"] or 0)
+        out["cycles"] = int(out["cycles"] or 0)
+        out["active_riders"] = int(active)
+        out["rider_ids"] = int(total)
+    return out
 
 
 @router.get("/story/by")

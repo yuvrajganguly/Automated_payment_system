@@ -38,6 +38,7 @@ const InactivePage = page(() => import('./pages/InactivePage'), 'InactivePage')
 const CodPage = page(() => import('./pages/CodPage'), 'CodPage')
 const PaymentsPage = page(() => import('./pages/PaymentsPage'), 'PaymentsPage')
 const DashboardPage = page(() => import('./pages/DashboardPage'), 'DashboardPage')
+const CompanyPage = page(() => import('./pages/CompanyPage'), 'CompanyPage')
 const CorrectionsPage = page(() => import('./pages/CorrectionsPage'), 'CorrectionsPage')
 const EvRentPage = page(() => import('./pages/EvRentPage'), 'EvRentPage')
 const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage')
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/cod" element={<CodPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/companies/:name" element={<CompanyPage />} />
             <Route path="/corrections" element={<CorrectionsPage />} />
             <Route path="/ev-rent" element={<EvRentPage />} />
             <Route path="/settings" element={<SettingsPage />} />

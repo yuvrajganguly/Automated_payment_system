@@ -35,6 +35,7 @@ export const WORKSPACES: Workspace[] = [
     key: 'analytics',
     label: 'Analytics',
     pages: [{ to: '/dashboard', label: 'Dashboard' }],
+    extra: ['/companies'],
     noRecruiter: true,
   },
   {

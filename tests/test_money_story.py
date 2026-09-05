@@ -215,3 +215,38 @@ def test_story_weeks_tally_with_prior_dues_and_carry_forward(db, client):
         "rows"
     ]
     assert [r["cycle_start"] for r in rows] == ["2026-06-08"] and rows[0]["partial"] is True
+
+
+def test_company_page_history_and_header(db, client):
+    """The company page asks for every cycle (all_time) and a lifetime header."""
+    pid = make_person(db, "Hist Rider", balance=0, arrears=0)
+    make_rider(db, pid, "H1", "Blitz", "Hist Rider")
+    make_ev(db, "EV-H", provider="Raft", model="Regular")
+    assign(db, pid, "EV-H", charged_through="2026-05-31")
+    db.execute(
+        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='H1' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("H1", 5000)]), commit=True)
+    process_cycle("Blitz", date(2026, 7, 6), date(2026, 7, 12), _file([("H1", 4000)]), commit=True)
+
+    # A narrow window sees one cycle; all_time sees both, none marked partial.
+    narrow = client.get("/api/dashboard/story/weeks?date_from=2026-07-01&date_to=2026-07-14")
+    assert [r["cycle_start"] for r in narrow.json()["rows"]] == ["2026-07-06"]
+    body = client.get("/api/dashboard/story/weeks?all_time=1&companies=Blitz").json()
+    assert [r["cycle_start"] for r in body["rows"]] == ["2026-07-06", "2026-06-01"]
+    assert all(r["partial"] is False for r in body["rows"])
+    assert body["window"]["all_time"] is True and body["window"]["from"] == "2026-06-01"
+
+    head = client.get("/api/dashboard/story/company/Blitz").json()
+    assert head["company_name"] == "Blitz"
+    assert head["cycles"] == 2 and head["riders"] == 1
+    assert head["first_cycle"] == "2026-06-01" and head["last_cycle"] == "2026-07-12"
+    assert head["gross_payout"] == 9000.0
+    # Lifetime totals are the sum of the week rows (the July cycle also
+    # carries the catch-up rent for the gap, so it is more than two weeks).
+    assert head["rent_collected"] == sum(r["rent_collected"] for r in body["rows"]) >= 2 * WEEK_R
+    assert head["active_riders"] >= 1
+    assert client.get("/api/dashboard/story/company/Nope").status_code == 404

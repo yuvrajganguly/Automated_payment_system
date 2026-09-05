@@ -11,7 +11,7 @@
  * Tabs: Story · Companies · EVs · Riders — the same numbers grouped by who
  * / what / where, as sortable tables with inline proportion bars.
  */
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUrlList, useUrlString } from '../state/useUrlState'
 import { useApi } from '../hooks/useApi'
@@ -81,24 +81,6 @@ interface CompanyRow {
   outstanding: number
   dues: number
   silent?: number
-}
-interface WeekRow {
-  company: string
-  cycle_start: string
-  cycle_end: string
-  riders: number
-  gross_payout: number
-  released: number
-  rent_charged: number
-  rent_collected: number
-  rent_missed: number
-  arrears_recovered: number
-  prior_dues_collected: number
-  dues_added: number
-  carried_forward: number
-  written_off: number
-  cod_held: number
-  partial: boolean
 }
 interface RiderRow {
   person_id: number
@@ -687,6 +669,7 @@ function CompaniesTab({ suffix }: { suffix: string }) {
       <p className="text-sm text-slate-500 mb-3">
         Each company over the window: what they sent, what riders got, and how their rent behaved.
         A payout cycle counts as soon as any of its days falls in the window — whenever the file was processed.
+        Click a company for its complete week-by-week history.
         <span className="text-slate-400"> "Owed now" is live (not window-scoped), active riders only.</span>
       </p>
       <TableShell>
@@ -710,7 +693,13 @@ function CompaniesTab({ suffix }: { suffix: string }) {
             const charged = r.rent_collected + r.rent_missed
             return (
               <tr key={r.company} className="border-t border-edge-soft hover:bg-white/[0.02]">
-                <td className={cellL + ' font-medium text-slate-900'}>{r.company}</td>
+                <td className={cellL + ' font-medium'}>
+                  <Link to={'/companies/' + encodeURIComponent(r.company)}
+                        className="text-slate-900 hover:text-brand-300 underline decoration-dotted underline-offset-2"
+                        title={'Complete history for ' + r.company}>
+                    {r.company}
+                  </Link>
+                </td>
                 <td className={cell}>{r.riders}</td>
                 <td className={cell}>{r0(r.gross_payout)}</td>
                 <td className={cell}>{r0(r.released)}</td>
@@ -747,89 +736,7 @@ function CompaniesTab({ suffix }: { suffix: string }) {
         </tfoot>
       </TableShell>
 
-      <WeekByWeek suffix={suffix} />
     </>
-  )
-}
-
-/** One row per company per payout cycle in the window — the operator's
- *  weekly reconciliation: what came in, what the rent did, old dues
- *  recovered out of this payout, and what riders still carry out of it. */
-function WeekByWeek({ suffix }: { suffix: string }) {
-  const { data, loading, error } = useApi<{ rows: WeekRow[] }>('/dashboard/story/weeks' + suffix)
-  if (loading && !data) return <div className="mt-8"><SkeletonTable cols={11} /></div>
-  if (error) return <p className="text-red-400 mt-6">{error}</p>
-  const rows = data?.rows ?? []
-  // Group by company, cycles newest first inside each.
-  const byCo = new Map<string, WeekRow[]>()
-  for (const r of rows) byCo.set(r.company, [...(byCo.get(r.company) ?? []), r])
-  const sum = (xs: WeekRow[], k: keyof WeekRow) => xs.reduce((a, r) => a + (r[k] as number), 0)
-  return (
-    <div className="mt-8">
-      <h3 className="font-semibold mb-1">Week by week</h3>
-      <p className="text-sm text-slate-500 mb-3">
-        Every payout cycle that touches the window, per company.
-        <span className="text-slate-400"> "Prior dues collected" is old debt recovered out of that payout; "Carried forward" is what riders still owed after it. A dimmed cycle only partly overlaps the window.</span>
-      </p>
-      {rows.length === 0 ? (
-        <p className="text-sm text-slate-500">No payout cycles touch this window.</p>
-      ) : (
-        <TableShell>
-          <thead className="text-left border-b border-edge-soft">
-            <tr>
-              <th className={cellL + ' font-medium text-xs'}>Cycle</th>
-              <th className={cell + ' font-medium text-xs'}>Riders</th>
-              <th className={cell + ' font-medium text-xs'}>Came in</th>
-              <th className={cell + ' font-medium text-xs'}>Rent collected</th>
-              <th className={cell + ' font-medium text-xs'}>Rent missed</th>
-              <th className={cell + ' font-medium text-xs'}>Clawed back</th>
-              <th className={cell + ' font-medium text-xs'}>Prior dues collected</th>
-              <th className={cell + ' font-medium text-xs'}>COD held</th>
-              <th className={cell + ' font-medium text-xs'}>Paid out</th>
-              <th className={cell + ' font-medium text-xs'}>Dues added</th>
-              <th className={cell + ' font-medium text-xs'}>Carried forward</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...byCo.entries()].map(([co, cycles]) => (
-              <Fragment key={co}>
-                <tr className="border-t border-edge bg-white/[0.02]">
-                  <td className={cellL + ' font-semibold text-slate-900'}>{co}</td>
-                  <td className={cell + ' text-slate-500'}>{cycles.length} cycle{cycles.length === 1 ? '' : 's'}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'gross_payout'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'rent_collected'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'rent_missed'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'arrears_recovered'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'prior_dues_collected'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'cod_held'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'released'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(sum(cycles, 'dues_added'))}</td>
-                  <td className={cell + ' font-semibold'}>{r0(cycles[0]?.carried_forward ?? 0)}</td>
-                </tr>
-                {cycles.map((r) => (
-                  <tr key={co + r.cycle_start + r.cycle_end}
-                      className={'border-t border-edge-soft hover:bg-white/[0.02]' + (r.partial ? ' opacity-60' : '')}>
-                    <td className={cellL + ' pl-6 text-slate-600'} title={r.partial ? 'Only part of this cycle is inside the window' : undefined}>
-                      {r.cycle_start} → {r.cycle_end}{r.partial ? ' *' : ''}
-                    </td>
-                    <td className={cell}>{r.riders}</td>
-                    <td className={cell}>{r0(r.gross_payout)}</td>
-                    <td className={cell + ' text-emerald-300'}>{r0(r.rent_collected)}</td>
-                    <td className={cell + (r.rent_missed > 0 ? ' text-red-300' : '')}>{r0(r.rent_missed)}</td>
-                    <td className={cell}>{r0(r.arrears_recovered)}</td>
-                    <td className={cell}>{r0(r.prior_dues_collected)}</td>
-                    <td className={cell}>{r0(r.cod_held)}</td>
-                    <td className={cell}>{r0(r.released)}</td>
-                    <td className={cell + (r.dues_added > 0 ? ' text-amber-300' : '')}>{r0(r.dues_added)}</td>
-                    <td className={cell + (r.carried_forward > 0 ? ' text-amber-300' : '')}>{r0(r.carried_forward)}</td>
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </TableShell>
-      )}
-    </div>
   )
 }
 
