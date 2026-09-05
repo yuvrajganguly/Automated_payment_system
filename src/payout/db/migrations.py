@@ -318,7 +318,9 @@ def _0013_company_payment_model(conn: Any) -> None:
     add_column(conn, "companies", "cadence", "TEXT NOT NULL DEFAULT 'weekly'")
     add_column(conn, "companies", "per_order_rate", "INTEGER")
     add_column(conn, "companies", "notes", "TEXT")
-    conn.execute("UPDATE companies SET cadence='slots' WHERE company_name=\"Spencer's\"")
+    # Parameterised: a double-quoted literal is a string to SQLite but an
+    # identifier to Postgres (CI caught exactly that).
+    conn.execute("UPDATE companies SET cadence='slots' WHERE company_name=?", ("Spencer's",))
 
 
 def _0014_seed_direct_and_per_order_companies(conn: Any) -> None:
