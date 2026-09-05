@@ -67,12 +67,6 @@ services:
       - PAYOUT_SMTP_USER=${PAYOUT_SMTP_USER:-}
       - PAYOUT_SMTP_PASS=${PAYOUT_SMTP_PASS:-}
       - PAYOUT_SMTP_FROM=${PAYOUT_SMTP_FROM:-}
-      # One-time codes on WhatsApp (Meta Cloud API, authentication template).
-      # Leave unset and codes go by email only. See DEPLOY.md "WhatsApp codes".
-      - PAYOUT_WA_TOKEN=${PAYOUT_WA_TOKEN:-}
-      - PAYOUT_WA_PHONE_ID=${PAYOUT_WA_PHONE_ID:-}
-      - PAYOUT_WA_TEMPLATE=${PAYOUT_WA_TEMPLATE:-payout_otp}
-      - PAYOUT_WA_LANG=${PAYOUT_WA_LANG:-en_US}
     volumes:
       - payout_docs:/data/documents
     healthcheck:

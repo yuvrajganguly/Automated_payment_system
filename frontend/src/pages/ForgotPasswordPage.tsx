@@ -8,7 +8,6 @@ type Stage = 'request' | 'reset' | 'done'
 export function ForgotPasswordPage() {
   const navigate = useNavigate()
   const [stage, setStage] = useState<Stage>('request')
-  const [channel, setChannel] = useState<'email' | 'whatsapp'>('email')
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
   const [newPw, setNewPw] = useState('')
@@ -19,8 +18,7 @@ export function ForgotPasswordPage() {
   async function sendOtp(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const j = await api.post<{ message?: string; channel?: string }>('/auth/forgot-password', { email }, { silent401: true })
-      setChannel(j.channel === 'whatsapp' ? 'whatsapp' : 'email')
+      const j = await api.post<{ message?: string }>('/auth/forgot-password', { email }, { silent401: true })
       setMsg({ tone: 'ok', text: j.message ?? 'Code sent. Check your inbox.' })
       setStage('reset')
     } catch (e) {
@@ -46,8 +44,8 @@ export function ForgotPasswordPage() {
       <div className="panel p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold mb-1">Payout System</h1>
         <p className="text-slate-500 text-sm mb-6">
-          {stage === 'request' ? 'Enter your email or phone number and we\'ll send you a 6-digit code — on WhatsApp if your account has a phone, otherwise by email.'
-           : stage === 'reset' ? (channel === 'whatsapp' ? 'Check WhatsApp for the code and set a new password.' : 'Check your email for the code and set a new password.')
+          {stage === 'request' ? 'Enter your email or phone number and we\'ll email you a 6-digit code.'
+           : stage === 'reset' ? 'Check your email for the code and set a new password.'
            : 'Password updated.'}
         </p>
 

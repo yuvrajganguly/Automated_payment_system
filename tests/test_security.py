@@ -120,8 +120,6 @@ def test_every_mutating_route_requires_auth(client):
         "/api/auth/logout",
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
-        "/api/auth/otp/send",
-        "/api/auth/otp/login",
     }
     offenders = []
     for path, methods in app.openapi()["paths"].items():
@@ -190,7 +188,7 @@ def test_demo_mode_is_opt_in(monkeypatch):
 def test_health_reports_demo_flag(client):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "demo": False, "whatsapp": False}
+    assert r.json() == {"status": "ok", "demo": False}
 
 
 # ── sessions follow the database, not the token ──────────────────────────────
@@ -274,82 +272,3 @@ def test_login_is_rate_limited(client):
     r = client.post("/api/auth/login", data={"username": "nobody@t.test", "password": "x"})
     assert r.status_code == 429
     assert "Retry-After" in r.headers
-
-
-def _wa_capture(monkeypatch):
-    """Configure WhatsApp and capture what would be sent."""
-    import payout.api.routes.auth as auth_routes
-
-    monkeypatch.setenv("PAYOUT_WA_TOKEN", "t")
-    monkeypatch.setenv("PAYOUT_WA_PHONE_ID", "p")
-    sent = []
-    monkeypatch.setattr(
-        auth_routes, "send_whatsapp_otp", lambda to, code: sent.append((to, code)) or True
-    )
-    return sent
-
-
-def test_forgot_password_prefers_whatsapp_when_account_has_phone(client, db, monkeypatch):
-    monkeypatch.delenv("PAYOUT_SMTP_HOST", raising=False)
-    monkeypatch.delenv("PAYOUT_DEV_PRINT_EMAIL", raising=False)
-    sent = _wa_capture(monkeypatch)
-    db.execute("UPDATE users SET phone='+919876543210' WHERE email=?", (_USER[0],))
-    db.commit()
-    # By email address, by phone in a loose spelling — both go to WhatsApp.
-    for ident in (_USER[0], "98765 43210"):
-        r = client.post("/api/auth/forgot-password", json={"email": ident})
-        assert r.status_code == 200, r.text
-        assert r.json()["channel"] == "whatsapp"
-    assert [to for to, _ in sent] == ["+919876543210", "+919876543210"]
-    assert all(len(c) == 6 and c.isdigit() for _, c in sent)
-    # Unknown number: same neutral answer, nothing sent.
-    r = client.post("/api/auth/forgot-password", json={"email": "9000000000"})
-    assert r.status_code == 200 and r.json()["channel"] == "whatsapp" and len(sent) == 2
-    # An account WITHOUT a phone, email not configured → clear 503.
-    r = client.post("/api/auth/forgot-password", json={"email": _ADMIN[0]})
-    assert r.status_code == 503
-    # The WhatsApp code resets the password; the phone works as the identifier.
-    code = sent[-1][1]
-    r = client.post(
-        "/api/auth/reset-password",
-        json={"email": "9876543210", "otp": code, "new_password": "Brand-new-pw-9"},
-    )
-    assert r.status_code == 200, r.text
-    assert (
-        client.post(
-            "/api/auth/login", data={"username": _USER[0], "password": "Brand-new-pw-9"}
-        ).status_code
-        == 200
-    )
-
-
-def test_whatsapp_otp_login(client, db, monkeypatch):
-    sent = _wa_capture(monkeypatch)
-    db.execute("UPDATE users SET phone='+919876543210' WHERE email=?", (_USER[0],))
-    db.commit()
-    r = client.post("/api/auth/otp/send", json={"phone": "+91 98765 43210"})
-    assert r.status_code == 200, r.text
-    assert sent and sent[0][0] == "+919876543210"
-    code = sent[0][1]
-    wrong = "000000" if code != "000000" else "111111"
-    r = client.post("/api/auth/otp/login", json={"phone": "9876543210", "otp": wrong})
-    assert r.status_code == 401
-    r = client.post("/api/auth/otp/login", json={"phone": "9876543210", "otp": code})
-    assert r.status_code == 200, r.text
-    assert r.json()["email"] == _USER[0]
-    tok = r.json()["access_token"]
-    me = client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok}).json()
-    assert me["email"] == _USER[0] and me["phone"] == "+919876543210"
-    # Single use.
-    r = client.post("/api/auth/otp/login", json={"phone": "9876543210", "otp": code})
-    assert r.status_code == 400
-    # Unknown number: neutral 200, nothing sent; garbage: 400.
-    assert client.post("/api/auth/otp/send", json={"phone": "9000000000"}).status_code == 200
-    assert len(sent) == 1
-    assert client.post("/api/auth/otp/send", json={"phone": "12"}).status_code == 400
-
-
-def test_otp_send_refuses_without_whatsapp(client, monkeypatch):
-    monkeypatch.delenv("PAYOUT_WA_TOKEN", raising=False)
-    monkeypatch.delenv("PAYOUT_WA_PHONE_ID", raising=False)
-    assert client.post("/api/auth/otp/send", json={"phone": "9876543210"}).status_code == 503

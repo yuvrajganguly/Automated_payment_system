@@ -1,14 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, configureClient } from '../api/client'
-import type { TokenResponse, User } from '../api/types'
+import type { User } from '../api/types'
 
 interface AuthState {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  /** Passwordless: the 6-digit code sent to the phone on WhatsApp. */
-  loginWithOtp: (phone: string, otp: string) => Promise<void>
   logout: () => void
   /** Re-read /auth/me (after a profile change such as the phone number). */
   refresh: () => Promise<void>
@@ -84,13 +82,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeSet(USER_KEY, JSON.stringify(u))
   }
 
-  const loginWithOtp = async (phone: string, otp: string) => {
-    const r = await api.post<TokenResponse>('/auth/otp/login', { phone, otp }, { silent401: true })
-    const u: User = { email: r.email, role: r.role }
-    setUser(u)
-    safeSet(USER_KEY, JSON.stringify(u))
-  }
-
   const logout = () => {
     api.logout().catch(() => {})
     clearSession()
@@ -103,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeSet(USER_KEY, JSON.stringify(u))
   }
 
-  const value = useMemo(() => ({ user, loading, login, loginWithOtp, logout, refresh }), [user, loading])
+  const value = useMemo(() => ({ user, loading, login, logout, refresh }), [user, loading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

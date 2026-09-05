@@ -265,27 +265,6 @@ def cmd_test_email(args) -> None:
     raise SystemExit(0 if ok else 1)
 
 
-def cmd_test_whatsapp(args) -> None:
-    """Send one test code through the WhatsApp Cloud API template."""
-    import logging
-
-    from payout.auth.phone import normalize_phone
-    from payout.notifications import send_whatsapp_otp, whatsapp_configured
-
-    to = normalize_phone(args.to)
-    if not to:
-        raise SystemExit("--to must be a phone number (10 digits or +country code).")
-    if not whatsapp_configured():
-        raise SystemExit(
-            "WhatsApp is not configured. Set PAYOUT_WA_TOKEN and PAYOUT_WA_PHONE_ID "
-            "(optionally PAYOUT_WA_TEMPLATE / PAYOUT_WA_LANG) in deploy/.env, then up -d."
-        )
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    ok = send_whatsapp_otp(to, "123456")
-    print(f"Accepted by Meta for {to} (code 123456)." if ok else "FAILED - see the error above.")
-    raise SystemExit(0 if ok else 1)
-
-
 def cmd_users(args) -> None:
     from payout.db.connection import get_connection
 
@@ -381,8 +360,6 @@ def main() -> None:
     sub.add_parser("users", help="List users and roles")
     pt = sub.add_parser("test-email", help="Send a test email via PAYOUT_SMTP_* settings")
     pt.add_argument("--to", required=True)
-    pw = sub.add_parser("test-whatsapp", help="Send a test code via the WhatsApp Cloud API")
-    pw.add_argument("--to", required=True, help="Phone number, e.g. 98765 43210")
     args = p.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -400,8 +377,6 @@ def main() -> None:
         cmd_users(args)
     elif args.command == "test-email":
         cmd_test_email(args)
-    elif args.command == "test-whatsapp":
-        cmd_test_whatsapp(args)
     else:
         p.print_help()
 
