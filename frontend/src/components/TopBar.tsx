@@ -10,7 +10,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const { user, logout } = useAuth()
   const { pathname, search } = useLocation()
   const navigate = useNavigate()
-  const active = workspaceFor(pathname)
+  const active = workspaceFor(pathname, user?.role)
+  const isAdmin = user?.role === 'admin' || user?.role === 'creator'
+  // Open money requests from recruiters — admins get a count on Money.
+  const reqs = useApi<{ open: number }>(isAdmin ? '/requests/summary' : null, [isAdmin], { silent401: true })
+  const openReqs = reqs.data?.open ?? 0
   const isCreator = user?.role === 'creator'
   // The public demo copy announces itself; the real deployment never sets this.
   const health = useApi<{ status: string; demo: boolean }>('/health', [], { silent401: true })
@@ -62,6 +66,15 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
               }
             >
               {ws.label}
+              {ws.key === 'money' && openReqs > 0 && (
+                <span
+                  title={`${openReqs} open request${openReqs === 1 ? '' : 's'} from recruiters`}
+                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full grid
+                             place-items-center text-[10px] font-bold bg-amber-400 text-slate-900"
+                >
+                  {openReqs}
+                </span>
+              )}
             </button>
           )
         })}
@@ -88,17 +101,19 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         </button>
         <div className="h-5 w-px bg-edge hidden sm:block" />
         <div className="hidden sm:flex items-center gap-2">
-          <span
+          <Link
+            to="/settings"
             className={
               'h-7 w-7 rounded-full grid place-items-center text-[11px] font-bold uppercase ' +
+              'hover:ring-2 transition-shadow ' +
               (isCreator
                 ? 'bg-fuchsia-500/20 text-fuchsia-300 ring-1 ring-fuchsia-400/30'
                 : 'bg-brand-500/20 text-brand-300 ring-1 ring-brand-400/30')
             }
-            title={`${user?.email} · ${user?.role}`}
+            title={`${user?.email} · ${user?.role} — account settings`}
           >
             {(user?.email ?? '?')[0]}
-          </span>
+          </Link>
           <button
             onClick={logout}
             className="text-[11px] text-slate-500 hover:text-slate-800 transition-colors"

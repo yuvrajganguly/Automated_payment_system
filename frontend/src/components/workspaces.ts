@@ -6,6 +6,8 @@ export interface WsPage {
   to: string
   label: string
   end?: boolean
+  /** Shown only to recruiters (their own view of a shared route). */
+  recruiterOnly?: boolean
 }
 
 export interface Workspace {
@@ -41,6 +43,7 @@ export const WORKSPACES: Workspace[] = [
     pages: [
       { to: '/riders', label: 'Riders' },
       { to: '/inactive', label: 'Inactive' },
+      { to: '/requests', label: 'My Requests', recruiterOnly: true },
     ],
     extra: ['/persons'],
   },
@@ -61,6 +64,7 @@ export const WORKSPACES: Workspace[] = [
       { to: '/cod', label: 'COD' },
       { to: '/payments', label: 'Payments' },
       { to: '/transactions', label: 'Transactions' },
+      { to: '/requests', label: 'Requests' },
     ],
     noRecruiter: true,
   },
@@ -76,12 +80,18 @@ export const WORKSPACES: Workspace[] = [
   },
 ]
 
-/** Recruiters see riders and the fleet; '/inactive' is a money view. */
-const RECRUITER_HIDDEN_PAGES = new Set(['/inactive'])
+/** Recruiters see riders and the fleet, never money: '/inactive' and the
+ * rent ledger / provider pages are money views. */
+const RECRUITER_HIDDEN_PAGES = new Set(['/inactive', '/ev-rent'])
+const RECRUITER_HIDDEN_PREFIXES = ['/raft', '/blive']
+/** Routes every role may open regardless of workspace (own account). */
+const ALWAYS_ALLOWED = new Set(['/settings', '/requests'])
 
 /** The workspaces (and pages) a role may use. */
 export function workspacesFor(role: string | undefined): Workspace[] {
-  if (role !== 'recruiter') return WORKSPACES
+  if (role !== 'recruiter') {
+    return WORKSPACES.map((ws) => ({ ...ws, pages: ws.pages.filter((p) => !p.recruiterOnly) }))
+  }
   return WORKSPACES.filter((ws) => !ws.noRecruiter).map((ws) => ({
     ...ws,
     pages: ws.pages.filter((p) => !RECRUITER_HIDDEN_PAGES.has(p.to)),
@@ -96,13 +106,20 @@ export function homeFor(role: string | undefined): string {
 /** May this role open this pathname? */
 export function canVisit(role: string | undefined, pathname: string): boolean {
   if (role !== 'recruiter') return true
+  if (ALWAYS_ALLOWED.has(pathname)) return true
+  if (RECRUITER_HIDDEN_PREFIXES.some((pre) => pathname === pre || pathname.startsWith(pre + '/'))) return false
   const ws = workspaceFor(pathname)
   if (ws.noRecruiter) return false
   return !RECRUITER_HIDDEN_PAGES.has(pathname)
 }
 
-/** Which workspace owns this pathname. */
-export function workspaceFor(pathname: string): Workspace {
+/** Which workspace owns this pathname. ``role`` disambiguates routes that
+ * two workspaces share (/requests: People for recruiters, Money for admins). */
+export function workspaceFor(pathname: string, role?: string): Workspace {
+  if (pathname === '/requests' || pathname.startsWith('/requests/')) {
+    const key = role === 'recruiter' ? 'people' : 'money'
+    return WORKSPACES.find((ws) => ws.key === key) ?? WORKSPACES[0]
+  }
   for (const ws of WORKSPACES) {
     for (const p of ws.pages) {
       if (p.end ? pathname === p.to : pathname === p.to || pathname.startsWith(p.to + '/')) {

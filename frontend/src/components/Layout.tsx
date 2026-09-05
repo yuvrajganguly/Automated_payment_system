@@ -1,3 +1,4 @@
+import { useAuth } from '../auth/AuthContext'
 import { Suspense, useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Spinner } from './Spinner'
@@ -14,13 +15,14 @@ export function Layout() {
   useScrollRestoration()
   useRouteMemory()
   const { pathname, search } = useLocation()
+  const { user } = useAuth()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Workspace memory: switching back to a workspace lands on the exact URL
   // you left it at.
   useEffect(() => {
-    rememberWorkspaceUrl(workspaceFor(pathname).key, pathname + search)
-  }, [pathname, search])
+    rememberWorkspaceUrl(workspaceFor(pathname, user?.role).key, pathname + search)
+  }, [pathname, search, user?.role])
 
   // ⌘K / Ctrl+K opens the palette from anywhere.
   useEffect(() => {

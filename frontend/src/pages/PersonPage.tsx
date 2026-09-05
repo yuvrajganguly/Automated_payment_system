@@ -248,6 +248,8 @@ export function PersonPage() {
       {isAdmin && <SetLastBilledDayCard personId={person.person_id} onPosted={load} />}
       {isAdmin && <AdjustmentForm personId={person.person_id} onPosted={load} />}
       {isAdmin && <WriteOffArrearsCard personId={person.person_id} onPosted={load} />}
+      {user?.role === 'recruiter' && <MoneyRequestCard personId={person.person_id} />}
+      <PersonRequests personId={person.person_id} isAdmin={isAdmin} />
 
       {splitOpen && person && (
         <SplitPersonModal
@@ -373,6 +375,108 @@ function WriteOffArrearsCard({ personId, onPosted }: { personId: number; onPoste
           {msg && <span className="text-xs text-slate-500">{msg}</span>}
         </div>
       </form>
+    </div>
+  )
+}
+
+/** Recruiters cannot post money. They ask, and an admin approves on the
+ *  Requests page — this is the "ask" form. */
+function MoneyRequestCard({ personId }: { personId: number }) {
+  const [direction, setDirection] = useState<'credit' | 'debit'>('credit')
+  const [amount, setAmount] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [tone, setTone] = useState<'ok' | 'err'>('ok')
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const amt = parseFloat(amount)
+      if (!amt || amt <= 0 || isNaN(amt)) throw new Error('Amount must be positive.')
+      if (reason.trim().length < 3) throw new Error('Say why — the admin reads this.')
+      await api.post('/requests', { person_id: personId, direction, amount: amt, reason: reason.trim() })
+      setTone('ok'); setMsg('Sent to the admins. You will see it under My Requests.')
+      setAmount(''); setReason('')
+      window.dispatchEvent(new CustomEvent('money-request-created'))
+    } catch (err) {
+      setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="panel p-4 mt-6 border-l-[3px] border-l-amber-400/80">
+      <h3 className="font-semibold mb-1">Request a credit or deduction</h3>
+      <p className="text-xs text-slate-500 mb-3">
+        You can't change money yourself. Describe what should happen and why; an admin approves or
+        rejects it, and only then does the rider's ledger change.
+      </p>
+      <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
+        <label className="block text-sm">
+          <span className="block text-xs">Type</span>
+          <select value={direction} onChange={(e) => setDirection(e.target.value as 'credit' | 'debit')}
+                  className="border rounded px-3 py-1.5">
+            <option value="credit">Add money (credit)</option>
+            <option value="debit">Deduct money (debit)</option>
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="block text-xs">Amount ₹ *</span>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" step="0.01" min="0"
+                 className="border rounded px-3 py-1.5 w-32" />
+        </label>
+        <label className="block text-sm flex-1 min-w-[220px]">
+          <span className="block text-xs">Why *</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder="e.g. lost charger, recovered from rider in cash"
+                 className="w-full border rounded px-3 py-1.5" />
+        </label>
+        <button type="submit" disabled={busy || !amount || reason.trim().length < 3}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold px-3 py-1.5 rounded disabled:opacity-50">
+          {busy ? 'Sending…' : 'Send request'}
+        </button>
+        {msg && (
+          <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>
+        )}
+      </form>
+    </div>
+  )
+}
+
+/** Requests filed on this rider. Recruiters see their own; admins see all,
+ *  with a link to act on the open ones. */
+function PersonRequests({ personId, isAdmin }: { personId: number; isAdmin: boolean }) {
+  const [rows, setRows] = useState<{ id: number; direction: string; amount: number; reason: string; status: string; created_by: string; created_at: string }[]>([])
+  useEffect(() => {
+    let active = true
+    const load = () =>
+      api.get<typeof rows>('/requests?person_id=' + personId + '&limit=20')
+        .then((r) => { if (active) setRows(r) }).catch(() => {})
+    load()
+    window.addEventListener('money-request-created', load)
+    return () => { active = false; window.removeEventListener('money-request-created', load) }
+  }, [personId])
+  if (!rows.length) return null
+  const open = rows.filter((r) => r.status === 'open').length
+  return (
+    <div className="panel p-4 mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold">Money requests ({rows.length})</h3>
+        {isAdmin && open > 0 && (
+          <Link to="/requests" className="text-xs underline text-brand">{open} open — review</Link>
+        )}
+      </div>
+      <ul className="text-sm divide-y divide-slate-100">
+        {rows.map((r) => (
+          <li key={r.id} className="py-1.5 flex flex-wrap gap-x-3 items-baseline">
+            <span className={r.direction === 'credit' ? 'text-emerald-300' : 'text-rose-300'}>
+              {r.direction === 'credit' ? 'Add' : 'Deduct'} ₹{fmt(r.amount)}
+            </span>
+            <span className="text-slate-500 flex-1">{r.reason}</span>
+            <span className={'pill ' + (r.status === 'open' ? 'bg-amber-400/15 text-amber-200' : r.status === 'approved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300')}>{r.status}</span>
+            <span className="text-xs text-slate-400">{r.created_by} · {r.created_at}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

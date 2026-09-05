@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from payout.api.auth import get_current_user, require_recruiter
+from payout.api.auth import get_current_user, require_admin, require_recruiter
 from payout.db import get_connection
 from payout.documents import (
     ALLOWED_CONTENT_TYPES,
@@ -156,8 +156,9 @@ def download_document(doc_id: int, _: dict = Depends(get_current_user)) -> Respo
 
 
 @router.delete("/{doc_id}")
-def delete_document(doc_id: int, user: dict = Depends(require_recruiter)) -> dict:
-    """Admins may delete any document; a recruiter only what they uploaded."""
+def delete_document(doc_id: int, user: dict = Depends(require_admin)) -> dict:
+    """Admins only. Recruiters edit but never delete (2026-09-05 rule): a
+    wrong upload is replaced by uploading the right one and asking an admin."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT person_id, doc_type, filename, storage_key, uploaded_by "
@@ -166,8 +167,6 @@ def delete_document(doc_id: int, user: dict = Depends(require_recruiter)) -> dic
         ).fetchone()
         if not row:
             raise HTTPException(404, "Document not found")
-        if user["role"] == "recruiter" and row["uploaded_by"] != user["email"]:
-            raise HTTPException(403, "You can only delete documents you uploaded")
         conn.execute("DELETE FROM rider_documents WHERE id=?", (doc_id,))
         record_activity(
             conn,

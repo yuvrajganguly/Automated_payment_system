@@ -9,7 +9,7 @@ import { workspaceFor, workspacesFor } from './workspaces'
 export function SubNav() {
   const { pathname, search } = useLocation()
   const { user } = useAuth()
-  const ws = workspaceFor(pathname)
+  const ws = workspaceFor(pathname, user?.role)
   const railRef = useRef<HTMLElement>(null)
   const [bar, setBar] = useState<{ left: number; width: number } | null>(null)
 

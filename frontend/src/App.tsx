@@ -41,6 +41,7 @@ const DashboardPage = page(() => import('./pages/DashboardPage'), 'DashboardPage
 const CorrectionsPage = page(() => import('./pages/CorrectionsPage'), 'CorrectionsPage')
 const EvRentPage = page(() => import('./pages/EvRentPage'), 'EvRentPage')
 const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage')
+const RequestsPage = page(() => import('./pages/RequestsPage'), 'RequestsPage')
 const UsersPage = page(() => import('./pages/UsersPage'), 'UsersPage')
 const SystemPage = page(() => import('./pages/SystemPage'), 'SystemPage')
 const RaftPage = page(() => import('./pages/RaftPage'), 'RaftPage')
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/corrections" element={<CorrectionsPage />} />
             <Route path="/ev-rent" element={<EvRentPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/requests" element={<RequestsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/system" element={<SystemPage />} />
             <Route path="/raft"  element={<RaftPage />} />

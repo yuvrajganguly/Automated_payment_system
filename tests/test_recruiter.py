@@ -200,10 +200,12 @@ def test_document_upload_list_download_delete(db, client, tmp_path):
     assert r.status_code == 200 and r.content == b"%PDF-1.4 fake"
     assert r.headers["content-type"].startswith("application/pdf")
 
-    # another recruiter may not delete it; the uploader may
+    # recruiters edit but never delete — not even their own upload; admins do
     r = client.delete(f"/api/documents/{doc['id']}", headers=_login(client, _RECRUITER2))
     assert r.status_code == 403
     r = client.delete(f"/api/documents/{doc['id']}", headers=h)
+    assert r.status_code == 403
+    r = client.delete(f"/api/documents/{doc['id']}", headers=_login(client, _ADMIN))
     assert r.status_code == 200
     assert client.get(f"/api/persons/{pid}/documents", headers=h).json() == []
     assert list((tmp_path / "docs").rglob("*.pdf")) == []
