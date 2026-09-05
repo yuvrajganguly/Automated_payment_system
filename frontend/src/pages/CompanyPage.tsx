@@ -17,6 +17,10 @@ interface Header {
   orders_column: string | null
   rider_ids_shared_with: string | null
   is_active: number
+  payment_model: 'payout_file' | 'per_order' | 'direct' | null
+  cadence: string | null
+  per_order_rate: number | null
+  notes: string | null
   riders: number
   cycles: number
   first_cycle: string | null
@@ -69,7 +73,10 @@ export function CompanyPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <Link to="/dashboard?tab=companies" className="text-sm text-brand underline">← Back to Companies</Link>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <Link to="/dashboard?tab=companies" className="text-brand underline">← Back to Companies</Link>
+        <Link to="/companies" className="text-slate-500 hover:text-brand-300">Manage companies</Link>
+      </div>
       <h1 className="text-2xl font-bold mt-2 mb-1">
         {h.company_name}
         {!h.is_active && <span className="ml-2 text-xs bg-slate-500/20 text-slate-500 px-2 py-0.5 rounded align-middle">inactive</span>}
@@ -78,6 +85,7 @@ export function CompanyPage() {
         {h.cycles} payout cycle{h.cycles === 1 ? '' : 's'} · {span} · {h.riders} rider{h.riders === 1 ? '' : 's'} ever paid
         · {h.active_riders} of {h.rider_ids} rider id{h.rider_ids === 1 ? '' : 's'} active
         {h.rider_ids_shared_with && <> · shares rider ids with {h.rider_ids_shared_with}</>}
+        {h.notes && <span className="block text-slate-400 mt-0.5">{h.notes}</span>}
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
@@ -90,7 +98,13 @@ export function CompanyPage() {
         <Stat label="Clawed back" value={r0(h.arrears_recovered)} hint="rent arrears recovered later" />
         <Stat label="Prior dues collected" value={r0(h.prior_dues_collected)} hint="old debt recovered from payouts" />
         <Stat label="Written off" value={r0(h.written_off)} hint="rent reversed / waived" />
-        <Stat label="Orders column" value={h.orders_column || '—'} hint="as read from their file" small />
+        {h.payment_model === 'per_order' ? (
+          <Stat label="How they pay" value={`₹${h.per_order_rate ?? 0} / order, paid by us`} hint="order counts typed on Process Payout" small />
+        ) : h.payment_model === 'direct' ? (
+          <Stat label="How they pay" value="Riders paid directly" hint="roster only — nothing to process" small />
+        ) : (
+          <Stat label="Orders column" value={h.orders_column || '—'} hint="as read from their file" small />
+        )}
       </div>
 
       <h2 className="font-semibold mb-1">Week by week</h2>

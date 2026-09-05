@@ -222,7 +222,16 @@ CREATE TABLE IF NOT EXISTS companies (
     -- Name of another company whose rider IDs this company reuses (Nykaa pays
     -- Blitz riders under their Blitz IDs). An unknown rider_id in this
     -- company's file that exists under that company is linked automatically.
-    rider_ids_shared_with TEXT
+    rider_ids_shared_with TEXT,
+    -- How the company pays (2026-09):
+    --   payout_file : they send a payout file; we parse it, deduct rent, release
+    --   per_order   : no file — the office counts orders and pays per_order_rate
+    --   direct      : they pay riders themselves; we only keep the roster
+    payment_model      TEXT NOT NULL DEFAULT 'payout_file',
+    -- weekly | monthly | slots (Spencer's 1-7 / 8-14 / 15-21 / 22-end)
+    cadence            TEXT NOT NULL DEFAULT 'weekly',
+    per_order_rate     INTEGER,            -- paise per order (per_order only)
+    notes              TEXT
 );
 
 -- ── users ───────────────────────────────────────────────────────────────────

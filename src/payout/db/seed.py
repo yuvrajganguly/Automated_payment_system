@@ -103,8 +103,74 @@ COMPANIES: list[dict] = [
         "hold_amount_column": "AMOUNT",
         "hold_status_column": None,
         "is_active": 1,
+        "cadence": "slots",
+    },
+    # ── Companies without a payout file (2026-09) ──────────────────────────
+    # Zomato and Flipkart pay riders themselves: roster only, nothing to
+    # process. Shadowfax sends no file either — the office reads each rider's
+    # order count off the Shadowfax dashboard and we pay ₹15 an order.
+    {
+        "company_name": "Zomato",
+        "parser_type": "none",
+        "payout_sheet": None,
+        "rider_id_column": "rider_id",
+        "payout_column": "payout",
+        "orders_column": "orders",
+        "has_hold_sheet": 0,
+        "hold_style": None,
+        "hold_sheet": None,
+        "hold_key_column": None,
+        "hold_amount_column": None,
+        "hold_status_column": None,
+        "is_active": 1,
+        "payment_model": "direct",
+        "notes": "Pays riders directly. Roster only — no payout file.",
+    },
+    {
+        "company_name": "Shadowfax",
+        "parser_type": "orders",
+        "payout_sheet": None,
+        "rider_id_column": "rider_id",
+        "payout_column": "payout",
+        "orders_column": "orders",
+        "has_hold_sheet": 0,
+        "hold_style": None,
+        "hold_sheet": None,
+        "hold_key_column": None,
+        "hold_amount_column": None,
+        "hold_status_column": None,
+        "is_active": 1,
+        "payment_model": "per_order",
+        "per_order_rate": 1500,
+        "notes": "No payout file. Order counts come from the Shadowfax dashboard; "
+        "₹15 per order paid by us.",
+    },
+    {
+        "company_name": "Flipkart",
+        "parser_type": "none",
+        "payout_sheet": None,
+        "rider_id_column": "rider_id",
+        "payout_column": "payout",
+        "orders_column": "orders",
+        "has_hold_sheet": 0,
+        "hold_style": None,
+        "hold_sheet": None,
+        "hold_key_column": None,
+        "hold_amount_column": None,
+        "hold_status_column": None,
+        "is_active": 1,
+        "payment_model": "direct",
+        "notes": "Salary based — details not settled yet; assumed to pay riders directly.",
     },
 ]
+
+_COMPANY_DEFAULTS = {
+    "rider_ids_shared_with": None,
+    "payment_model": "payout_file",
+    "cadence": "weekly",
+    "per_order_rate": None,
+    "notes": None,
+}
 
 
 def seed_ev_models(conn: sqlite3.Connection) -> None:
@@ -121,14 +187,16 @@ def seed_companies(conn: sqlite3.Connection) -> None:
             (company_name, parser_type, payout_sheet, rider_id_column,
              payout_column, orders_column, has_hold_sheet, hold_style,
              hold_sheet, hold_key_column, hold_amount_column,
-             hold_status_column, is_active, rider_ids_shared_with)
+             hold_status_column, is_active, rider_ids_shared_with,
+             payment_model, cadence, per_order_rate, notes)
         VALUES
             (:company_name, :parser_type, :payout_sheet, :rider_id_column,
              :payout_column, :orders_column, :has_hold_sheet, :hold_style,
              :hold_sheet, :hold_key_column, :hold_amount_column,
-             :hold_status_column, :is_active, :rider_ids_shared_with)
+             :hold_status_column, :is_active, :rider_ids_shared_with,
+             :payment_model, :cadence, :per_order_rate, :notes)
         """,
-        [{"rider_ids_shared_with": None, **c} for c in COMPANIES],
+        [{**_COMPANY_DEFAULTS, **c} for c in COMPANIES],
     )
 
 

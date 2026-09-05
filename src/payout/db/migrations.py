@@ -309,6 +309,52 @@ def _0012_person_identity_numbers(conn: Any) -> None:
     add_column(conn, "person_registry", "pan_no", "TEXT")
 
 
+def _0013_company_payment_model(conn: Any) -> None:
+    """How each company pays, so the office can onboard a company without a
+    parser (2026-09-05): ``payment_model`` payout_file | per_order | direct,
+    ``cadence`` weekly | monthly | slots, ``per_order_rate`` (paise), ``notes``.
+    Spencer's is the one slots company; everything existing sends a file."""
+    add_column(conn, "companies", "payment_model", "TEXT NOT NULL DEFAULT 'payout_file'")
+    add_column(conn, "companies", "cadence", "TEXT NOT NULL DEFAULT 'weekly'")
+    add_column(conn, "companies", "per_order_rate", "INTEGER")
+    add_column(conn, "companies", "notes", "TEXT")
+    conn.execute("UPDATE companies SET cadence='slots' WHERE company_name=\"Spencer's\"")
+
+
+def _0014_seed_direct_and_per_order_companies(conn: Any) -> None:
+    """Zomato and Flipkart pay riders directly; Shadowfax has no file — the
+    office reads the order count off their dashboard and pays ₹15 an order.
+    Only inserted when the name is absent, so a row edited in the UI stays."""
+    rows = [
+        ("Zomato", "direct", None, "Pays riders directly. Roster only — no payout file."),
+        (
+            "Shadowfax",
+            "per_order",
+            1500,
+            "No payout file. Order counts come from the Shadowfax dashboard; "
+            "₹15 per order paid by us.",
+        ),
+        (
+            "Flipkart",
+            "direct",
+            None,
+            "Salary based — details not settled yet; assumed to pay riders directly.",
+        ),
+    ]
+    for name, model, rate, note in rows:
+        if conn.execute(
+            "SELECT 1 FROM companies WHERE LOWER(company_name)=LOWER(?)", (name,)
+        ).fetchone():
+            continue
+        conn.execute(
+            "INSERT INTO companies (company_name, parser_type, payout_sheet, rider_id_column, "
+            " payout_column, orders_column, has_hold_sheet, is_active, payment_model, cadence, "
+            " per_order_rate, notes) "
+            "VALUES (?, ?, NULL, 'rider_id', 'payout', 'orders', 0, 1, ?, 'weekly', ?, ?)",
+            (name, "none" if model == "direct" else "orders", model, rate, note),
+        )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -322,6 +368,8 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0010_users_phone", _0010_users_phone),
     ("0011_collapse_raft_warrior_models", _0011_collapse_raft_warrior_models),
     ("0012_person_identity_numbers", _0012_person_identity_numbers),
+    ("0013_company_payment_model", _0013_company_payment_model),
+    ("0014_seed_direct_and_per_order_companies", _0014_seed_direct_and_per_order_companies),
 ]
 
 _TRACKING_DDL = (

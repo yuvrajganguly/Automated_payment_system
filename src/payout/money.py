@@ -73,6 +73,7 @@ MONEY_KEYS = frozenset(
         "current_balance",
         "pending_xc_rent",
         "weekly_rate",
+        "per_order_rate",
         "daily_rate",
         "daily_cost",
         "provider_cost",

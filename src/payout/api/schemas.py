@@ -28,6 +28,10 @@ class UserOut(BaseModel):
 
 
 # ── Companies ───────────────────────────────────────────────────────────────
+PAYMENT_MODELS = ("payout_file", "per_order", "direct")
+CADENCES = ("weekly", "monthly", "slots")
+
+
 class CompanyOut(BaseModel):
     company_name: str
     parser_type: str
@@ -37,6 +41,62 @@ class CompanyOut(BaseModel):
     is_active: bool
     # Another company whose rider IDs this one reuses (Nykaa -> Blitz).
     rider_ids_shared_with: str | None = None
+    # How they pay: payout_file (they send a file we process), per_order (no
+    # file; we count orders and pay per_order_rate), direct (they pay riders).
+    payment_model: str = "payout_file"
+    cadence: str = "weekly"
+    per_order_rate: int | None = None  # paise; rupeeized on the way out
+    notes: str | None = None
+    payout_sheet: str | None = None
+    rider_id_column: str | None = None
+    orders_column: str | None = None
+    hold_sheet: str | None = None
+    hold_key_column: str | None = None
+    hold_amount_column: str | None = None
+    hold_status_column: str | None = None
+    active_riders: int = 0
+    rider_ids: int = 0
+
+
+class CompanyIn(BaseModel):
+    """Create a company from the Admin → Companies page. Column names are only
+    needed for payout_file companies; per_order needs a rate."""
+
+    company_name: str
+    payment_model: str = "payout_file"
+    cadence: str = "weekly"
+    per_order_rate: float | None = None  # rupees per order
+    notes: str | None = None
+    rider_ids_shared_with: str | None = None
+    parser_type: str | None = None
+    payout_sheet: str | None = None
+    rider_id_column: str | None = None
+    payout_column: str | None = None
+    orders_column: str | None = None
+    hold_style: str | None = None  # 'sheet' | 'column' | None
+    hold_sheet: str | None = None
+    hold_key_column: str | None = None
+    hold_amount_column: str | None = None
+    hold_status_column: str | None = None
+
+
+class CompanyPatch(BaseModel):
+    payment_model: str | None = None
+    cadence: str | None = None
+    per_order_rate: float | None = None  # rupees per order
+    notes: str | None = None
+    rider_ids_shared_with: str | None = None
+    is_active: bool | None = None
+    parser_type: str | None = None
+    payout_sheet: str | None = None
+    rider_id_column: str | None = None
+    payout_column: str | None = None
+    orders_column: str | None = None
+    hold_style: str | None = None
+    hold_sheet: str | None = None
+    hold_key_column: str | None = None
+    hold_amount_column: str | None = None
+    hold_status_column: str | None = None
 
 
 # ── Riders + Persons ────────────────────────────────────────────────────────

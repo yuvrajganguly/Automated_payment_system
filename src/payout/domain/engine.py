@@ -364,15 +364,23 @@ def process_cycle(
     company,
     cycle_start,
     cycle_end,
-    file_bytes,
+    file_bytes=None,
     *,
     overrides=None,
     created_by="engine",
     commit=True,
     force=False,
+    parsed=None,
 ) -> CycleResult:
+    """Run one company cycle. Input is either ``file_bytes`` (the company's
+    payout file, read through its parser config) or a ready ``ParseResult``
+    (``parsed`` — how per-order companies get in: the route builds the records
+    from typed order counts × the company's rate; there is no file)."""
     overrides = overrides or CycleOverrides()
-    parsed = parse_file(company, file_bytes)
+    if parsed is None:
+        if file_bytes is None:
+            raise ValueError("process_cycle needs file_bytes or parsed")
+        parsed = parse_file(company, file_bytes)
     result = CycleResult(
         company=company,
         cycle_start=cycle_start,

@@ -697,7 +697,8 @@ def company_profile(company_name: str, _: dict = Depends(get_current_user)) -> d
     every cycle, active rider ids there, and the live outstanding position."""
     with get_connection() as conn:
         co = conn.execute(
-            "SELECT company_name, orders_column, rider_ids_shared_with, is_active "
+            "SELECT company_name, orders_column, rider_ids_shared_with, is_active, "
+            " payment_model, cadence, per_order_rate, notes "
             "FROM companies WHERE company_name=?",
             (company_name,),
         ).fetchone()

@@ -15,6 +15,21 @@ export interface Company {
   is_active: boolean
   /** Another company whose rider IDs this one reuses (Nykaa -> Blitz). */
   rider_ids_shared_with?: string | null
+  /** payout_file (they send a file) | per_order (we pay orders × rate) | direct (they pay riders). */
+  payment_model?: 'payout_file' | 'per_order' | 'direct'
+  cadence?: 'weekly' | 'monthly' | 'slots'
+  /** Rupees per order (per_order only). */
+  per_order_rate?: number | null
+  notes?: string | null
+  payout_sheet?: string | null
+  rider_id_column?: string | null
+  orders_column?: string | null
+  hold_sheet?: string | null
+  hold_key_column?: string | null
+  hold_amount_column?: string | null
+  hold_status_column?: string | null
+  active_riders?: number
+  rider_ids?: number
 }
 
 export interface RiderResultRow {

@@ -42,12 +42,29 @@ def next_spencers_cycle(last_end: date) -> tuple[date, date]:
     return start, start + timedelta(days=span - 1)
 
 
-def next_cycle_for(company: str, last_end: date | None) -> tuple[date, date]:
+def next_monthly_cycle(last_end: date) -> tuple[date, date]:
+    """Calendar month after ``last_end``'s month (1st → last day)."""
+    y, m = (last_end.year + 1, 1) if last_end.month == 12 else (last_end.year, last_end.month + 1)
+    return date(y, m, 1), date(y, m, monthrange(y, m)[1])
+
+
+def next_cycle_for(
+    company: str, last_end: date | None, cadence: str | None = None
+) -> tuple[date, date]:
     """Return (next_start, next_end). If no history, anchor on most recent
-    Monday for weekly companies, or the current slot for Spencer's."""
+    Monday for weekly companies, the previous month for monthly ones, or the
+    current slot for Spencer's-style ``slots``. ``cadence`` comes from the
+    companies row; when omitted, Spencer's is the one slots company."""
+    if cadence is None:
+        cadence = "slots" if company == "Spencer's" else "weekly"
+    if cadence == "monthly":
+        if last_end is None:
+            today = date.today()
+            last_end = date(today.year, today.month, 1) - timedelta(days=1)
+        return next_monthly_cycle(last_end)
     if last_end is None:
         today = date.today()
-        if company == "Spencer's":
+        if cadence == "slots":
             # Find the slot today falls in and return the NEXT one.
             d = today.day
             last_day = monthrange(today.year, today.month)[1]
@@ -65,6 +82,6 @@ def next_cycle_for(company: str, last_end: date | None) -> tuple[date, date]:
         last_sunday = today - timedelta(days=days_back if days_back else 7)
         return next_weekly_cycle(last_sunday)
 
-    if company == "Spencer's":
+    if cadence == "slots":
         return next_spencers_cycle(last_end)
     return next_weekly_cycle(last_end)

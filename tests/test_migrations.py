@@ -22,6 +22,8 @@ _NEW_COLUMNS = [
     ("cod_holds", "worker_name"),
     ("cod_holds", "hub_code"),
     ("users", "phone"),
+    ("companies", "payment_model"),
+    ("companies", "per_order_rate"),
 ]
 
 
@@ -55,7 +57,16 @@ def test_pre_runner_database_gets_every_migration():
         "    -- Name of another company whose rider IDs this company reuses (Nykaa pays\n"
         "    -- Blitz riders under their Blitz IDs). An unknown rider_id in this\n"
         "    -- company's file that exists under that company is linked automatically.\n"
-        "    rider_ids_shared_with TEXT\n",
+        "    rider_ids_shared_with TEXT,\n"
+        "    -- How the company pays (2026-09):\n"
+        "    --   payout_file : they send a payout file; we parse it, deduct rent, release\n"
+        "    --   per_order   : no file — the office counts orders and pays per_order_rate\n"
+        "    --   direct      : they pay riders themselves; we only keep the roster\n"
+        "    payment_model      TEXT NOT NULL DEFAULT 'payout_file',\n"
+        "    -- weekly | monthly | slots (Spencer's 1-7 / 8-14 / 15-21 / 22-end)\n"
+        "    cadence            TEXT NOT NULL DEFAULT 'weekly',\n"
+        "    per_order_rate     INTEGER,            -- paise per order (per_order only)\n"
+        "    notes              TEXT\n",
         "    is_active          INTEGER NOT NULL DEFAULT 1\n",
     )
     old_schema = old_schema.replace(
@@ -73,6 +84,7 @@ def test_pre_runner_database_gets_every_migration():
     )
     assert "phone         TEXT" not in old_schema
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
+    assert "payment_model" not in old_schema
     assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema
 
     import payout.db.schema as schema_mod
@@ -176,3 +188,46 @@ def test_0011_collapses_raft_warrior_into_regular_only_at_equal_rate(db):
     }
     assert units["W1"] == reg["model_id"] and units["W2"] == reg["model_id"]
     assert units["WX"] == ids["WARRIOR X"]  # different rate: left for the operator
+
+
+def test_0013_0014_payment_model_and_new_companies(db):
+    """Fresh DB: seed carries the three file-less companies with their model;
+    Spencer's is the slots company. Re-running 0014 never duplicates."""
+    rows = {
+        r["company_name"]: dict(r)
+        for r in db.execute(
+            "SELECT company_name, payment_model, cadence, per_order_rate, parser_type "
+            "FROM companies"
+        )
+    }
+    assert rows["Zomato"]["payment_model"] == "direct"
+    assert rows["Flipkart"]["payment_model"] == "direct"
+    assert rows["Shadowfax"]["payment_model"] == "per_order"
+    assert rows["Shadowfax"]["per_order_rate"] == 1500
+    assert rows["Spencer's"]["cadence"] == "slots"
+    assert rows["Blitz"]["payment_model"] == "payout_file"
+    from payout.db.migrations import _0014_seed_direct_and_per_order_companies
+
+    _0014_seed_direct_and_per_order_companies(db)
+    assert (
+        db.execute("SELECT COUNT(*) FROM companies WHERE company_name='Zomato'").fetchone()[0] == 1
+    )
+
+
+def test_cadence_next_cycle():
+    from datetime import date
+
+    from payout.domain.cycles import next_cycle_for
+
+    assert next_cycle_for("Anything", date(2026, 8, 31), "monthly") == (
+        date(2026, 9, 1),
+        date(2026, 9, 30),
+    )
+    assert next_cycle_for("X", date(2026, 12, 31), "monthly") == (
+        date(2027, 1, 1),
+        date(2027, 1, 31),
+    )
+    assert next_cycle_for("X", date(2026, 9, 7), "slots") == (date(2026, 9, 8), date(2026, 9, 14))
+    assert next_cycle_for("X", date(2026, 9, 6), "weekly") == (date(2026, 9, 7), date(2026, 9, 13))
+    # No cadence given: Spencer's is still the slots company.
+    assert next_cycle_for("Spencer's", date(2026, 9, 14)) == (date(2026, 9, 15), date(2026, 9, 21))

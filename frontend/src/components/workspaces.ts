@@ -35,7 +35,8 @@ export const WORKSPACES: Workspace[] = [
     key: 'analytics',
     label: 'Analytics',
     pages: [{ to: '/dashboard', label: 'Dashboard' }],
-    extra: ['/companies'],
+    // '/companies/<name>' (history) is Analytics; the bare '/companies' list is Admin.
+    extra: ['/companies/'],
     noRecruiter: true,
   },
   {
@@ -74,6 +75,7 @@ export const WORKSPACES: Workspace[] = [
     label: 'Admin',
     pages: [
       { to: '/users', label: 'Users' },
+      { to: '/companies', label: 'Companies', end: true },
       { to: '/settings', label: 'Settings' },
     ],
     extra: ['/system'],
@@ -128,7 +130,9 @@ export function workspaceFor(pathname: string, role?: string): Workspace {
       }
     }
     for (const ex of ws.extra ?? []) {
-      if (pathname === ex || pathname.startsWith(ex + '/')) return ws
+      // A trailing slash means "sub-paths only": '/companies/' owns
+      // '/companies/Myntra' but not the bare '/companies' page.
+      if (ex.endsWith('/') ? pathname.startsWith(ex) : pathname === ex || pathname.startsWith(ex + '/')) return ws
     }
   }
   return WORKSPACES[0]

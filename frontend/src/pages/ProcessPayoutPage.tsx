@@ -4,17 +4,20 @@ import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { addDaysISO, todayISO } from '../lib/dates'
 import { money as fmt } from '../lib/format'
-import type { Company, CycleResult, InactiveRow, RiderResultRow, RunResponse } from '../api/types'
+import type { Company, CycleResult, InactiveRow, RiderOut, RiderResultRow, RunResponse } from '../api/types'
 
 const isoToday = (offset = 0) => addDaysISO(todayISO(), offset)
 
-/** What a preview was run for. Commit is only offered for an identical set. */
-interface RunKey { company: string; cycleStart: string; cycleEnd: string; fileName: string; fileSize: number; fileMtime: number }
-const runKey = (company: string, cycleStart: string, cycleEnd: string, file: File): RunKey =>
-  ({ company, cycleStart, cycleEnd, fileName: file.name, fileSize: file.size, fileMtime: file.lastModified })
+/** What a preview was run for. Commit is only offered for an identical set.
+ *  A payout-file company is keyed on the file; a per-order company on the
+ *  exact order counts typed (so editing a count re-requires a preview). */
+interface RunKey { company: string; cycleStart: string; cycleEnd: string; input: string }
+const fileKey = (f: File) => `file:${f.name}:${f.size}:${f.lastModified}`
+const ordersKey = (o: Record<string, string>) =>
+  'orders:' + Object.entries(o).filter(([, v]) => v !== '').sort().map(([k, v]) => `${k}=${v}`).join(',')
 const sameKey = (a: RunKey | null, b: RunKey) =>
   !!a && a.company === b.company && a.cycleStart === b.cycleStart && a.cycleEnd === b.cycleEnd &&
-  a.fileName === b.fileName && a.fileSize === b.fileSize && a.fileMtime === b.fileMtime
+  a.input === b.input
 
 function downloadBase64(b64: string, filename: string, mime: string) {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
@@ -38,6 +41,9 @@ export function ProcessPayoutPage() {
   const [cycleStart, setCycleStart] = useState(isoToday(-7))
   const [cycleEnd, setCycleEnd] = useState(isoToday(-1))
   const [file, setFile] = useState<File | null>(null)
+  // Per-order companies: rider_id -> order count typed off their dashboard.
+  const [orders, setOrders] = useState<Record<string, string>>({})
+  const [orderRiders, setOrderRiders] = useState<RiderOut[]>([])
   const [preview, setPreview] = useState<CycleResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -47,22 +53,33 @@ export function ProcessPayoutPage() {
   // inputs has been seen (and confirmed) — it used to be one click from a
   // fresh file pick.
   const [previewedKey, setPreviewedKey] = useState<RunKey | null>(null)
-  const currentKey = file ? runKey(company, cycleStart, cycleEnd, file) : null
+  const selected = companies.find((c) => c.company_name === company)
+  const perOrder = selected?.payment_model === 'per_order'
+  const rate = selected?.per_order_rate ?? 0
+  const ordersFilled = Object.values(orders).some((v) => v !== '')
+  const totalOrders = Object.values(orders).reduce((a, v) => a + (Number(v) || 0), 0)
+  const hasInput = perOrder ? ordersFilled : !!file
+  const currentKey: RunKey | null = hasInput
+    ? { company, cycleStart, cycleEnd, input: perOrder ? ordersKey(orders) : fileKey(file as File) }
+    : null
   const previewIsCurrent = !!currentKey && sameKey(previewedKey, currentKey)
   const blockers: string[] = []
   if (preview?.unreadable_riders?.length)
     blockers.push(`${preview.unreadable_riders.length} rider(s) have an unreadable payout cell`)
   if (preview?.unknown_riders?.length)
     blockers.push(`${preview.unknown_riders.length} unknown rider(s) not onboarded`)
-  const canCommit = !!file && !busy && previewIsCurrent && !preview?.committed && blockers.length === 0
+  const canCommit = hasInput && !busy && previewIsCurrent && !preview?.committed && blockers.length === 0
 
   useEffect(() => {
     api
       .get<Company[]>('/companies')
       .then((cs) => {
-        const active = cs.filter((c) => c.is_active)
+        // Direct-pay companies have nothing to process — they never appear here.
+        const active = cs.filter((c) => c.is_active && c.payment_model !== 'direct')
         setCompanies(active)
-        if (active.length) setCompany((cur) => cur || active[0].company_name)
+        if (active.length) {
+          setCompany((cur) => (active.some((c) => c.company_name === cur) ? cur : active[0].company_name))
+        }
       })
       .catch((e: Error) => setError(e.message))
   }, [])
@@ -83,10 +100,20 @@ export function ProcessPayoutPage() {
       })
   }, [company])
 
+  // Per-order company: load its active riders so the counts can be typed
+  // against names, not bare ids. Counts reset when the company changes.
+  useEffect(() => {
+    setOrders({}); setOrderRiders([]); setPreview(null); setPreviewedKey(null)
+    if (!company || !perOrder) return
+    api.get<RiderOut[]>('/riders?company=' + encodeURIComponent(company) + '&active=true')
+      .then((rs) => setOrderRiders([...rs].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))))
+      .catch((e: Error) => setError(e.message))
+  }, [company, perOrder])
+
   async function submit(commit: boolean, e?: FormEvent) {
     e?.preventDefault()
-    if (!file || !company) return
-    const key = runKey(company, cycleStart, cycleEnd, file)
+    if (!hasInput || !company || !currentKey) return
+    const key = currentKey
     if (commit) {
       if (!sameKey(previewedKey, key)) {
         setError('Run a preview of this exact file and cycle before committing.')
@@ -108,7 +135,13 @@ export function ProcessPayoutPage() {
       form.set('cycle_start', cycleStart)
       form.set('cycle_end', cycleEnd)
       form.set('commit', commit ? 'true' : 'false')
-      form.set('file', file)
+      if (perOrder) {
+        form.set('orders', JSON.stringify(
+          Object.entries(orders).filter(([, v]) => v !== '').map(([rider_id, v]) => ({ rider_id, orders: Number(v) })),
+        ))
+      } else {
+        form.set('file', file as File)
+      }
       const r = await api.postForm<RunResponse>('/cycles/run', form)
       setPreview(r.result)
       setPreviewedKey(key)
@@ -128,8 +161,11 @@ export function ProcessPayoutPage() {
     <div className="max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold mb-1">Process Payout</h1>
       <p className="text-slate-500 text-sm mb-6">
-        Upload a company payout file, preview the result, then commit when ready.
-        Commit writes everything atomically and returns the styled workbook for download.
+        {perOrder
+          ? <>{company} sends no file — type each rider's order count from their dashboard; we pay ₹{rate} an order, deduct rent as usual and release the rest. Preview, then commit.</>
+          : <>Upload a company payout file, preview the result, then commit when ready.
+            Commit writes everything atomically and returns the styled workbook for download.</>}
+        <span className="text-slate-400"> Companies that pay riders directly are not listed — there is nothing to process for them.</span>
       </p>
 
       <form onSubmit={(e) => submit(false, e)} className="panel p-6 mb-6">
@@ -162,18 +198,31 @@ export function ProcessPayoutPage() {
               className="w-full border rounded px-3 py-2"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Payout File (.xlsx)</label>
-            <input
-              type="file" accept=".xlsx"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="w-full text-sm"
-            />
-          </div>
+          {perOrder ? (
+            <div>
+              <label className="block text-sm font-medium mb-1">Payout</label>
+              <div className="text-sm text-slate-600 py-2">
+                ₹{rate} per order × <b>{totalOrders}</b> orders = <b>₹{fmt(rate * totalOrders)}</b>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium mb-1">Payout File (.xlsx)</label>
+              <input
+                type="file" accept=".xlsx"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm"
+              />
+            </div>
+          )}
         </div>
+        {perOrder && (
+          <OrdersTable riders={orderRiders} orders={orders} rate={rate} company={company}
+                       onChange={(rid, v) => setOrders((cur) => ({ ...cur, [rid]: v }))} />
+        )}
         <div className="flex flex-wrap gap-3 mt-4 items-center">
           <button
-            type="submit" disabled={!file || !!busy}
+            type="submit" disabled={!hasInput || !!busy}
             className="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded font-medium disabled:opacity-50"
           >
             {busy === 'preview' ? 'Previewing...' : 'Preview (dry run)'}
@@ -181,7 +230,7 @@ export function ProcessPayoutPage() {
           <button
             type="button" onClick={() => void submit(true)} disabled={!canCommit}
             title={
-              !file ? 'Choose a file first'
+              !hasInput ? (perOrder ? 'Enter the order counts first' : 'Choose a file first')
               : !previewIsCurrent ? 'Preview this exact file and cycle first'
               : blockers.length ? blockers.join('; ')
               : preview?.committed ? 'Already committed'
@@ -192,8 +241,10 @@ export function ProcessPayoutPage() {
             {busy === 'commit' ? 'Committing...' : 'Commit & Download'}
           </button>
           {busy && <Spinner />}
-          {file && !previewIsCurrent && !busy && (
-            <span className="text-xs text-slate-500">Preview first — commit unlocks for the previewed file and dates.</span>
+          {hasInput && !previewIsCurrent && !busy && (
+            <span className="text-xs text-slate-500">
+              Preview first — commit unlocks for the previewed {perOrder ? 'counts' : 'file'} and dates.
+            </span>
           )}
           {previewIsCurrent && blockers.length > 0 && (
             <span className="text-xs text-rose-300">Cannot commit: {blockers.join('; ')}.</span>
@@ -586,5 +637,61 @@ function InactiveTable({ rows }: { rows: InactiveRow[] }) {
         ))}
       </tbody>
     </table>
+  )
+}
+
+
+/** Per-order companies: one row per active rider, an order count each.
+ *  Riders left blank are not in the cycle (treated as absent, like a rider
+ *  missing from a payout file); a typed 0 counts as present with no pay. */
+function OrdersTable({ riders, orders, rate, company, onChange }: {
+  riders: RiderOut[]; orders: Record<string, string>; rate: number; company: string
+  onChange: (riderId: string, value: string) => void
+}) {
+  if (riders.length === 0) {
+    return (
+      <p className="text-sm text-slate-500 mt-4">
+        No active riders at {company} yet — onboard them on the Riders page first.
+      </p>
+    )
+  }
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left border-b border-edge-soft">
+          <tr>
+            <th className="px-3 py-2 font-medium text-xs">Rider</th>
+            <th className="px-3 py-2 font-medium text-xs">Rider id</th>
+            <th className="px-3 py-2 font-medium text-xs">Hub</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Orders</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Payout</th>
+          </tr>
+        </thead>
+        <tbody>
+          {riders.map((r) => {
+            const v = orders[r.rider_id] ?? ''
+            return (
+              <tr key={r.rider_id} className="border-t border-edge-soft">
+                <td className="px-3 py-1.5">{r.name || <span className="text-slate-400">—</span>}</td>
+                <td className="px-3 py-1.5 text-slate-600">{r.rider_id}</td>
+                <td className="px-3 py-1.5 text-slate-500">{r.hub || ''}</td>
+                <td className="px-3 py-1.5 text-right">
+                  <input type="number" min={0} step={1} inputMode="numeric" value={v}
+                         onChange={(e) => onChange(r.rider_id, e.target.value)}
+                         placeholder="—"
+                         className="w-24 border rounded px-2 py-1 text-sm text-right" />
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">
+                  {v === '' ? <span className="text-slate-400">not in cycle</span> : '₹' + fmt(rate * (Number(v) || 0))}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-[11px] text-slate-500 mt-2">
+        Leave a rider blank to keep them out of this cycle; type 0 for a rider who worked but delivered nothing.
+      </p>
+    </div>
   )
 }
