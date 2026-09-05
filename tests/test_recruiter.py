@@ -383,14 +383,35 @@ def test_profile_photo_latest_image_wins(db, client):
         headers=h,
     )
     assert r.status_code == 415
-    for i, body in enumerate((b"\x89PNG one", b"\x89PNG two")):
+    from PIL import Image
+
+    def png(w, h, colour):
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h), colour).save(buf, format="PNG")
+        return buf.getvalue()
+
+    # Garbage with an image content-type is refused.
+    r = client.post(
+        f"/api/persons/{pid}/documents",
+        files={"file": ("x.png", io.BytesIO(b"not really a png"), "image/png")},
+        data={"doc_type": "photo"},
+        headers=h,
+    )
+    assert r.status_code == 415
+    for i, colour in enumerate(((255, 0, 0), (0, 0, 255))):
         r = client.post(
             f"/api/persons/{pid}/documents",
-            files={"file": (f"p{i}.png", io.BytesIO(body), "image/png")},
+            files={"file": (f"p{i}.png", io.BytesIO(png(3000, 2000, colour)), "image/png")},
             data={"doc_type": "photo"},
             headers=h,
         )
         assert r.status_code == 201, r.text
+        assert r.json()["content_type"] == "image/jpeg" and r.json()["filename"].endswith(".jpg")
     r = client.get(f"/api/persons/{pid}/photo", headers=h)
-    assert r.status_code == 200
-    assert r.headers["content-type"].startswith("image/png") and r.content == b"\x89PNG two"
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/jpeg")
+    im = Image.open(io.BytesIO(r.content))
+    assert max(im.size) == 1024 and im.getpixel((10, 10))[2] > 200  # shrunk, and the blue one
+    assert len(r.content) < 60_000
+    # Only one photo document remains (the red one was replaced, file and row).
+    docs = client.get(f"/api/persons/{pid}/documents", headers=h).json()
+    assert [d["doc_type"] for d in docs] == ["photo"]

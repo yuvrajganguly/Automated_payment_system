@@ -14,6 +14,8 @@ Routes:
 
 from __future__ import annotations
 
+import contextlib
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -126,6 +128,11 @@ async def upload_document(
             413, f"File is {len(data) // 1024} KB; the limit is {MAX_DOCUMENT_BYTES // 1024} KB"
         )
     filename = (file.filename or "document").strip()[:200]
+    if doc_type == "photo":
+        # A phone photo is 3-6 MB; 650 riders x 14 nightly backup tarballs
+        # would fill the 37 GB disk. A profile picture needs ~1000 px.
+        data, ctype = _shrink_photo(data)
+        filename = filename.rsplit(".", 1)[0][:190] + ".jpg"
     key = make_key(person_id, ctype)
     with get_connection() as conn:
         person = conn.execute(
@@ -141,6 +148,18 @@ async def upload_document(
             (person_id, doc_type, filename, ctype, len(data), key, notes or None, user["email"]),
         )
         doc_id = cur.lastrowid
+        stale_keys: list[str] = []
+        if doc_type == "photo":
+            # One profile picture per rider: the previous one is replaced,
+            # not kept (housekeeping, not a recruiter delete).
+            stale = conn.execute(
+                "SELECT id, storage_key FROM rider_documents "
+                "WHERE person_id=? AND doc_type='photo' AND id<>?",
+                (person_id, doc_id),
+            ).fetchall()
+            for r in stale:
+                stale_keys.append(r["storage_key"])
+                conn.execute("DELETE FROM rider_documents WHERE id=?", (r["id"],))
         record_activity(
             conn,
             user,
@@ -157,7 +176,34 @@ async def upload_document(
             (doc_id,),
         ).fetchone()
         conn.commit()
+    for k in stale_keys:
+        # The index row is gone; a leftover file would be harmless.
+        with contextlib.suppress(Exception):
+            get_storage().delete(k)
     return _doc_out(row)
+
+
+_PHOTO_MAX_PX = 1024
+
+
+def _shrink_photo(data: bytes) -> tuple[bytes, str]:
+    """Re-encode an uploaded picture as a <=1024 px JPEG (EXIF-rotated,
+    metadata dropped). Returns (bytes, content_type)."""
+    import io
+
+    from PIL import Image, ImageOps
+
+    try:
+        im = Image.open(io.BytesIO(data))
+        im = ImageOps.exif_transpose(im)
+        im.thumbnail((_PHOTO_MAX_PX, _PHOTO_MAX_PX))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=82, optimize=True)
+        return out.getvalue(), "image/jpeg"
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(415, "That file is not an image we can read") from exc
 
 
 @router.get("/{doc_id}/download")
