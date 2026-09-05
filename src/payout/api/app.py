@@ -239,8 +239,11 @@ def swagger_docs(_: dict = Depends(require_creator)):
 
 @app.get("/api/health", tags=["meta"])
 def health() -> dict:
-    """Liveness probe. ``demo`` tells the SPA whether to offer the demo login."""
-    return {"status": "ok", "demo": DEMO_MODE}
+    """Liveness probe. ``demo`` tells the SPA whether to offer the demo login;
+    ``whatsapp`` whether "sign in with a WhatsApp code" is available."""
+    from payout.notifications import whatsapp_configured
+
+    return {"status": "ok", "demo": DEMO_MODE, "whatsapp": whatsapp_configured()}
 
 
 # ── Serve React SPA (production only — Vite dev server handles this in dev) ──

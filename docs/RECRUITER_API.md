@@ -32,6 +32,8 @@ Accounts are created by the creator: `POST /users {"email","password","role":"re
 ## Auth
 
 ```
+POST /auth/otp/send       json: {phone}            -> 6-digit code on WhatsApp (needs PAYOUT_WA_*)
+POST /auth/otp/login      json: {phone, otp}       -> same token/cookie as /auth/login
 POST /auth/login          form: username=<email or phone>&password=<pw>   (phone: 10 digits or +country code)
                           → {"access_token","token_type":"bearer","role","email"}
 GET  /auth/me             → {"email","role"}

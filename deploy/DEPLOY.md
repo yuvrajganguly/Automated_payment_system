@@ -221,3 +221,40 @@ certificate for DEMO_ADDRESS; the login page shows "Explore the live demo"
 (admin@demo.com / Demo-1234) and the header carries a DEMO ribbon. Reset the
 sample data any time with `docker restart payout-demo`; a weekly reset is
 `echo '0 3 * * 1 root docker restart payout-demo' > /etc/cron.d/payout-demo-reset`.
+
+## WhatsApp codes (password reset + passwordless sign-in)
+
+No SMS provider and no DLT: codes go out as a WhatsApp *authentication*
+template through Meta's Cloud API (~₹0.12 per code in India).
+
+One-time setup, all on Meta's side (business.facebook.com / developers.facebook.com):
+
+1. Meta Business Portfolio for Qwikserve → **WhatsApp Business app** in
+   Meta for Developers (product "WhatsApp"). The app comes with a free
+   *test number* that can message up to 5 verified recipients — enough to
+   try everything before adding a real number.
+2. Add a **sender number** (a number NOT currently on WhatsApp; a new SIM is
+   simplest). Note its **Phone Number ID** from WhatsApp → API Setup.
+3. **Message template**: WhatsApp Manager → Message templates → Create →
+   category *Authentication*, name `payout_otp`, language English (US),
+   "Copy code" button, optional expiry text. Meta approves these within
+   minutes.
+4. **Permanent token**: Business settings → System users → Add (admin) →
+   Assign the WhatsApp app with full control → Generate token with
+   `whatsapp_business_messaging` + `whatsapp_business_management`. Copy it once.
+5. In `deploy/.env`:
+
+       PAYOUT_WA_TOKEN=<permanent token>
+       PAYOUT_WA_PHONE_ID=<phone number id>
+       PAYOUT_WA_TEMPLATE=payout_otp
+       PAYOUT_WA_LANG=en_US
+
+   then `docker compose -f docker-compose.prod.yml up -d` and verify with
+   `docker compose -f docker-compose.prod.yml exec app payout-manage test-whatsapp --to 98765 43210`.
+
+Behaviour once set: "Forgot password" sends the code on WhatsApp for any
+account with a phone number (email otherwise); the login page offers
+"Sign in with a WhatsApp code" (`POST /auth/otp/send` + `/auth/otp/login`),
+which is what the recruiter app will use. Business verification is only
+needed to message more than the test recipients / raise the daily limit
+(1,000 conversations/day unverified is plenty here).
