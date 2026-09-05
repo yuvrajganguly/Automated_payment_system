@@ -257,5 +257,12 @@ if _FRONTEND_DIR.exists():
         """
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
+        # Real files at the dist root (favicon, manifest, home-screen icons)
+        # are served as themselves — before this, /favicon.png got index.html
+        # back and the browser showed no logo. Anything else is a client route.
+        if full_path and "/" not in full_path and ".." not in full_path:
+            candidate = _FRONTEND_DIR / full_path
+            if candidate.is_file():
+                return FileResponse(str(candidate))
         index = _FRONTEND_DIR / "index.html"
         return FileResponse(str(index))

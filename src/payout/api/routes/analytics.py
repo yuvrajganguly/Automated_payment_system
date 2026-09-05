@@ -489,7 +489,12 @@ def rider_analytics(
 # grouped by company, rider, or EV. Written for a reader who is not an
 # accountant: every figure is one SQL aggregate with a plain meaning.
 
-_TXN_WINDOW = "date(t.created_at) BETWEEN ? AND ?"
+# A row belongs to the window when the CYCLE it was booked for overlaps it —
+# not when the file happened to be processed. A Spencer's 22-31 Aug file run
+# on 3 Sep is August money. Overlap, not containment: a cycle is in as soon as
+# any of its days is (2026-09-05, user decision). Params: [wt, wf].
+_TXN_WINDOW = "(t.cycle_start <= ? AND t.cycle_end >= ?)"
+_COD_WINDOW = "(ch.cycle_start <= ? AND ch.cycle_end >= ?)"
 # Correction rows (heal refunds, write-offs, credit offsets) are written with
 # company='' — attribute them to the person's deduction company so company
 # filters and groupings still see them.
@@ -518,15 +523,14 @@ def _flow_sums(conn, wf: str, wt: str, cos: list[str]) -> dict:
         "FROM transactions t "
         "JOIN person_registry pr ON pr.person_id = t.person_id "
         f"WHERE {_TXN_WINDOW}{co_sql}",
-        [wf, wt, *co_args],
+        [wt, wf, *co_args],
     ).fetchone()
     out = {k: int(row[k] or 0) for k in row.keys()}  # noqa: SIM118 (sqlite3.Row)
-    cod_co_sql, cod_co_args = _co_clause(cos, "company")
+    cod_co_sql, cod_co_args = _co_clause(cos, "ch.company")
     out["cod_held"] = int(
         conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM cod_holds "
-            f"WHERE date(created_at) BETWEEN ? AND ?{cod_co_sql}",
-            [wf, wt, *cod_co_args],
+            f"SELECT COALESCE(SUM(ch.amount),0) FROM cod_holds ch WHERE {_COD_WINDOW}{cod_co_sql}",
+            [wt, wf, *cod_co_args],
         ).fetchone()[0]
     )
     return out
@@ -541,9 +545,10 @@ def money_story(
 ) -> dict:
     """The window's money flow in plain terms, plus today's debt position.
 
-    ``flow`` is scoped to the window (by when rows were written, matching
-    /summary); ``position`` is live — where the debt stands right now,
-    including the dormant split (EV returned, debt kept silently).
+    ``flow`` is scoped to the window by CYCLE: every payout cycle whose
+    days overlap the window counts, whenever the file was processed.
+    ``position`` is live — where the debt stands right now, including the
+    dormant split (EV returned, debt kept silently).
     """
     wf, wt = _window(date_from, date_to)
     days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
@@ -612,6 +617,67 @@ def money_story(
     }
 
 
+@router.get("/story/weeks")
+def money_story_weeks(
+    companies: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Week-by-week tally per company: one row per (company, cycle) whose
+    window overlaps the selected dates. Beyond the usual flow it carries what
+    the operator reconciles a week on: *prior dues collected* (DUES_CLEARED —
+    old debt recovered out of this payout) and *carried forward* (the general
+    dues riders still owe after this cycle, from DUES_CARRY balance_after)."""
+    wf, wt = _window(date_from, date_to)
+    days = (date.fromisoformat(wt) - date.fromisoformat(wf)).days + 1
+    cos = _split_companies(companies)
+    with get_connection() as conn:
+        co_sql, co_args = _co_clause(cos, "t.company")
+        rows = conn.execute(
+            "SELECT t.company, t.cycle_start, t.cycle_end, "
+            " COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS riders, "
+            " SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS gross_payout, "
+            " SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
+            " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
+            " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
+            "   AS rent_collected, "
+            " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) AS rent_missed, "
+            " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
+            "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
+            " SUM(CASE WHEN t.event_type='DUES_CLEARED' THEN t.amount ELSE 0 END) "
+            "   AS prior_dues_collected, "
+            " SUM(CASE WHEN t.event_type='DUES_CARRY' AND t.amount < 0 THEN -t.amount ELSE 0 END) "
+            "   AS dues_added, "
+            " SUM(CASE WHEN t.event_type='DUES_CARRY' AND t.balance_after < 0 "
+            "     THEN -t.balance_after ELSE 0 END) AS carried_forward, "
+            " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) AS written_off "
+            "FROM transactions t "
+            "WHERE t.company <> '' AND t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_COLLECTED',"
+            "  'RENT_MISSED','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CLEARED','DUES_CARRY',"
+            "  'RENT_REVERSAL') "
+            f"  AND {_TXN_WINDOW}{co_sql} "
+            "GROUP BY t.company, t.cycle_start, t.cycle_end "
+            "ORDER BY t.cycle_start DESC, t.cycle_end DESC, t.company",
+            [wt, wf, *co_args],
+        ).fetchall()
+        out = [dict(r) for r in rows]
+        # COD held per cycle (its own table).
+        cod = {
+            (r["company"], r["cycle_start"], r["cycle_end"]): int(r["held"] or 0)
+            for r in conn.execute(
+                "SELECT ch.company, ch.cycle_start, ch.cycle_end, SUM(ch.amount) AS held "
+                f"FROM cod_holds ch WHERE {_COD_WINDOW} "
+                "GROUP BY ch.company, ch.cycle_start, ch.cycle_end",
+                [wt, wf],
+            )
+        }
+        for r in out:
+            r["cod_held"] = cod.get((r["company"], r["cycle_start"], r["cycle_end"]), 0)
+            r["partial"] = r["cycle_start"] < wf or r["cycle_end"] > wt
+    return {"window": {"from": wf, "to": wt, "days": days}, "rows": out}
+
+
 @router.get("/story/by")
 def money_story_by(
     dim: str,
@@ -651,12 +717,16 @@ def money_story_by(
                 "   AS written_off, "
                 " SUM(CASE WHEN t.event_type='DEPOSIT_APPLIED' THEN t.amount ELSE 0 END) "
                 "   AS deposit_applied, "
+                " SUM(CASE WHEN t.event_type='DUES_CLEARED' THEN t.amount ELSE 0 END) "
+                "   AS prior_dues_collected, "
+                " SUM(CASE WHEN t.event_type='DUES_CARRY' AND t.balance_after < 0 "
+                "     THEN -t.balance_after ELSE 0 END) AS carried_forward, "
                 " COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS riders "
                 "FROM transactions t "
                 "JOIN person_registry pr ON pr.person_id = t.person_id "
                 f"WHERE {_TXN_WINDOW}{co_sql} "
                 f"GROUP BY {_CO_EXPR} ORDER BY rent_charged DESC",
-                [wf, wt, *co_args],
+                [wt, wf, *co_args],
             ).fetchall()
             out = [dict(r) for r in rows if r["company"]]
             # live outstanding per company (person's deduction company),
@@ -726,7 +796,7 @@ def money_story_by(
                 f"WHERE {_TXN_WINDOW}{co_sql} "
                 "GROUP BY t.person_id, pr.display_name "
                 "ORDER BY 6 DESC LIMIT ?",  # 6 = rent_charged (PG: no aliases in ORDER BY exprs)
-                [wf, wt, *co_args, limit],
+                [wt, wf, *co_args, limit],
             ).fetchall()
             out = []
             for r in rows:
@@ -774,8 +844,8 @@ def money_story_by(
             wo: dict[str, int] = {}
             for r in conn.execute(
                 "SELECT t.amount, t.remarks FROM transactions t "
-                "WHERE t.event_type='RENT_REVERSAL' AND date(t.created_at) BETWEEN ? AND ?",
-                [wf, wt],
+                f"WHERE t.event_type='RENT_REVERSAL' AND {_TXN_WINDOW}",
+                [wt, wf],
             ):
                 m = re.search(r"EV (\S+) returned", r["remarks"] or "")
                 if m:

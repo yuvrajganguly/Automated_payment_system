@@ -141,3 +141,77 @@ def test_story_by_ev(seeded, client):
 
 def test_story_by_bad_dim(client):
     assert client.get("/api/dashboard/story/by?dim=nope").status_code == 400
+
+
+def test_window_is_by_cycle_not_processing_date(db, client):
+    """A cycle for a week in June processed today belongs to June. Any overlap
+    with the window counts; a window that only covers today sees nothing."""
+    pid = make_person(db, "June Rider", balance=0, arrears=0)
+    make_rider(db, pid, "J1", "Blitz", "June Rider")
+    make_ev(db, "EV-J", provider="Raft", model="Regular")
+    assign(db, pid, "EV-J", charged_through="2026-05-31")
+    db.execute(
+        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='J1' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("J1", 4000)]), commit=True)
+
+    def flow(qs):
+        return client.get("/api/dashboard/story" + qs).json()["flow"]
+
+    assert flow("?date_from=2026-06-01&date_to=2026-06-07")["gross_payout"] == 4000.0
+    # One day of overlap on either edge is enough.
+    assert flow("?date_from=2026-05-25&date_to=2026-06-01")["gross_payout"] == 4000.0
+    assert flow("?date_from=2026-06-07&date_to=2026-06-20")["gross_payout"] == 4000.0
+    # Adjacent but not overlapping: nothing.
+    assert flow("?date_from=2026-06-08&date_to=2026-06-14")["gross_payout"] == 0
+    # The day it was processed (today) is not the cycle's window.
+    today = date.today().isoformat()
+    assert flow(f"?date_from={today}&date_to={today}")["gross_payout"] == 0
+    rows = client.get(
+        "/api/dashboard/story/by?dim=company&date_from=2026-06-01&date_to=2026-06-07"
+    ).json()["rows"]
+    assert [r["company"] for r in rows] == ["Blitz"] and rows[0]["gross_payout"] == 4000.0
+
+
+def test_story_weeks_tally_with_prior_dues_and_carry_forward(db, client):
+    """Week-by-week per company: a rider who ends week 1 in debt shows it as
+    carried forward; the debt recovered from week 2's payout shows as prior
+    dues collected in week 2's row."""
+    pid = make_person(db, "Carry Rider", balance=0, arrears=0)
+    make_rider(db, pid, "C1", "Blitz", "Carry Rider")
+    make_ev(db, "EV-C", provider="Raft", model="Regular")
+    assign(db, pid, "EV-C", charged_through="2026-05-31")
+    db.execute(
+        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='C1' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+    # Week 1: payout smaller than the rent -> dues carried forward.
+    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("C1", 500)]), commit=True)
+    # Week 2: a normal payout clears last week's dues.
+    process_cycle("Blitz", date(2026, 6, 8), date(2026, 6, 14), _file([("C1", 5000)]), commit=True)
+
+    body = client.get("/api/dashboard/story/weeks?date_from=2026-06-01&date_to=2026-06-14").json()
+    rows = body["rows"]
+    assert [(r["company"], r["cycle_start"]) for r in rows] == [
+        ("Blitz", "2026-06-08"),
+        ("Blitz", "2026-06-01"),
+    ]
+    w1 = rows[1]
+    w2 = rows[0]
+    shortfall = WEEK_R - 500.0
+    assert w1["gross_payout"] == 500.0 and w1["rent_charged"] == WEEK_R
+    assert w1["carried_forward"] == shortfall and w1["released"] == 0
+    assert w1["partial"] is False
+    assert w2["prior_dues_collected"] == shortfall
+    assert w2["carried_forward"] == 0
+    assert w2["released"] == 5000.0 - WEEK_R - shortfall
+    # A window touching only week 2 marks week 1 as outside... and drops it.
+    rows = client.get("/api/dashboard/story/weeks?date_from=2026-06-10&date_to=2026-06-20").json()[
+        "rows"
+    ]
+    assert [r["cycle_start"] for r in rows] == ["2026-06-08"] and rows[0]["partial"] is True
