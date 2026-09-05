@@ -90,12 +90,18 @@ export function PersonPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <Link to="/riders" className="text-sm text-brand underline">← Back to riders</Link>
-      <h1 className="text-2xl font-bold mt-2 mb-1">
-        {person.display_name} <span className="text-slate-400 text-base">#{person.person_id}</span>
-      </h1>
-      <p className="text-slate-500 text-sm mb-6">
-        Deduction anchor: {person.deduction_company ?? '-'} / {person.deduction_rider_id ?? '-'}
-      </p>
+      <div className="flex items-start gap-4 mt-2 mb-6">
+        <ProfilePhoto personId={person.person_id} name={person.display_name}
+                      canEdit={isAdmin || user?.role === 'recruiter'} />
+        <div>
+          <h1 className="text-2xl font-bold mb-1">
+            {person.display_name} <span className="text-slate-400 text-base">#{person.person_id}</span>
+          </h1>
+          <p className="text-slate-500 text-sm">
+            Deduction anchor: {person.deduction_company ?? '-'} / {person.deduction_rider_id ?? '-'}
+          </p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {/* Everyone sees where the rider stands; only money roles see the ledger behind it. */}
@@ -125,6 +131,10 @@ export function PersonPage() {
             <dt className="text-slate-500">Rent through</dt><dd>{person.ev.rent_charged_through ?? '-'}</dd>
           </dl>
         </div>
+      )}
+
+      {!person.ev && (isAdmin || user?.role === 'recruiter') && (
+        <AssignEvHere personId={person.person_id} onAssigned={load} />
       )}
 
       {isAdmin && backrent?.applicable && (
@@ -372,6 +382,149 @@ function WriteOffArrearsCard({ personId, onPosted }: { personId: number; onPoste
           {msg && <span className="text-xs text-slate-500">{msg}</span>}
         </div>
       </form>
+    </div>
+  )
+}
+
+/** The rider's picture: the latest 'photo' document, or initials. Admins and
+ *  recruiters can upload / replace it from here; old photos stay on file. */
+function ProfilePhoto({ personId, name, canEdit }: { personId: number; name: string; canEdit: boolean }) {
+  const [version, setVersion] = useState(0)
+  const [missing, setMissing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setBusy(true); setError(null)
+    try {
+      const form = new FormData()
+      form.set('file', file)
+      form.set('doc_type', 'photo')
+      await api.postForm(`/persons/${personId}/documents`, form)
+      setMissing(false); setVersion((v) => v + 1)
+    } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="shrink-0 flex flex-col items-center gap-1">
+      <div className="h-24 w-24 rounded-2xl overflow-hidden bg-brand-500/15 ring-1 ring-white/10 grid place-items-center">
+        {missing ? (
+          <span className="text-2xl font-semibold text-brand-300 select-none">{initials || '?'}</span>
+        ) : (
+          <img src={`/api/persons/${personId}/photo?v=${version}`} alt={name}
+               className="h-full w-full object-cover" onError={() => setMissing(true)} />
+        )}
+      </div>
+      {canEdit && (
+        <label className={'text-[11px] text-brand underline cursor-pointer ' + (busy ? 'opacity-50' : '')}>
+          {busy ? 'Uploading…' : missing ? 'Add photo' : 'Change photo'}
+          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                 onChange={onPick} disabled={busy} />
+        </label>
+      )}
+      {error && <span className="text-[11px] text-red-400 max-w-[8rem] text-center">{error}</span>}
+    </div>
+  )
+}
+
+/** Hand this rider an EV without leaving their page: pick from the spare
+ *  pool, or add a brand-new unit and hand it over in one go. */
+function AssignEvHere({ personId, onAssigned }: { personId: number; onAssigned: () => void }) {
+  const [mode, setMode] = useState<'spare' | 'new'>('spare')
+  const [spares, setSpares] = useState<{ ev_id: string; provider: string; model: string; weekly_rate: number }[]>([])
+  const [models, setModels] = useState<{ provider: string; model_name: string; weekly_rate: number }[]>([])
+  const [evId, setEvId] = useState('')
+  const [provider, setProvider] = useState('')
+  const [model, setModel] = useState('')
+  const [handover, setHandover] = useState(todayISO())
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [tone, setTone] = useState<'ok' | 'err'>('ok')
+
+  useEffect(() => {
+    api.get<typeof spares & { status: string }[]>('/evs?status=spare').then((r) => setSpares(r)).catch(() => {})
+    api.get<typeof models>('/evs/models').then(setModels).catch(() => {})
+  }, [])
+  const providers = Array.from(new Set(models.map((m) => m.provider)))
+  const modelsFor = (p: string) => models.filter((m) => m.provider === p)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      if (mode === 'spare') {
+        await api.post('/evs/assign', { ev_id: evId, person_id: personId, handover_date: handover || undefined })
+      } else {
+        await api.post('/evs', { ev_id: evId.trim(), provider, model, person_id: personId, handover_date: handover || undefined })
+      }
+      setTone('ok'); setMsg(`${evId} handed over.`); onAssigned()
+    } catch (err) { setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+  const ok = mode === 'spare' ? !!evId : !!evId.trim() && !!provider && !!model
+
+  return (
+    <div className="panel p-4 mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold">Assign an EV</h3>
+        <div className="flex gap-1 text-xs">
+          {(['spare', 'new'] as const).map((m) => (
+            <button key={m} type="button" onClick={() => { setMode(m); setEvId(''); setMsg(null) }}
+                    className={'px-2 py-1 rounded ' + (mode === m ? 'bg-brand-500/20 text-white' : 'text-slate-500 hover:text-slate-800')}>
+              {m === 'spare' ? `From spares (${spares.length})` : 'New unit'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <form onSubmit={submit} className="flex flex-wrap gap-2 items-end text-sm">
+        {mode === 'spare' ? (
+          <label className="block">
+            <span className="block text-xs">Spare EV *</span>
+            <select value={evId} onChange={(e) => setEvId(e.target.value)} className="border rounded px-3 py-1.5 min-w-[220px]">
+              <option value="">{spares.length ? 'Pick a unit…' : 'No spare units'}</option>
+              {spares.map((u) => (
+                <option key={u.ev_id} value={u.ev_id}>{u.ev_id} — {u.provider} {u.model} · ₹{fmt(u.weekly_rate)}/wk</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <>
+            <label className="block">
+              <span className="block text-xs">EV ID *</span>
+              <input value={evId} onChange={(e) => setEvId(e.target.value)} className="border rounded px-3 py-1.5 w-40" />
+            </label>
+            <label className="block">
+              <span className="block text-xs">Provider *</span>
+              <select value={provider} onChange={(e) => { setProvider(e.target.value); setModel('') }} className="border rounded px-3 py-1.5">
+                <option value="">—</option>
+                {providers.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="block text-xs">Model *</span>
+              <select value={model} onChange={(e) => setModel(e.target.value)} className="border rounded px-3 py-1.5" disabled={!provider}>
+                <option value="">—</option>
+                {modelsFor(provider).map((m) => <option key={m.model_name} value={m.model_name}>{m.model_name} · ₹{fmt(m.weekly_rate)}/wk</option>)}
+              </select>
+            </label>
+          </>
+        )}
+        <label className="block">
+          <span className="block text-xs">Handover date</span>
+          <input type="date" value={handover} onChange={(e) => setHandover(e.target.value)} className="border rounded px-3 py-1.5" />
+        </label>
+        <button type="submit" disabled={busy || !ok} className="btn-primary">
+          {busy ? '…' : mode === 'spare' ? 'Hand over' : 'Add & hand over'}
+        </button>
+        {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
+      </form>
+      <p className="text-xs text-slate-500 mt-2">
+        Rent starts the day after the handover date. A backdated handover gets a back-rent prompt for admins.
+      </p>
     </div>
   )
 }

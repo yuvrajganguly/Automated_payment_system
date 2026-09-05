@@ -272,6 +272,36 @@ def _0010_users_phone(conn: Any) -> None:
     )
 
 
+def _0011_collapse_raft_warrior_models(conn: Any) -> None:
+    """Raft's WARRIOR and WARRIOR 2.0 are the Regular model at the same
+    rate; three names for one thing only cluttered the rate card. Units move
+    to Regular and the two rows go. A WARRIOR row with a *different* rate is
+    left alone (the operator decides), so nobody's rent changes silently."""
+    if not table_exists(conn, "ev_models"):
+        return
+    regular = conn.execute(
+        "SELECT model_id, weekly_rate FROM ev_models "
+        "WHERE provider='Raft' AND LOWER(model_name)='regular'"
+    ).fetchone()
+    if not regular:
+        return
+    for row in conn.execute(
+        "SELECT model_id, model_name, weekly_rate FROM ev_models "
+        "WHERE provider='Raft' AND LOWER(model_name) LIKE 'warrior%'"
+    ).fetchall():
+        if int(row["weekly_rate"]) != int(regular["weekly_rate"]):
+            print(
+                f"[migrate] leaving Raft {row['model_name']!r}: rate {row['weekly_rate']} "
+                f"differs from Regular {regular['weekly_rate']}"
+            )
+            continue
+        conn.execute(
+            "UPDATE ev_units SET model_id=? WHERE model_id=?",
+            (regular["model_id"], row["model_id"]),
+        )
+        conn.execute("DELETE FROM ev_models WHERE model_id=?", (row["model_id"],))
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -283,6 +313,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0008_cod_hub_code", _0008_cod_hub_code),
     ("0009_suspected_return_dismissals", _0009_suspected_return_dismissals),
     ("0010_users_phone", _0010_users_phone),
+    ("0011_collapse_raft_warrior_models", _0011_collapse_raft_warrior_models),
 ]
 
 _TRACKING_DDL = (

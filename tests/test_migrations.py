@@ -134,3 +134,45 @@ def test_0007_upgrades_stock_spencers_config_only():
         ).fetchone()
         assert tuple(other) == ("Rider id", "My Pay")
         conn.rollback()
+
+
+def test_0011_collapses_raft_warrior_into_regular_only_at_equal_rate(db):
+    from payout.db.migrations import _0011_collapse_raft_warrior_models
+
+    reg = db.execute(
+        "SELECT model_id, weekly_rate FROM ev_models WHERE provider='Raft' AND model_name='Regular'"
+    ).fetchone()
+    db.execute(
+        "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES ('Raft','WARRIOR',?)",
+        (reg["weekly_rate"],),
+    )
+    db.execute(
+        "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES ('Raft','WARRIOR 2.0',?)",
+        (reg["weekly_rate"],),
+    )
+    db.execute(
+        "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES ('Raft','WARRIOR X',?)",
+        (reg["weekly_rate"] + 5000,),
+    )
+    ids = {
+        r["model_name"]: r["model_id"]
+        for r in db.execute("SELECT model_id, model_name FROM ev_models WHERE provider='Raft'")
+    }
+    for ev, m in (("W1", "WARRIOR"), ("W2", "WARRIOR 2.0"), ("WX", "WARRIOR X")):
+        db.execute(
+            "INSERT INTO ev_units (ev_id, model_id, status) VALUES (?,?,'spare')", (ev, ids[m])
+        )
+    db.commit()
+    _0011_collapse_raft_warrior_models(db)
+    db.commit()
+    left = {
+        r["model_name"]
+        for r in db.execute("SELECT model_name FROM ev_models WHERE provider='Raft'")
+    }
+    assert "WARRIOR" not in left and "WARRIOR 2.0" not in left and "WARRIOR X" in left
+    units = {
+        r["ev_id"]: r["model_id"]
+        for r in db.execute("SELECT ev_id, model_id FROM ev_units WHERE ev_id IN ('W1','W2','WX')")
+    }
+    assert units["W1"] == reg["model_id"] and units["W2"] == reg["model_id"]
+    assert units["WX"] == ids["WARRIOR X"]  # different rate: left for the operator

@@ -169,6 +169,17 @@ export function EVsPage() {
         </table>
       </Section>
 
+      {isAdmin && (
+        <div className="grid md:grid-cols-2 gap-4">
+          <AddEvCard models={models} onAdded={reload} />
+          <AssignEvCard onChanged={reload} />
+          <ReturnEvCard onChanged={reload} />
+          <MarkSpareEvCard onChanged={reload} />
+          <MaintenanceCard onLogged={reload} />
+        </div>
+      )}
+
+      <div className="mt-6" />
       <Section title={'Maintenance Log (' + maint.length + ')'}>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
@@ -189,15 +200,6 @@ export function EVsPage() {
         </table>
       </Section>
 
-      {isAdmin && (
-        <div className="grid md:grid-cols-2 gap-4">
-          <AddEvCard models={models} onAdded={reload} />
-          <AssignEvCard onChanged={reload} />
-          <ReturnEvCard onChanged={reload} />
-          <MarkSpareEvCard onChanged={reload} />
-          <MaintenanceCard onLogged={reload} />
-        </div>
-      )}
     </div>
   )
 }

@@ -200,3 +200,31 @@ def test_delete_rider_id_reanchors_deduction(db, client):
 
 def test_delete_rider_id_unknown_404(db, client):
     assert client.delete("/api/riders/NOPE?company=Blitz").status_code == 404
+
+
+def test_duplicate_name_can_be_added_anyway_but_not_duplicate_account(db, client):
+    """Two different 'Amit Naskar's at one company: the warning stands, the
+    operator can push through by name — never by bank account."""
+    r = client.post(
+        "/api/riders",
+        json={"company": "Blitz", "name": "Amit Naskar", "account_no": "111"},
+    )
+    assert r.status_code == 201, r.text
+    first = r.json()["person_id"]
+    dup = {"company": "Blitz", "name": "amit naskar", "account_no": "222"}
+    r = client.post("/api/riders", json=dup)
+    assert r.status_code == 409 and "add anyway" in r.text
+    r = client.post("/api/riders", json={**dup, "allow_duplicate_name": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["person_id"] != first  # a separate person, not a merge
+    # Same bank account is still refused even with the bypass.
+    r = client.post(
+        "/api/riders",
+        json={
+            "company": "Blitz",
+            "name": "Amit Naskar",
+            "account_no": "111",
+            "allow_duplicate_name": True,
+        },
+    )
+    assert r.status_code == 409

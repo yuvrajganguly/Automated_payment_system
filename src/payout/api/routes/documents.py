@@ -76,6 +76,30 @@ def list_documents(person_id: int, _: dict = Depends(get_current_user)) -> list[
     return [_doc_out(r) for r in rows]
 
 
+@person_router.get("/{person_id}/photo")
+def person_photo(person_id: int, _: dict = Depends(get_current_user)) -> Response:
+    """The rider's profile picture: the most recent 'photo' document. 404 when
+    there is none, so an <img> can fall back to initials."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT content_type, storage_key FROM rider_documents "
+            "WHERE person_id=? AND doc_type='photo' AND content_type LIKE 'image/%' "
+            "ORDER BY id DESC LIMIT 1",
+            (person_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "No photo")
+    try:
+        data = get_storage().get(row["storage_key"])
+    except FileNotFoundError as exc:
+        raise HTTPException(410, "The photo is missing from the document store") from exc
+    return Response(
+        content=data,
+        media_type=row["content_type"],
+        headers={"Cache-Control": "private, max-age=60"},
+    )
+
+
 @person_router.post("/{person_id}/documents", response_model=DocumentOut, status_code=201)
 async def upload_document(
     person_id: int,
@@ -92,6 +116,8 @@ async def upload_document(
         raise HTTPException(
             415, f"Only {', '.join(ALLOWED_CONTENT_TYPES)} are accepted (got {ctype or 'unknown'})"
         )
+    if doc_type == "photo" and not ctype.startswith("image/"):
+        raise HTTPException(415, "A profile photo must be a JPEG, PNG or WebP image")
     data = await file.read()
     if not data:
         raise HTTPException(400, "Empty file")

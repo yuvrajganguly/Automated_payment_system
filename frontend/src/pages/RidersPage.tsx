@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { ColumnFilters, applyFilters } from '../components/TableFilters'
@@ -131,17 +131,25 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [msgTone, setMsgTone] = useState<'ok' | 'err'>('ok')
+  // A same-name rider exists at that company: the warning stays, but the
+  // operator may push through and create a separate person.
+  const [dupWarning, setDupWarning] = useState<string | null>(null)
 
-  async function submit(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setMsg(null)
+  async function submit(e: FormEvent | null, allowDuplicate = false) {
+    e?.preventDefault(); setBusy(true); setMsg(null); setDupWarning(null)
     try {
-      const r = await api.post<{ rider_id: string }>('/riders', form)
+      const r = await api.post<{ rider_id: string }>('/riders',
+        allowDuplicate ? { ...form, allow_duplicate_name: true } : form)
       setMsgTone('ok'); setMsg(`Added (rider_id=${r.rider_id})`)
       setForm(empty); onAdded()
     }
     catch (err) {
-      setMsgTone('err')
-      setMsg(err instanceof Error ? err.message : 'Failed')
+      const text = err instanceof Error ? err.message : 'Failed'
+      if (err instanceof ApiError && err.status === 409 && /add anyway/i.test(text)) {
+        setDupWarning(text)
+      } else {
+        setMsgTone('err'); setMsg(text)
+      }
     }
     finally { setBusy(false) }
   }
@@ -162,8 +170,20 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
         <Input label="Phone" v={form.mob_no} on={(v) => setForm({ ...form, mob_no: v })} />
         <div className="col-span-2 text-xs text-slate-500 -mt-1">
           Leave Rider ID blank to auto-assign a placeholder (QSPEND…).
-          Duplicate by name or account at the same company will be refused.
+          A duplicate name at the same company is flagged first (you can add anyway); a duplicate bank account is always refused.
         </div>
+        {dupWarning && (
+          <div className="col-span-2 rounded border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <div>{dupWarning}</div>
+            <div className="mt-2 flex gap-2">
+              <button type="button" onClick={() => submit(null, true)} disabled={busy}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold px-3 py-1 rounded disabled:opacity-50">
+                {busy ? '…' : 'Add anyway — a different person'}
+              </button>
+              <button type="button" onClick={() => setDupWarning(null)} className="underline">Cancel</button>
+            </div>
+          </div>
+        )}
         <div className="col-span-2 flex gap-2 items-center mt-1">
           <Submit busy={busy} disabled={!form.company || !form.name} label="Add Rider" />
           {msg && <span className={'text-xs ' + (msgTone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}

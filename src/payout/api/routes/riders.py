@@ -584,12 +584,27 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
     with get_connection() as conn:
         if body.person_id is None:
             existing = _find_existing_rider(conn, body.name, body.company, body.account_no)
+            if existing and body.allow_duplicate_name:
+                # Only a NAME match may be waved through; an account match
+                # is the same bank account and stays a hard stop.
+                same_account = bool(
+                    body.account_no
+                    and str(body.account_no).strip()
+                    and conn.execute(
+                        "SELECT 1 FROM rider_master WHERE company=? AND account_no=? "
+                        "AND account_no <> ''",
+                        (body.company, str(body.account_no).strip()),
+                    ).fetchone()
+                )
+                if not same_account:
+                    existing = None
             if existing:
                 raise HTTPException(
                     409,
                     f"{body.name!r} already exists at {body.company} "
                     f"(rider_id={existing['rider_id']}). "
-                    f"Use 'Link Riders' to merge if this is intentional.",
+                    f"Use 'Link Riders' to merge if this is the same person, "
+                    f"or add anyway to create a separate rider with this name.",
                 )
         _, rider_id, person_id = _insert_rider_into_db(
             conn,

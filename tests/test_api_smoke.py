@@ -62,6 +62,7 @@ _EXPECTED_STATUS = {
     "/api/providers/{provider}/bills/{bill_id}": 404,  # no bills in the demo seed
     "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
     "/api/documents/{doc_id}/download": 404,  # no documents in the demo seed
+    "/api/persons/{person_id}/photo": 404,  # no photo uploaded in the demo seed
 }
 if DB_URL:
     # No single file to stream on Postgres; the route says to use pg_dump.

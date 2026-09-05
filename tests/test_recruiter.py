@@ -368,3 +368,29 @@ def test_activity_survives_bad_details():
     c = Conn()
     record_activity(c, {"email": "a@b"}, "x.y", entity_type="t", entity_id=1, details={"s": {1, 2}})
     assert c.params[-1]  # serialised via default=str, never raised
+
+
+def test_profile_photo_latest_image_wins(db, client):
+    pid = make_person(db, "Photo Rider")
+    db.commit()
+    h = _login(client, _RECRUITER)
+    assert client.get(f"/api/persons/{pid}/photo", headers=h).status_code == 404
+    # A PDF filed as 'photo' is refused; images are accepted.
+    r = client.post(
+        f"/api/persons/{pid}/documents",
+        files={"file": ("x.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
+        data={"doc_type": "photo"},
+        headers=h,
+    )
+    assert r.status_code == 415
+    for i, body in enumerate((b"\x89PNG one", b"\x89PNG two")):
+        r = client.post(
+            f"/api/persons/{pid}/documents",
+            files={"file": (f"p{i}.png", io.BytesIO(body), "image/png")},
+            data={"doc_type": "photo"},
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+    r = client.get(f"/api/persons/{pid}/photo", headers=h)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png") and r.content == b"\x89PNG two"

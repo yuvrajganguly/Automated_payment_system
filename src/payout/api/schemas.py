@@ -52,6 +52,10 @@ class RiderIn(BaseModel):
     # creating a fresh one by display_name lookup. Used when adding a person
     # to a second company.
     person_id: int | None = None
+    # A rider with the same NAME at this company already exists and the
+    # operator has seen the warning and wants a separate person anyway
+    # (two "Amit Naskar"s). A matching bank account is never bypassed.
+    allow_duplicate_name: bool = False
 
 
 class RiderOut(BaseModel):
