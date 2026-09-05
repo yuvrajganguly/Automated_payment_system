@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS rider_master (
     mob_no     TEXT,
     email      TEXT,
     is_active  INTEGER NOT NULL DEFAULT 1,
+    salary     INTEGER,                        -- paise per cycle (salary companies)
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (rider_id, company)
@@ -231,8 +232,37 @@ CREATE TABLE IF NOT EXISTS companies (
     -- weekly | monthly | slots (Spencer's 1-7 / 8-14 / 15-21 / 22-end)
     cadence            TEXT NOT NULL DEFAULT 'weekly',
     per_order_rate     INTEGER,            -- paise per order (per_order only)
-    notes              TEXT
+    notes              TEXT,
+    -- salary model: each rider_master row carries its salary per cycle; the
+    -- company sets the expected working days per cycle (a day short is
+    -- salary / expected_days off) and the incentives added on top.
+    salary_expected_days INTEGER NOT NULL DEFAULT 26,
+    incentive_per_order  INTEGER NOT NULL DEFAULT 0,  -- paise per order delivered
+    incentive_per_day    INTEGER NOT NULL DEFAULT 0   -- paise per day present
 );
+
+-- ── salary_inputs ───────────────────────────────────────────────────────────
+-- What the office marked for a salaried rider in a cycle (days present,
+-- orders) and the pay it produced. Written on commit; the ledger carries the
+-- PAYOUT, this keeps the working.
+CREATE TABLE IF NOT EXISTS salary_inputs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    company      TEXT NOT NULL,
+    cycle_start  TEXT NOT NULL,
+    cycle_end    TEXT NOT NULL,
+    rider_id     TEXT NOT NULL,
+    person_id    INTEGER,
+    days_present REAL NOT NULL DEFAULT 0,
+    orders       REAL NOT NULL DEFAULT 0,
+    salary       INTEGER NOT NULL DEFAULT 0,   -- paise per cycle at the time
+    base_pay     INTEGER NOT NULL DEFAULT 0,   -- salary less days off
+    incentives   INTEGER NOT NULL DEFAULT 0,
+    payout       INTEGER NOT NULL DEFAULT 0,   -- base_pay + incentives
+    created_at   TEXT DEFAULT (datetime('now')),
+    created_by   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_salary_inputs_cycle
+    ON salary_inputs (company, cycle_start, cycle_end);
 
 -- ── users ───────────────────────────────────────────────────────────────────
 -- Login credentials. bcrypt-hashed passwords only.

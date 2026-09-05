@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
 import { addDaysISO, todayISO } from '../lib/dates'
 import { money as fmt } from '../lib/format'
-import type { Company, CycleResult, InactiveRow, RiderOut, RiderResultRow, RunResponse } from '../api/types'
+import type { Company, CycleResult, InactiveRow, RiderOut, RiderResultRow, RunResponse, SalaryLine } from '../api/types'
 
 const isoToday = (offset = 0) => addDaysISO(todayISO(), offset)
 
@@ -15,6 +15,11 @@ interface RunKey { company: string; cycleStart: string; cycleEnd: string; input:
 const fileKey = (f: File) => `file:${f.name}:${f.size}:${f.lastModified}`
 const ordersKey = (o: Record<string, string>) =>
   'orders:' + Object.entries(o).filter(([, v]) => v !== '').sort().map(([k, v]) => `${k}=${v}`).join(',')
+/** Salary companies: rider_id -> {days present, orders} typed or uploaded. */
+type Attendance = Record<string, { days: string; orders: string }>
+const attendanceKey = (a: Attendance, salaries: Record<string, string>) =>
+  'att:' + Object.entries(a).filter(([, v]) => v.days !== '' || v.orders !== '').sort()
+    .map(([k, v]) => `${k}=${v.days}/${v.orders}/${salaries[k] ?? ''}`).join(',')
 const sameKey = (a: RunKey | null, b: RunKey) =>
   !!a && a.company === b.company && a.cycleStart === b.cycleStart && a.cycleEnd === b.cycleEnd &&
   a.input === b.input
@@ -44,6 +49,12 @@ export function ProcessPayoutPage() {
   // Per-order companies: rider_id -> order count typed off their dashboard.
   const [orders, setOrders] = useState<Record<string, string>>({})
   const [orderRiders, setOrderRiders] = useState<RiderOut[]>([])
+  const [attendance, setAttendance] = useState<Attendance>({})
+  // Salary per rider (rupees per cycle) as shown in the table; saved to the
+  // rider row on blur so it is remembered next cycle.
+  const [salaries, setSalaries] = useState<Record<string, string>>({})
+  const [salaryLines, setSalaryLines] = useState<SalaryLine[] | null>(null)
+  const [sheetNote, setSheetNote] = useState<string | null>(null)
   const [preview, setPreview] = useState<CycleResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,12 +66,16 @@ export function ProcessPayoutPage() {
   const [previewedKey, setPreviewedKey] = useState<RunKey | null>(null)
   const selected = companies.find((c) => c.company_name === company)
   const perOrder = selected?.payment_model === 'per_order'
+  const salaried = selected?.payment_model === 'salary'
+  const typed = perOrder || salaried
   const rate = selected?.per_order_rate ?? 0
   const ordersFilled = Object.values(orders).some((v) => v !== '')
+  const attendanceFilled = Object.values(attendance).some((v) => v.days !== '' || v.orders !== '')
   const totalOrders = Object.values(orders).reduce((a, v) => a + (Number(v) || 0), 0)
-  const hasInput = perOrder ? ordersFilled : !!file
+  const hasInput = perOrder ? ordersFilled : salaried ? attendanceFilled : !!file
   const currentKey: RunKey | null = hasInput
-    ? { company, cycleStart, cycleEnd, input: perOrder ? ordersKey(orders) : fileKey(file as File) }
+    ? { company, cycleStart, cycleEnd,
+        input: perOrder ? ordersKey(orders) : salaried ? attendanceKey(attendance, salaries) : fileKey(file as File) }
     : null
   const previewIsCurrent = !!currentKey && sameKey(previewedKey, currentKey)
   const blockers: string[] = []
@@ -103,12 +118,55 @@ export function ProcessPayoutPage() {
   // Per-order company: load its active riders so the counts can be typed
   // against names, not bare ids. Counts reset when the company changes.
   useEffect(() => {
-    setOrders({}); setOrderRiders([]); setPreview(null); setPreviewedKey(null)
-    if (!company || !perOrder) return
+    setOrders({}); setAttendance({}); setSalaries({}); setSalaryLines(null); setSheetNote(null)
+    setOrderRiders([]); setPreview(null); setPreviewedKey(null)
+    if (!company || !typed) return
     api.get<RiderOut[]>('/riders?company=' + encodeURIComponent(company) + '&active=true')
-      .then((rs) => setOrderRiders([...rs].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))))
+      .then((rs) => {
+        const sorted = [...rs].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+        setOrderRiders(sorted)
+        setSalaries(Object.fromEntries(sorted.map((r) => [r.rider_id, r.salary != null ? String(r.salary) : ''])))
+      })
       .catch((e: Error) => setError(e.message))
-  }, [company, perOrder])
+  }, [company, typed])
+
+  async function saveSalary(rid: string, value: string) {
+    const r = orderRiders.find((x) => x.rider_id === rid)
+    const current = r?.salary != null ? String(r.salary) : ''
+    if (value === current || value === '') return
+    try {
+      const saved = await api.patch<RiderOut>('/riders/' + encodeURIComponent(rid) + '?company=' + encodeURIComponent(company), { salary: Number(value) })
+      setOrderRiders((cur) => cur.map((x) => (x.rider_id === rid ? { ...x, salary: saved.salary } : x)))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save salary')
+    }
+  }
+
+  async function uploadSheet(f: File | null) {
+    if (!f || !company) return
+    setSheetNote(null); setError(null)
+    const form = new FormData()
+    form.set('company', company)
+    form.set('file', f)
+    try {
+      const r = await api.postForm<{ rows: { rider_id: string; days_present: number | null; orders: number | null }[]; unknown: { rider_id: string; name: string | null }[]; matched: Record<string, string | null> }>('/cycles/parse-sheet', form)
+      if (perOrder) {
+        setOrders((cur) => ({ ...cur, ...Object.fromEntries(r.rows.map((x) => [x.rider_id, x.orders != null ? String(x.orders) : (cur[x.rider_id] ?? '')])) }))
+      } else {
+        setAttendance((cur) => ({ ...cur, ...Object.fromEntries(r.rows.map((x) => [x.rider_id, {
+          days: x.days_present != null ? String(x.days_present) : (cur[x.rider_id]?.days ?? ''),
+          orders: x.orders != null ? String(x.orders) : (cur[x.rider_id]?.orders ?? ''),
+        }])) }))
+      }
+      const parts = [`${r.rows.length} rider(s) filled in from the sheet`]
+      if (!r.matched.days_present && salaried) parts.push('no "days present" column found')
+      if (!r.matched.orders) parts.push('no "orders" column found')
+      if (r.unknown.length) parts.push(`${r.unknown.length} id(s) not on the roster: ${r.unknown.slice(0, 6).map((u) => u.rider_id).join(', ')}${r.unknown.length > 6 ? '…' : ''}`)
+      setSheetNote(parts.join(' · '))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read the sheet')
+    }
+  }
 
   async function submit(commit: boolean, e?: FormEvent) {
     e?.preventDefault()
@@ -139,11 +197,17 @@ export function ProcessPayoutPage() {
         form.set('orders', JSON.stringify(
           Object.entries(orders).filter(([, v]) => v !== '').map(([rider_id, v]) => ({ rider_id, orders: Number(v) })),
         ))
+      } else if (salaried) {
+        form.set('attendance', JSON.stringify(
+          Object.entries(attendance).filter(([, v]) => v.days !== '' || v.orders !== '')
+            .map(([rider_id, v]) => ({ rider_id, days_present: Number(v.days) || 0, orders: Number(v.orders) || 0 })),
+        ))
       } else {
         form.set('file', file as File)
       }
       const r = await api.postForm<RunResponse>('/cycles/run', form)
       setPreview(r.result)
+      setSalaryLines(r.salary_lines ?? null)
       setPreviewedKey(key)
       if (commit && r.xlsx) {
         downloadBase64(r.xlsx.content_base64, r.xlsx.filename, r.xlsx.mime)
@@ -163,6 +227,8 @@ export function ProcessPayoutPage() {
       <p className="text-slate-500 text-sm mb-6">
         {perOrder
           ? <>{company} sends no file — type each rider's order count from their dashboard; we pay ₹{rate} an order, deduct rent as usual and release the rest. Preview, then commit.</>
+          : salaried
+          ? <>{company} riders are salaried — mark each rider's days present and orders (or upload the sheet you keep). Pay = salary less a day's pay per day short of {selected?.salary_expected_days ?? 26}, plus ₹{selected?.incentive_per_order ?? 0} an order and ₹{selected?.incentive_per_day ?? 0} a day present; EV rent comes off as usual. Preview, then commit.</>
           : <>Upload a company payout file, preview the result, then commit when ready.
             Commit writes everything atomically and returns the styled workbook for download.</>}
         <span className="text-slate-400"> Companies that pay riders directly are not listed — there is nothing to process for them.</span>
@@ -205,6 +271,13 @@ export function ProcessPayoutPage() {
                 ₹{rate} per order × <b>{totalOrders}</b> orders = <b>₹{fmt(rate * totalOrders)}</b>
               </div>
             </div>
+          ) : salaried ? (
+            <div>
+              <label className="block text-sm font-medium mb-1">Attendance sheet (optional)</label>
+              <input type="file" accept=".xlsx,.xls,.csv" className="w-full text-sm"
+                     onChange={(e) => { void uploadSheet(e.target.files?.[0] ?? null); e.target.value = '' }} />
+              <div className="text-[11px] text-slate-500 mt-1">Columns: rider id, days present, orders — fills the table below.</div>
+            </div>
           ) : (
             <div>
               <label className="block text-sm font-medium mb-1">Payout File (.xlsx)</label>
@@ -217,9 +290,25 @@ export function ProcessPayoutPage() {
           )}
         </div>
         {perOrder && (
-          <OrdersTable riders={orderRiders} orders={orders} rate={rate} company={company}
-                       onChange={(rid, v) => setOrders((cur) => ({ ...cur, [rid]: v }))} />
+          <>
+            <OrdersTable riders={orderRiders} orders={orders} rate={rate} company={company}
+                         onChange={(rid, v) => setOrders((cur) => ({ ...cur, [rid]: v }))} />
+            <label className="inline-block text-xs text-slate-500 mt-2">
+              or fill the counts from a sheet:{' '}
+              <input type="file" accept=".xlsx,.xls,.csv" className="text-xs"
+                     onChange={(e) => { void uploadSheet(e.target.files?.[0] ?? null); e.target.value = '' }} />
+            </label>
+          </>
         )}
+        {salaried && selected && (
+          <SalaryTable riders={orderRiders} attendance={attendance} salaries={salaries} company={company}
+                       expectedDays={selected.salary_expected_days ?? 26}
+                       incOrder={selected.incentive_per_order ?? 0} incDay={selected.incentive_per_day ?? 0}
+                       onAttendance={(rid, patch) => setAttendance((cur) => ({ ...cur, [rid]: { ...(cur[rid] ?? { days: '', orders: '' }), ...patch } }))}
+                       onSalary={(rid, v) => setSalaries((cur) => ({ ...cur, [rid]: v }))}
+                       onSalaryBlur={(rid, v) => void saveSalary(rid, v)} />
+        )}
+        {sheetNote && <p className="text-xs text-slate-500 mt-2">{sheetNote}</p>}
         <div className="flex flex-wrap gap-3 mt-4 items-center">
           <button
             type="submit" disabled={!hasInput || !!busy}
@@ -243,7 +332,7 @@ export function ProcessPayoutPage() {
           {busy && <Spinner />}
           {hasInput && !previewIsCurrent && !busy && (
             <span className="text-xs text-slate-500">
-              Preview first — commit unlocks for the previewed {perOrder ? 'counts' : 'file'} and dates.
+              Preview first — commit unlocks for the previewed {typed ? 'entries' : 'file'} and dates.
             </span>
           )}
           {previewIsCurrent && blockers.length > 0 && (
@@ -252,6 +341,43 @@ export function ProcessPayoutPage() {
         </div>
         {error && <p className="text-red-400 mt-3 text-sm">{error}</p>}
       </form>
+
+      {preview && salaryLines && salaryLines.length > 0 && (
+        <div className="panel p-6 mb-6">
+          <h2 className="font-semibold mb-2">Salary working — {preview.company} {preview.cycle_start} → {preview.cycle_end}</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left border-b border-edge-soft">
+                <tr>
+                  <th className="px-3 py-2 font-medium text-xs">Rider</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Salary</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Present</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Days off</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Base pay</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Orders</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Incentives</th>
+                  <th className="px-3 py-2 font-medium text-xs text-right">Gross</th>
+                </tr>
+              </thead>
+              <tbody>
+                {salaryLines.map((l) => (
+                  <tr key={l.rider_id} className="border-t border-edge-soft">
+                    <td className="px-3 py-1.5">{l.name || l.rider_id} <span className="text-slate-500 text-xs">{l.rider_id}</span></td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">₹{fmt(l.salary)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{l.days_present}</td>
+                    <td className={'px-3 py-1.5 text-right tabular-nums' + (l.days_off > 0 ? ' text-amber-300' : '')}>{l.days_off}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">₹{fmt(l.base_pay)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{l.orders}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">₹{fmt(l.incentives)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums font-semibold">₹{fmt(l.payout)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-2">Gross is what goes into the cycle below; EV rent and dues come off it there.</p>
+        </div>
+      )}
 
       {preview && (
         <div className="panel p-6">
@@ -691,6 +817,97 @@ function OrdersTable({ riders, orders, rate, company, onChange }: {
       </table>
       <p className="text-[11px] text-slate-500 mt-2">
         Leave a rider blank to keep them out of this cycle; type 0 for a rider who worked but delivered nothing.
+      </p>
+    </div>
+  )
+}
+
+
+/** Salaried companies: salary per rider (saved on the rider), days present
+ *  and orders per cycle, and the pay they produce — the same arithmetic the
+ *  server uses, shown live so the operator sees the effect of a day off. */
+function SalaryTable({ riders, attendance, salaries, company, expectedDays, incOrder, incDay, onAttendance, onSalary, onSalaryBlur }: {
+  riders: RiderOut[]; attendance: Attendance; salaries: Record<string, string>; company: string
+  expectedDays: number; incOrder: number; incDay: number
+  onAttendance: (riderId: string, patch: Partial<{ days: string; orders: string }>) => void
+  onSalary: (riderId: string, value: string) => void
+  onSalaryBlur: (riderId: string, value: string) => void
+}) {
+  if (riders.length === 0) {
+    return (
+      <p className="text-sm text-slate-500 mt-4">
+        No active riders at {company} yet — onboard them on the Riders page first.
+      </p>
+    )
+  }
+  const calc = (rid: string) => {
+    const a = attendance[rid]
+    if (!a || (a.days === '' && a.orders === '')) return null
+    const salary = Number(salaries[rid]) || 0
+    const present = Number(a.days) || 0
+    const orders = Number(a.orders) || 0
+    const off = Math.max(0, expectedDays - present)
+    const base = Math.max(0, salary - off * salary / expectedDays)
+    const inc = orders * incOrder + present * incDay
+    return { off, base, inc, pay: base + inc, noSalary: salary <= 0 }
+  }
+  const inp = 'w-24 border rounded px-2 py-1 text-sm text-right'
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left border-b border-edge-soft">
+          <tr>
+            <th className="px-3 py-2 font-medium text-xs">Rider</th>
+            <th className="px-3 py-2 font-medium text-xs">Rider id</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Salary / cycle (₹)</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Days present</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Orders</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Days off</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Base + incentives</th>
+            <th className="px-3 py-2 font-medium text-xs text-right">Pay</th>
+          </tr>
+        </thead>
+        <tbody>
+          {riders.map((r) => {
+            const a = attendance[r.rider_id] ?? { days: '', orders: '' }
+            const c = calc(r.rider_id)
+            return (
+              <tr key={r.rider_id} className="border-t border-edge-soft">
+                <td className="px-3 py-1.5">{r.name || <span className="text-slate-400">—</span>}</td>
+                <td className="px-3 py-1.5 text-slate-600">{r.rider_id}</td>
+                <td className="px-3 py-1.5 text-right">
+                  <input type="number" min={0} step={100} value={salaries[r.rider_id] ?? ''}
+                         onChange={(e) => onSalary(r.rider_id, e.target.value)}
+                         onBlur={(e) => onSalaryBlur(r.rider_id, e.target.value)}
+                         placeholder="set" className={inp + (!(Number(salaries[r.rider_id]) > 0) ? ' border-amber-400/60' : '')} />
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <input type="number" min={0} max={31} step={1} value={a.days}
+                         onChange={(e) => onAttendance(r.rider_id, { days: e.target.value })}
+                         placeholder="—" className={inp} />
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <input type="number" min={0} step={1} value={a.orders}
+                         onChange={(e) => onAttendance(r.rider_id, { orders: e.target.value })}
+                         placeholder="0" className={inp} />
+                </td>
+                <td className={'px-3 py-1.5 text-right tabular-nums' + (c && c.off > 0 ? ' text-amber-300' : ' text-slate-500')}>{c ? c.off : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
+                  {c ? `₹${fmt(c.base)} + ₹${fmt(c.inc)}` : ''}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {!c ? <span className="text-slate-400">not in cycle</span>
+                    : c.noSalary ? <span className="text-amber-300">set salary</span>
+                    : '₹' + fmt(c.pay)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-[11px] text-slate-500 mt-2">
+        Leave a rider blank to keep them out of this cycle. Salary is remembered on the rider once you tab out of the box.
+        A day short of {expectedDays} costs salary ÷ {expectedDays}; incentives are ₹{incOrder} an order and ₹{incDay} a day present.
       </p>
     </div>
   )

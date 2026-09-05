@@ -16,11 +16,15 @@ export interface Company {
   /** Another company whose rider IDs this one reuses (Nykaa -> Blitz). */
   rider_ids_shared_with?: string | null
   /** payout_file (they send a file) | per_order (we pay orders × rate) | direct (they pay riders). */
-  payment_model?: 'payout_file' | 'per_order' | 'direct'
+  payment_model?: 'payout_file' | 'per_order' | 'direct' | 'salary'
   cadence?: 'weekly' | 'monthly' | 'slots'
   /** Rupees per order (per_order only). */
   per_order_rate?: number | null
   notes?: string | null
+  /** Salary model: expected working days per cycle and incentives (rupees). */
+  salary_expected_days?: number
+  incentive_per_order?: number
+  incentive_per_day?: number
   payout_sheet?: string | null
   rider_id_column?: string | null
   orders_column?: string | null
@@ -100,6 +104,21 @@ export interface CycleResult {
 export interface RunResponse {
   result: CycleResult
   xlsx?: { filename: string; content_base64: string; mime: string }
+  /** Salary companies: the per-rider working the payout came from (rupees). */
+  salary_lines?: SalaryLine[]
+}
+
+export interface SalaryLine {
+  rider_id: string
+  person_id: number | null
+  name: string | null
+  days_present: number
+  days_off: number
+  orders: number
+  salary: number
+  base_pay: number
+  incentives: number
+  payout: number
 }
 
 export interface RiderOut {
@@ -113,6 +132,8 @@ export interface RiderOut {
   ifsc: string | null
   mob_no: string | null
   is_active: boolean
+  /** Rupees per cycle (salary companies). */
+  salary?: number | null
 }
 
 export interface EvSummary {

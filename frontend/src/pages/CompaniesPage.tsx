@@ -20,18 +20,20 @@ import { api } from '../api/client'
 import type { Company } from '../api/types'
 import { Spinner } from '../components/Spinner'
 
-type Model = 'payout_file' | 'per_order' | 'direct'
+type Model = 'payout_file' | 'per_order' | 'direct' | 'salary'
 type Cadence = 'weekly' | 'monthly' | 'slots'
 
 const MODEL_LABEL: Record<Model, string> = {
   payout_file: 'Sends a payout file',
   per_order: 'Paid per order by us',
   direct: 'Pays riders directly',
+  salary: 'Salaried, paid by us',
 }
 const MODEL_TONE: Record<Model, string> = {
   payout_file: 'bg-sky-500/15 text-sky-200',
   per_order: 'bg-amber-500/15 text-amber-200',
   direct: 'bg-emerald-500/15 text-emerald-200',
+  salary: 'bg-fuchsia-500/15 text-fuchsia-200',
 }
 const CADENCE_LABEL: Record<Cadence, string> = {
   weekly: 'Weekly',
@@ -66,9 +68,11 @@ export function CompaniesPage() {
         Who we ride for and how each one pays. A company that <b>sends a payout file</b> is processed
         on the Process Payout page with the column names set here. One <b>paid per order by us</b> has no
         file — you type each rider's order count there and the system pays the rate per order, deducting
-        rent the usual way. One that <b>pays riders directly</b> only needs the roster: riders can be
-        onboarded under it and hold an EV, but there is nothing to process. Nothing is deleted — deactivate
-        a company you no longer work with.
+        rent the usual way. A <b>salaried</b> one pays each rider a fixed amount per cycle (set on the rider),
+        less a day's pay for every day short of the expected days, plus incentives per order and per day
+        present — you mark or upload attendance there. One that <b>pays riders directly</b> only needs the
+        roster: riders can be onboarded under it and hold an EV, but there is nothing to process. Nothing is
+        deleted — deactivate a company you no longer work with.
       </p>
 
       <AddCompanyCard companies={rows} onAdded={reload} />
@@ -123,8 +127,14 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
                       <span className={'text-xs px-2 py-0.5 rounded ' + MODEL_TONE[m]}>{MODEL_LABEL[m]}</span>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-slate-700">{CADENCE_LABEL[cadenceOf(c)]}</td>
-                    <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                      {m === 'per_order' ? `₹${c.per_order_rate ?? 0} / order` : <span className="text-slate-400">—</span>}
+                    <td className="px-3 py-2 whitespace-nowrap tabular-nums text-xs">
+                      {m === 'per_order' ? `₹${c.per_order_rate ?? 0} / order`
+                        : m === 'salary' ? (
+                          <>
+                            <div>{c.salary_expected_days ?? 26} days / cycle</div>
+                            <div className="text-slate-500">+₹{c.incentive_per_order ?? 0}/order · +₹{c.incentive_per_day ?? 0}/day</div>
+                          </>
+                        ) : <span className="text-slate-400">—</span>}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap tabular-nums">
                       {c.active_riders ?? 0}<span className="text-slate-400"> / {c.rider_ids ?? 0}</span>
@@ -136,7 +146,9 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
                           {c.orders_column && <div>orders: <code>{c.orders_column}</code></div>}
                           {c.hold_style && <div>COD: {c.hold_style === 'sheet' ? `sheet "${c.hold_sheet}"` : `column "${c.hold_amount_column}"`}</div>}
                         </>
-                      ) : m === 'per_order' ? 'order counts typed on Process Payout' : 'nothing to process'}
+                      ) : m === 'per_order' ? 'order counts typed on Process Payout'
+                        : m === 'salary' ? 'attendance + orders marked or uploaded on Process Payout; salary per rider'
+                        : 'nothing to process'}
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600 max-w-[16rem]">{c.notes}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-right">
@@ -178,6 +190,9 @@ interface Draft {
   payment_model: Model
   cadence: Cadence
   per_order_rate: string
+  salary_expected_days: string
+  incentive_per_order: string
+  incentive_per_day: string
   notes: string
   rider_ids_shared_with: string
   payout_sheet: string
@@ -191,7 +206,8 @@ interface Draft {
   hold_status_column: string
 }
 const blank: Draft = {
-  payment_model: 'payout_file', cadence: 'weekly', per_order_rate: '', notes: '',
+  payment_model: 'direct', cadence: 'weekly', per_order_rate: '',
+  salary_expected_days: '26', incentive_per_order: '', incentive_per_day: '', notes: '',
   rider_ids_shared_with: '', payout_sheet: '', rider_id_column: '', payout_column: '',
   orders_column: '', hold_style: '', hold_sheet: '', hold_key_column: '', hold_amount_column: '',
   hold_status_column: '',
@@ -199,6 +215,9 @@ const blank: Draft = {
 const fromCompany = (c: Company): Draft => ({
   payment_model: modelOf(c), cadence: cadenceOf(c),
   per_order_rate: c.per_order_rate != null ? String(c.per_order_rate) : '',
+  salary_expected_days: String(c.salary_expected_days ?? 26),
+  incentive_per_order: c.incentive_per_order ? String(c.incentive_per_order) : '',
+  incentive_per_day: c.incentive_per_day ? String(c.incentive_per_day) : '',
   notes: c.notes ?? '', rider_ids_shared_with: c.rider_ids_shared_with ?? '',
   payout_sheet: c.payout_sheet ?? '', rider_id_column: c.rider_id_column ?? '',
   payout_column: c.payout_column ?? '', orders_column: c.orders_column ?? '',
@@ -210,6 +229,9 @@ const toBody = (d: Draft) => ({
   payment_model: d.payment_model,
   cadence: d.cadence,
   per_order_rate: d.payment_model === 'per_order' && d.per_order_rate !== '' ? Number(d.per_order_rate) : null,
+  salary_expected_days: d.salary_expected_days !== '' ? Number(d.salary_expected_days) : 26,
+  incentive_per_order: d.incentive_per_order !== '' ? Number(d.incentive_per_order) : 0,
+  incentive_per_day: d.incentive_per_day !== '' ? Number(d.incentive_per_day) : 0,
   notes: d.notes || null,
   rider_ids_shared_with: d.rider_ids_shared_with || null,
   payout_sheet: d.payout_sheet || null,
@@ -244,9 +266,10 @@ function DraftFields({ d, set, companies, self }: {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Field label="How do they pay?">
           <select value={d.payment_model} onChange={(e) => set({ payment_model: e.target.value as Model })} className={input}>
+            <option value="direct">They pay riders directly</option>
             <option value="payout_file">They send us a payout file</option>
             <option value="per_order">We pay per order (no file)</option>
-            <option value="direct">They pay riders directly</option>
+            <option value="salary">Salaried — we pay a fixed salary plus incentives</option>
           </select>
         </Field>
         <Field label="Payout cycle" hint="Sets the next cycle dates on Process Payout.">
@@ -270,6 +293,28 @@ function DraftFields({ d, set, companies, self }: {
           </Field>
         )}
       </div>
+
+      {d.payment_model === 'salary' && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-slate-600 mb-2">
+            Salary rules — each rider's salary per cycle is set on the rider (Process Payout table)
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="Expected working days per cycle" hint="Each day short costs salary ÷ this.">
+              <input type="number" min={1} max={31} step={1} value={d.salary_expected_days}
+                     onChange={(e) => set({ salary_expected_days: e.target.value })} className={input} required />
+            </Field>
+            <Field label="Incentive per order (₹)" hint="Added for every order delivered. 0 for none.">
+              <input type="number" min={0} step="0.5" value={d.incentive_per_order}
+                     onChange={(e) => set({ incentive_per_order: e.target.value })} className={input} placeholder="0" />
+            </Field>
+            <Field label="Incentive per day present (₹)" hint="Added for every day present. 0 for none.">
+              <input type="number" min={0} step="1" value={d.incentive_per_day}
+                     onChange={(e) => set({ incentive_per_day: e.target.value })} className={input} placeholder="0" />
+            </Field>
+          </div>
+        </div>
+      )}
 
       {d.payment_model === 'payout_file' && (
         <div className="mt-3">

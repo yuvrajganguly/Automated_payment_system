@@ -14,6 +14,7 @@ from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
+from payout.money import to_paise
 from payout.parsers.base import match_column
 
 router = APIRouter()
@@ -283,7 +284,7 @@ def export_riders(
         rows = conn.execute(
             f"SELECT rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
+            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -349,7 +350,7 @@ def list_riders(
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
+            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -387,6 +388,12 @@ def update_rider(
         fields["mob_no"] = body.mob_no.strip() or None
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+    if body.salary is not None:
+        if user.get("role") == "recruiter":
+            raise HTTPException(403, "Only admins set salaries")
+        if body.salary < 0:
+            raise HTTPException(400, "salary cannot be negative")
+        fields["salary"] = to_paise(body.salary)
 
     new_rid = (body.new_rider_id or "").strip() or None
     new_co = (body.new_company or "").strip() or None
@@ -461,14 +468,14 @@ def update_rider(
                 rider_id, company = target_rid, target_co  # for the SELECT below
 
         row = conn.execute(
-            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, is_active "
-            "FROM rider_master WHERE rider_id=? AND company=?",
+            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, "
+            " mob_no, is_active, salary FROM rider_master WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()
         changed = diff_fields(
             dict(existing),
             dict(row),
-            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active"),
+            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active", "salary"),
         )
         if body.mob_no is not None:
             changed["mob_no"] = [existing["mob_no"], fields.get("mob_no")]

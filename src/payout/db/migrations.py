@@ -355,6 +355,66 @@ def _0014_seed_direct_and_per_order_companies(conn: Any) -> None:
         )
 
 
+def _0015_salary_model(conn: Any) -> None:
+    """Salaried companies (2026-09-05, replacing the retired Blue Dart module):
+    a salary per cycle on the rider row, expected days + incentives on the
+    company, and salary_inputs to keep what was marked each cycle."""
+    add_column(conn, "companies", "salary_expected_days", "INTEGER NOT NULL DEFAULT 26")
+    add_column(conn, "companies", "incentive_per_order", "INTEGER NOT NULL DEFAULT 0")
+    add_column(conn, "companies", "incentive_per_day", "INTEGER NOT NULL DEFAULT 0")
+    add_column(conn, "rider_master", "salary", "INTEGER")
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS salary_inputs ("
+        "  id           INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  company      TEXT NOT NULL,"
+        "  cycle_start  TEXT NOT NULL,"
+        "  cycle_end    TEXT NOT NULL,"
+        "  rider_id     TEXT NOT NULL,"
+        "  person_id    INTEGER,"
+        "  days_present REAL NOT NULL DEFAULT 0,"
+        "  orders       REAL NOT NULL DEFAULT 0,"
+        "  salary       INTEGER NOT NULL DEFAULT 0,"
+        "  base_pay     INTEGER NOT NULL DEFAULT 0,"
+        "  incentives   INTEGER NOT NULL DEFAULT 0,"
+        "  payout       INTEGER NOT NULL DEFAULT 0,"
+        "  created_at   TEXT DEFAULT (datetime('now')),"
+        "  created_by   TEXT"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_salary_inputs_cycle "
+        "ON salary_inputs (company, cycle_start, cycle_end)"
+    )
+
+
+def _0016_pidge_delhivery_retire_bluedart_dealshare(conn: Any) -> None:
+    """Pidge and Delhivery join as direct-pay companies; Blue Dart and
+    Dealshare are switched off (2026-09-05). Deactivating keeps every rider
+    row and cycle readable — nothing is deleted."""
+    for name in ("Pidge", "Delhivery"):
+        if conn.execute(
+            "SELECT 1 FROM companies WHERE LOWER(company_name)=LOWER(?)", (name,)
+        ).fetchone():
+            continue
+        conn.execute(
+            "INSERT INTO companies (company_name, parser_type, payout_sheet, rider_id_column, "
+            " payout_column, orders_column, has_hold_sheet, is_active, payment_model, cadence, "
+            " per_order_rate, notes) "
+            "VALUES (?, 'none', NULL, 'rider_id', 'payout', 'orders', 0, 1, 'direct', 'weekly', "
+            " NULL, 'Pays riders directly (for now). Roster only — no payout file.')",
+            (name,),
+        )
+    conn.execute(
+        "UPDATE companies SET is_active=0 WHERE LOWER(company_name) IN ('bluedart', 'dealshare')"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -370,6 +430,11 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0012_person_identity_numbers", _0012_person_identity_numbers),
     ("0013_company_payment_model", _0013_company_payment_model),
     ("0014_seed_direct_and_per_order_companies", _0014_seed_direct_and_per_order_companies),
+    ("0015_salary_model", _0015_salary_model),
+    (
+        "0016_pidge_delhivery_retire_bluedart_dealshare",
+        _0016_pidge_delhivery_retire_bluedart_dealshare,
+    ),
 ]
 
 _TRACKING_DDL = (

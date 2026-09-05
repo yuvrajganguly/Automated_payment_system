@@ -229,3 +229,138 @@ def test_per_order_cycle_pays_rate_times_orders_and_deducts_rent(db, client):
         },
     )
     assert r.status_code == 400
+
+
+def test_pidge_delhivery_seeded_and_defaults_direct(db, client):
+    rows = {c["company_name"]: c for c in client.get("/api/companies").json()}
+    assert rows["Pidge"]["payment_model"] == "direct"
+    assert rows["Delhivery"]["payment_model"] == "direct"
+    # A company added with nothing but a name is direct-pay until told otherwise.
+    r = client.post("/api/companies", json={"company_name": "Ekart"})
+    assert r.status_code == 201 and r.json()["payment_model"] == "direct"
+    # Migration 0016 on an existing DB: Blue Dart + Dealshare switched off, nothing lost.
+    from payout.db.migrations import _0016_pidge_delhivery_retire_bluedart_dealshare
+
+    _0016_pidge_delhivery_retire_bluedart_dealshare(db)
+    db.commit()
+    rows = {c["company_name"]: c for c in client.get("/api/companies").json()}
+    assert rows["Dealshare"]["is_active"] is False
+    assert (
+        db.execute("SELECT COUNT(*) FROM companies WHERE company_name='Pidge'").fetchone()[0] == 1
+    )
+
+
+def _salary_company(client):
+    r = client.post(
+        "/api/companies",
+        json={
+            "company_name": "SalaryCo",
+            "payment_model": "salary",
+            "cadence": "monthly",
+            "salary_expected_days": 26,
+            "incentive_per_order": 2,  # ₹2 an order
+            "incentive_per_day": 10,  # ₹10 a day present
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["parser_type"] == "salary"
+    assert body["incentive_per_order"] == 2.0 and body["incentive_per_day"] == 10.0
+    assert body["salary_expected_days"] == 26
+
+
+def test_salary_cycle_deducts_days_off_and_adds_incentives(db, client):
+    _salary_company(client)
+    pid = make_person(db, "Sal Rider", balance=0, arrears=0)
+    make_rider(db, pid, "S-1", "SalaryCo", "Sal Rider")
+    make_ev(db, "EV-S", provider="Raft", model="Regular")
+    assign(db, pid, "EV-S", charged_through="2026-05-31")
+    db.execute(
+        "UPDATE person_registry SET deduction_company='SalaryCo', deduction_rider_id='S-1' "
+        "WHERE person_id=?",
+        (pid,),
+    )
+    db.commit()
+    # Salary is set on the rider row (rupees in, paise stored, rupees out).
+    r = client.patch("/api/riders/S-1?company=SalaryCo", json={"salary": 13000})
+    assert r.status_code == 200, r.text
+    assert r.json()["salary"] == 13000.0
+    assert (
+        db.execute("SELECT salary FROM rider_master WHERE rider_id='S-1'").fetchone()[0] == 1300000
+    )
+
+    attendance = json.dumps([{"rider_id": "S-1", "days_present": 24, "orders": 300}])
+    common = {"company": "SalaryCo", "cycle_start": "2026-06-01", "cycle_end": "2026-06-30"}
+    r = client.post("/api/cycles/run", data={**common, "commit": "false"})
+    assert r.status_code == 400 and "salaried" in r.json()["detail"]
+    r = client.post("/api/cycles/run", data={**common, "commit": "false", "attendance": attendance})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    line = body["salary_lines"][0]
+    # 2 days off of 26: 13000 − 2 × 500 = 12000; incentives 300×2 + 24×10 = 840.
+    assert line["days_off"] == 2
+    assert line["base_pay"] == 12000.0 and line["incentives"] == 840.0
+    assert line["payout"] == 12840.0
+    res = body["result"]
+    assert res["totals"]["riders_paid"] == 1
+    assert res["totals"]["total_rent_charged"] > 0  # EV rent comes off the salary as usual
+    assert db.execute("SELECT COUNT(*) FROM salary_inputs").fetchone()[0] == 0
+
+    r = client.post("/api/cycles/run", data={**common, "commit": "true", "attendance": attendance})
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["committed"] is True
+    row = db.execute("SELECT * FROM salary_inputs WHERE rider_id='S-1'").fetchone()
+    assert (row["days_present"], row["orders"], row["payout"]) == (24, 300, 1284000)
+    assert (
+        db.execute(
+            "SELECT amount FROM transactions WHERE person_id=? AND event_type='PAYOUT'", (pid,)
+        ).fetchone()[0]
+        == 1284000
+    )
+
+    # A rider without a salary set is refused by name, not silently paid nothing.
+    pid2 = make_person(db, "No Salary")
+    make_rider(db, pid2, "S-2", "SalaryCo", "No Salary")
+    db.commit()
+    r = client.post(
+        "/api/cycles/run",
+        data={
+            "company": "SalaryCo",
+            "cycle_start": "2026-07-01",
+            "cycle_end": "2026-07-31",
+            "commit": "false",
+            "attendance": json.dumps([{"rider_id": "S-2", "days_present": 26, "orders": 0}]),
+        },
+    )
+    assert r.status_code == 400 and "No Salary has no salary set" in r.json()["detail"]
+
+
+def test_parse_attendance_sheet(db, client):
+    _salary_company(client)
+    pid = make_person(db, "Sal Rider")
+    make_rider(db, pid, "S-1", "SalaryCo", "Sal Rider")
+    db.commit()
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Rider ID", "Name", "Days Present", "Orders Delivered"])
+    ws.append(["S-1", "Sal Rider", 24, 300])
+    ws.append(["S-9", "Stranger", 20, 10])
+    ws.append([None, None, None, None])
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = client.post(
+        "/api/cycles/parse-sheet",
+        data={"company": "SalaryCo"},
+        files={"file": ("att.xlsx", buf.getvalue(), "application/octet-stream")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rows"] == [
+        {"rider_id": "S-1", "name": "Sal Rider", "days_present": 24.0, "orders": 300.0}
+    ]
+    assert [u["rider_id"] for u in body["unknown"]] == ["S-9"]
+    assert body["matched"]["days_present"] == "Days Present"

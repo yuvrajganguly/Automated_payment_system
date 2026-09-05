@@ -34,7 +34,8 @@ _COLS = (
     "company_name, parser_type, payout_sheet, rider_id_column, payout_column, "
     "orders_column, has_hold_sheet, hold_style, hold_sheet, hold_key_column, "
     "hold_amount_column, hold_status_column, is_active, rider_ids_shared_with, "
-    "payment_model, cadence, per_order_rate, notes"
+    "payment_model, cadence, per_order_rate, notes, "
+    "salary_expected_days, incentive_per_order, incentive_per_day"
 )
 _EDITABLE = (
     "payment_model",
@@ -53,6 +54,9 @@ _EDITABLE = (
     "hold_key_column",
     "hold_amount_column",
     "hold_status_column",
+    "salary_expected_days",
+    "incentive_per_order",
+    "incentive_per_day",
 )
 
 
@@ -70,6 +74,9 @@ def _out(r, counts: dict[str, tuple[int, int]] | None = None) -> CompanyOut:
         cadence=r["cadence"] or "weekly",
         per_order_rate=r["per_order_rate"],
         notes=r["notes"],
+        salary_expected_days=int(r["salary_expected_days"] or 26),
+        incentive_per_order=int(r["incentive_per_order"] or 0),
+        incentive_per_day=int(r["incentive_per_day"] or 0),
         payout_sheet=r["payout_sheet"],
         rider_id_column=r["rider_id_column"],
         orders_column=r["orders_column"],
@@ -101,6 +108,18 @@ def _validate(model: str | None, cadence: str | None, rate_paise: int | None) ->
         raise HTTPException(400, "A per-order company needs a per-order rate (₹ per order).")
     if rate_paise is not None and rate_paise < 0:
         raise HTTPException(400, "per_order_rate cannot be negative")
+
+
+def _salary_fields(days, inc_order, inc_day) -> tuple[int, int, int]:
+    """Normalise the salary settings (rupees in, paise out)."""
+    days = int(days) if days is not None else 26
+    if not 1 <= days <= 31:
+        raise HTTPException(400, "salary_expected_days must be between 1 and 31")
+    io_ = to_paise(inc_order) if inc_order is not None else 0
+    id_ = to_paise(inc_day) if inc_day is not None else 0
+    if io_ < 0 or id_ < 0:
+        raise HTTPException(400, "incentives cannot be negative")
+    return days, io_, id_
 
 
 @router.get("", response_model=list[CompanyOut])
@@ -136,12 +155,15 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
         parser_type = (body.parser_type or name.lower().replace(" ", "_").replace("'", "")).strip()
         rider_col, payout_col = body.rider_id_column.strip(), body.payout_column.strip()
     else:
-        parser_type = "orders" if model == "per_order" else "none"
+        parser_type = {"per_order": "orders", "salary": "salary"}.get(model, "none")
         rider_col, payout_col = "rider_id", "payout"
     hold_style = (body.hold_style or "").strip() or None
     if hold_style not in (None, "sheet", "column"):
         raise HTTPException(400, "hold_style must be 'sheet', 'column' or blank")
     shared = (body.rider_ids_shared_with or "").strip() or None
+    exp_days, inc_order, inc_day = _salary_fields(
+        body.salary_expected_days, body.incentive_per_order, body.incentive_per_day
+    )
     with get_connection() as conn:
         if (
             shared
@@ -151,7 +173,7 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
         ):
             raise HTTPException(400, f"rider_ids_shared_with: unknown company '{shared}'")
         conn.execute(
-            f"INSERT INTO companies ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO companies ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 name,
                 parser_type,
@@ -171,6 +193,9 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
                 body.cadence,
                 rate if model == "per_order" else None,
                 (body.notes or "").strip() or None,
+                exp_days,
+                inc_order,
+                inc_day,
             ),
         )
         record_activity(
@@ -205,6 +230,10 @@ def update_company(
         for k, v in given.items():
             if k == "per_order_rate":
                 after[k] = to_paise(v) if v is not None else None
+            elif k in ("incentive_per_order", "incentive_per_day"):
+                after[k] = to_paise(v) if v is not None else 0
+            elif k == "salary_expected_days":
+                after[k] = int(v) if v is not None else 26
             elif k == "is_active":
                 after[k] = 1 if v else 0
             elif isinstance(v, str):
@@ -217,8 +246,11 @@ def update_company(
             raise HTTPException(
                 400, "A payout-file company needs the rider-id column and the payout column."
             )
+        _salary_fields(after["salary_expected_days"], None, None)  # range check
+        if (after["incentive_per_order"] or 0) < 0 or (after["incentive_per_day"] or 0) < 0:
+            raise HTTPException(400, "incentives cannot be negative")
         if model != "payout_file":
-            after["parser_type"] = "orders" if model == "per_order" else "none"
+            after["parser_type"] = {"per_order": "orders", "salary": "salary"}.get(model, "none")
             after["rider_id_column"] = after["rider_id_column"] or "rider_id"
             after["payout_column"] = after["payout_column"] or "payout"
         if model != "per_order":

@@ -9,6 +9,8 @@ Three databases must all end up identical:
 
 from __future__ import annotations
 
+import re
+
 from payout.db import get_connection, initialize_database
 from payout.db.migrations import MIGRATIONS, has_column, run_migrations, table_exists
 from payout.db.schema import SCHEMA, apply_schema
@@ -24,6 +26,8 @@ _NEW_COLUMNS = [
     ("users", "phone"),
     ("companies", "payment_model"),
     ("companies", "per_order_rate"),
+    ("companies", "salary_expected_days"),
+    ("rider_master", "salary"),
 ]
 
 
@@ -52,22 +56,17 @@ def test_pre_runner_database_gets_every_migration():
         "    attempts   INTEGER NOT NULL DEFAULT 0, -- wrong guesses; locked after MAX_OTP_ATTEMPTS\n",  # noqa: E501
         "",
     )
+    # The companies table: everything after is_active arrived by migration.
+    old_schema = re.sub(
+        r"    is_active          INTEGER NOT NULL DEFAULT 1,\n.*?\n\);",
+        "    is_active          INTEGER NOT NULL DEFAULT 1\n);",
+        old_schema,
+        count=1,
+        flags=re.S,
+    )
     old_schema = old_schema.replace(
-        "    is_active          INTEGER NOT NULL DEFAULT 1,\n"
-        "    -- Name of another company whose rider IDs this company reuses (Nykaa pays\n"
-        "    -- Blitz riders under their Blitz IDs). An unknown rider_id in this\n"
-        "    -- company's file that exists under that company is linked automatically.\n"
-        "    rider_ids_shared_with TEXT,\n"
-        "    -- How the company pays (2026-09):\n"
-        "    --   payout_file : they send a payout file; we parse it, deduct rent, release\n"
-        "    --   per_order   : no file — the office counts orders and pays per_order_rate\n"
-        "    --   direct      : they pay riders themselves; we only keep the roster\n"
-        "    payment_model      TEXT NOT NULL DEFAULT 'payout_file',\n"
-        "    -- weekly | monthly | slots (Spencer's 1-7 / 8-14 / 15-21 / 22-end)\n"
-        "    cadence            TEXT NOT NULL DEFAULT 'weekly',\n"
-        "    per_order_rate     INTEGER,            -- paise per order (per_order only)\n"
-        "    notes              TEXT\n",
-        "    is_active          INTEGER NOT NULL DEFAULT 1\n",
+        "    salary     INTEGER,                        -- paise per cycle (salary companies)\n",
+        "",
     )
     old_schema = old_schema.replace(
         "    -- Hub/store code and worker name exactly as the company's COD sheet\n"
@@ -84,7 +83,7 @@ def test_pre_runner_database_gets_every_migration():
     )
     assert "phone         TEXT" not in old_schema
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
-    assert "payment_model" not in old_schema
+    assert "payment_model" not in old_schema and "salary_expected_days" not in old_schema
     assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema
 
     import payout.db.schema as schema_mod
@@ -229,5 +228,8 @@ def test_cadence_next_cycle():
     )
     assert next_cycle_for("X", date(2026, 9, 7), "slots") == (date(2026, 9, 8), date(2026, 9, 14))
     assert next_cycle_for("X", date(2026, 9, 6), "weekly") == (date(2026, 9, 7), date(2026, 9, 13))
+    # No history for a monthly company: the last completed month, never the current one.
+    ns, ne = next_cycle_for("X", None, "monthly")
+    assert ne < date.today() and ns.day == 1
     # No cadence given: Spencer's is still the slots company.
     assert next_cycle_for("Spencer's", date(2026, 9, 14)) == (date(2026, 9, 15), date(2026, 9, 21))

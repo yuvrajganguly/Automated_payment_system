@@ -59,8 +59,11 @@ def next_cycle_for(
         cadence = "slots" if company == "Spencer's" else "weekly"
     if cadence == "monthly":
         if last_end is None:
+            # No history: offer the most recent *completed* month (the current
+            # one would fail the not-in-the-future guard on Process Payout).
             today = date.today()
-            last_end = date(today.year, today.month, 1) - timedelta(days=1)
+            prev_month_end = date(today.year, today.month, 1) - timedelta(days=1)
+            last_end = prev_month_end.replace(day=1) - timedelta(days=1)
         return next_monthly_cycle(last_end)
     if last_end is None:
         today = date.today()

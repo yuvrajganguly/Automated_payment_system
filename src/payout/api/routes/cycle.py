@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import io
 import json
 from datetime import date, datetime
 
@@ -113,6 +114,214 @@ def _orders_to_parse_result(company: str, raw: str | None, rate_paise: int | Non
     )
 
 
+def _salary_to_parse_result(conn, company: str, raw: str | None, co) -> tuple[object, list[dict]]:
+    """Salaried company: the office marks days present and orders per rider.
+
+    Per rider (salary from the rider row, paise per cycle):
+        days_off   = max(0, expected_days − days_present)
+        base_pay   = salary − days_off × salary / expected_days
+        incentives = orders × incentive_per_order + days_present × incentive_per_day
+        payout     = base_pay + incentives
+    Returns the ParseResult for the engine and the working per rider."""
+    from payout.domain.models import ParseResult, RiderRecord
+
+    if not raw:
+        raise HTTPException(400, f"{company} is salaried — mark days present and orders.")
+    try:
+        items = json.loads(raw)
+        assert isinstance(items, list)
+    except (ValueError, AssertionError) as exc:
+        raise HTTPException(
+            400, "attendance must be a JSON list of {rider_id, days_present, orders}"
+        ) from exc
+    expected = int(co["salary_expected_days"] or 26)
+    inc_order = int(co["incentive_per_order"] or 0)
+    inc_day = int(co["incentive_per_day"] or 0)
+    salaries = {
+        r["rider_id"]: (int(r["salary"] or 0), r["person_id"], r["name"])
+        for r in conn.execute(
+            "SELECT rider_id, salary, person_id, name FROM rider_master WHERE company=?",
+            (company,),
+        )
+    }
+    seen: dict[str, dict] = {}
+    for it in items:
+        rid = str((it or {}).get("rider_id", "")).strip()
+        if not rid:
+            continue
+        try:
+            present = float(it.get("days_present") or 0)
+            n_orders = float(it.get("orders") or 0)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, f"days/orders for {rid} are not numbers") from exc
+        if present < 0 or n_orders < 0:
+            raise HTTPException(400, f"days/orders for {rid} cannot be negative")
+        if present > 31:
+            raise HTTPException(400, f"days present for {rid} cannot exceed 31")
+        if rid in seen:
+            seen[rid]["days_present"] += present
+            seen[rid]["orders"] += n_orders
+        else:
+            seen[rid] = {"rider_id": rid, "days_present": present, "orders": n_orders}
+    if not seen:
+        raise HTTPException(400, "No riders were marked.")
+    records, lines = [], []
+    for rid, it in seen.items():
+        salary, pid, name = salaries.get(rid, (0, None, None))
+        if rid in salaries and not salary:
+            raise HTTPException(
+                400, f"{name or rid} has no salary set — enter it in the table first."
+            )
+        days_off = max(0.0, expected - it["days_present"])
+        base = int(round(salary - days_off * salary / expected))
+        base = max(0, base)
+        incentives = int(round(it["orders"] * inc_order + it["days_present"] * inc_day))
+        payout = base + incentives
+        records.append(RiderRecord(rider_id=rid, payout=payout, orders=it["orders"]))
+        lines.append(
+            {
+                "rider_id": rid,
+                "person_id": pid,
+                "name": name,
+                "days_present": it["days_present"],
+                "days_off": days_off,
+                "orders": it["orders"],
+                "salary": salary,
+                "base_pay": base,
+                "incentives": incentives,
+                "payout": payout,
+            }
+        )
+    parsed = ParseResult(
+        company=company,
+        records=records,
+        sheet="attendance marked by hand",
+        matched_columns={
+            "rider_id": "rider_id",
+            "payout": "salary − days off + incentives",
+            "orders": "orders",
+        },
+        warnings=[],
+    )
+    return parsed, lines
+
+
+def _record_salary_inputs(company, cycle_start, cycle_end, lines, user) -> None:
+    """Keep what was marked for the cycle (after a successful commit)."""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM salary_inputs WHERE company=? AND cycle_start=? AND cycle_end=?",
+            (company, cycle_start.isoformat(), cycle_end.isoformat()),
+        )
+        for ln in lines:
+            conn.execute(
+                "INSERT INTO salary_inputs (company, cycle_start, cycle_end, rider_id, "
+                " person_id, days_present, orders, salary, base_pay, incentives, payout, "
+                " created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    company,
+                    cycle_start.isoformat(),
+                    cycle_end.isoformat(),
+                    ln["rider_id"],
+                    ln["person_id"],
+                    ln["days_present"],
+                    ln["orders"],
+                    ln["salary"],
+                    ln["base_pay"],
+                    ln["incentives"],
+                    ln["payout"],
+                    user["email"],
+                ),
+            )
+        conn.commit()
+
+
+_SHEET_ID_ALIASES = ("rider_id", "rider id", "id", "worker code", "rider", "fe id", "employee id")
+_SHEET_DAYS_ALIASES = (
+    "days_present",
+    "days present",
+    "present",
+    "attendance",
+    "days",
+    "present days",
+)
+_SHEET_ORDERS_ALIASES = ("orders", "orders delivered", "delivered", "deliveries", "total orders")
+_SHEET_NAME_ALIASES = ("name", "rider name", "rider_name")
+
+
+@router.post("/parse-sheet")
+async def parse_attendance_sheet(
+    company: str = Form(...),
+    file: UploadFile = File(...),
+    _: dict = Depends(require_admin),
+) -> dict:
+    """Read an attendance / orders sheet the office keeps (xlsx or csv) into
+    rows the Process Payout table can take: {rider_id, name, days_present,
+    orders}. Column headers are matched loosely; unmatched rider ids are
+    reported so the operator can fix the sheet rather than lose rows."""
+    import pandas as pd
+
+    from payout.parsers.base import match_column
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    try:
+        if (file.filename or "").lower().endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(raw))
+        else:
+            df = pd.read_excel(io.BytesIO(raw))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read the sheet: {exc}") from exc
+    df.columns = [str(c).strip() for c in df.columns]
+    id_col = match_column(df.columns, *_SHEET_ID_ALIASES)
+    if not id_col:
+        raise HTTPException(
+            400, "No rider-id column found (expected a header like 'Rider ID' or 'ID')."
+        )
+    days_col = match_column(df.columns, *_SHEET_DAYS_ALIASES)
+    orders_col = match_column(df.columns, *_SHEET_ORDERS_ALIASES)
+    name_col = match_column(df.columns, *_SHEET_NAME_ALIASES)
+    with get_connection() as conn:
+        known = {
+            r["rider_id"]: r["name"]
+            for r in conn.execute(
+                "SELECT rider_id, name FROM rider_master WHERE company=? AND is_active=1",
+                (company,),
+            )
+        }
+
+    def num(rec, col):
+        if not col:
+            return None
+        try:
+            f = float(rec.get(col))
+        except (TypeError, ValueError):
+            return None
+        return None if f != f else f  # NaN
+
+    rows, unknown = [], []
+    for _, r in df.iterrows():
+        rid = str(r.get(id_col, "") or "").strip()
+        if rid.endswith(".0") and rid[:-2].isdigit():
+            rid = rid[:-2]
+        if not rid or rid.lower() == "nan":
+            continue
+        nm = str(r.get(name_col) or "").strip() if name_col else ""
+        row = {
+            "rider_id": rid,
+            "name": (nm if nm and nm.lower() != "nan" else "") or known.get(rid),
+            "days_present": num(r, days_col),
+            "orders": num(r, orders_col),
+        }
+        (rows if rid in known else unknown).append(row)
+    return {
+        "rows": rows,
+        "unknown": unknown,
+        "matched": {"rider_id": id_col, "days_present": days_col, "orders": orders_col},
+    }
+
+
 @router.post("/run")
 async def run_cycle(
     company: str = Form(...),
@@ -122,6 +331,7 @@ async def run_cycle(
     force: bool = Form(False),
     overrides: str | None = Form(None),
     orders: str | None = Form(None),
+    attendance: str | None = Form(None),
     file: UploadFile | None = File(None),
     user: dict = Depends(require_admin),
 ) -> dict:
@@ -162,14 +372,19 @@ async def run_cycle(
         )
     with get_connection() as conn:
         co = conn.execute(
-            "SELECT payment_model, per_order_rate, is_active FROM companies WHERE company_name=?",
+            "SELECT payment_model, per_order_rate, is_active, salary_expected_days, "
+            " incentive_per_order, incentive_per_day FROM companies WHERE company_name=?",
             (company,),
         ).fetchone()
-    if not co or not co["is_active"]:
-        raise HTTPException(400, f"Company '{company}' not found or not active.")
-    model = co["payment_model"] or "payout_file"
+        if not co or not co["is_active"]:
+            raise HTTPException(400, f"Company '{company}' not found or not active.")
+        model = co["payment_model"] or "payout_file"
+        salary_lines: list[dict] = []
+        if model == "salary":
+            parsed, salary_lines = _salary_to_parse_result(conn, company, attendance, co)
     file_bytes: bytes | None = None
-    parsed = None
+    if model != "salary":
+        parsed = None
     if model == "direct":
         raise HTTPException(
             400,
@@ -178,6 +393,8 @@ async def run_cycle(
         )
     if model == "per_order":
         parsed = _orders_to_parse_result(company, orders, co["per_order_rate"])
+    elif model == "salary":
+        pass
     else:
         if file is None:
             raise HTTPException(400, f"{company} sends a payout file — upload it to process.")
@@ -205,6 +422,10 @@ async def run_cycle(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     response: dict = {"result": _serialize(result)}
+    if salary_lines:
+        response["salary_lines"] = salary_lines
+        if commit and result.committed:
+            _record_salary_inputs(company, cycle_start, cycle_end, salary_lines, user)
     if commit:
         buf = build_output(result)
         response["xlsx"] = {

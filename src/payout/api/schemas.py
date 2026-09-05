@@ -28,7 +28,7 @@ class UserOut(BaseModel):
 
 
 # ── Companies ───────────────────────────────────────────────────────────────
-PAYMENT_MODELS = ("payout_file", "per_order", "direct")
+PAYMENT_MODELS = ("payout_file", "per_order", "direct", "salary")
 CADENCES = ("weekly", "monthly", "slots")
 
 
@@ -47,6 +47,10 @@ class CompanyOut(BaseModel):
     cadence: str = "weekly"
     per_order_rate: int | None = None  # paise; rupeeized on the way out
     notes: str | None = None
+    # salary model
+    salary_expected_days: int = 26
+    incentive_per_order: int = 0  # paise; rupeeized on the way out
+    incentive_per_day: int = 0
     payout_sheet: str | None = None
     rider_id_column: str | None = None
     orders_column: str | None = None
@@ -63,10 +67,13 @@ class CompanyIn(BaseModel):
     needed for payout_file companies; per_order needs a rate."""
 
     company_name: str
-    payment_model: str = "payout_file"
+    payment_model: str = "direct"  # the safe default: nothing to process until told otherwise
     cadence: str = "weekly"
     per_order_rate: float | None = None  # rupees per order
     notes: str | None = None
+    salary_expected_days: int | None = None
+    incentive_per_order: float | None = None  # rupees
+    incentive_per_day: float | None = None  # rupees
     rider_ids_shared_with: str | None = None
     parser_type: str | None = None
     payout_sheet: str | None = None
@@ -85,6 +92,9 @@ class CompanyPatch(BaseModel):
     cadence: str | None = None
     per_order_rate: float | None = None  # rupees per order
     notes: str | None = None
+    salary_expected_days: int | None = None
+    incentive_per_order: float | None = None  # rupees
+    incentive_per_day: float | None = None  # rupees
     rider_ids_shared_with: str | None = None
     is_active: bool | None = None
     parser_type: str | None = None
@@ -141,6 +151,7 @@ class RiderOut(BaseModel):
     ifsc: str | None = None
     mob_no: str | None = None
     is_active: bool = True
+    salary: int | None = None  # paise per cycle (salary companies); rupeeized out
     # Set on create-for-existing-person when blank fields were filled from
     # another of their rider rows: {"from": "JI10000@Jiffy", "fields": [...]}.
     copied_from: dict | None = None
@@ -159,6 +170,7 @@ class RiderPatch(BaseModel):
     ifsc: str | None = None
     mob_no: str | None = None
     is_active: bool | None = None
+    salary: float | None = None  # rupees per cycle (salary companies)
     new_rider_id: str | None = None
     new_company: str | None = None
 
