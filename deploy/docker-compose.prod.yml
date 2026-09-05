@@ -77,6 +77,32 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Public DEMO copy for recruiters / visitors — same image, its own SQLite
+  # database on a tmpfs (fake riders re-seeded on every restart), no link to
+  # the real Postgres at all. Enabled with COMPOSE_PROFILES=demo and
+  # DEMO_ADDRESS=<hostname> in deploy/.env; the login page shows "Explore the
+  # live demo" (admin@demo.com / Demo-1234) and the header a DEMO ribbon.
+  # Reset it any time with `docker restart payout-demo` (cron does it weekly).
+  demo:
+    image: ghcr.io/yuvrajganguly/automated_payment_system:${PAYOUT_IMAGE_TAG:-latest}
+    container_name: payout-demo
+    profiles: ["demo"]
+    environment:
+      - PAYOUT_DB=/data/demo.db
+      - PAYOUT_SEED_DEMO=1
+      - PAYOUT_JWT_SECRET=${PAYOUT_DEMO_JWT_SECRET:-${PAYOUT_JWT_SECRET}-demo}
+      - PAYOUT_COOKIE_SECURE=true
+      - PAYOUT_DOCS_DIR=/data/documents
+    tmpfs:
+      - /data:size=64m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     container_name: payout-caddy
@@ -87,6 +113,9 @@ services:
       - "443:443"
     environment:
       - SITE_ADDRESS=${SITE_ADDRESS:?e.g. payout.203-0-113-10.sslip.io — set in deploy/.env}
+      # Hostname of the demo copy (profile "demo"). Unset -> demo.localhost,
+      # which Caddy serves with an internal certificate and nobody reaches.
+      - DEMO_ADDRESS=${DEMO_ADDRESS:-demo.localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data                     # keeps the TLS certificates

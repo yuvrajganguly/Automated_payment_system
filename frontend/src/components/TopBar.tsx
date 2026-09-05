@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { workspaceFor, workspaceUrl, workspacesFor } from './workspaces'
 import emblem from '../assets/qwikserve-emblem.png'
+import { useApi } from '../hooks/useApi'
 
 /** The command bar: brand mark · workspace switcher · ⌘K · identity.
  *  Fixed, glass, and the only chrome above the content. */
@@ -11,6 +12,9 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const navigate = useNavigate()
   const active = workspaceFor(pathname)
   const isCreator = user?.role === 'creator'
+  // The public demo copy announces itself; the real deployment never sets this.
+  const health = useApi<{ status: string; demo: boolean }>('/health', [], { silent401: true })
+  const isDemo = health.data?.demo === true
 
   return (
     <header className="glass-bar fixed top-0 inset-x-0 z-40 h-14 flex items-center gap-4 px-4">
@@ -26,6 +30,15 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           QwikServe
         </span>
       </Link>
+      {isDemo && (
+        <span
+          title="This is a public demo with generated sample data. Nothing here is real, and it resets weekly."
+          className="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide
+                     bg-amber-400/15 text-amber-200 border border-amber-400/30 select-none"
+        >
+          DEMO · sample data
+        </span>
+      )}
 
       {/* Workspace switcher — the app's spine. */}
       <nav className="flex items-center gap-0.5 mx-auto rounded-xl p-1

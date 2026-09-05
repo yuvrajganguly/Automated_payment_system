@@ -207,3 +207,17 @@ sign in at all, on the server:
 (`set-password` prompts for the new password without echoing it and
 re-activates the account.) After setting SMTP, verify with
 `docker compose -f docker-compose.prod.yml exec app payout-manage test-email --to you@example.com`.
+
+## Public demo copy (for a CV / visitors)
+
+Same image, separate process, SQLite on a tmpfs seeded with fake riders —
+no connection to the real database. In `deploy/.env`:
+
+    COMPOSE_PROFILES=demo
+    DEMO_ADDRESS=demo.13-232-172-91.sslip.io     # or any hostname pointing at this box
+
+then `docker compose -f docker-compose.prod.yml up -d`. Caddy fetches a
+certificate for DEMO_ADDRESS; the login page shows "Explore the live demo"
+(admin@demo.com / Demo-1234) and the header carries a DEMO ribbon. Reset the
+sample data any time with `docker restart payout-demo`; a weekly reset is
+`echo '0 3 * * 1 root docker restart payout-demo' > /etc/cron.d/payout-demo-reset`.

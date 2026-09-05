@@ -12,3 +12,20 @@
 		-Server
 	}
 }
+
+# Public demo copy (compose profile "demo"). With DEMO_ADDRESS unset this is
+# demo.localhost: Caddy uses an internal certificate and never asks Let's
+# Encrypt, so the block is harmless on a box without the demo running.
+{$DEMO_ADDRESS} {
+	encode gzip
+	reverse_proxy demo:8000
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Robots-Tag "noindex"
+		-Server
+	}
+}
