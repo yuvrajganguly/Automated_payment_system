@@ -7,7 +7,7 @@ from io import BytesIO
 import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
-from payout.api.auth import get_current_user, require_admin, require_recruiter
+from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -255,7 +255,7 @@ def export_riders(
     hub: str | None = None,
     active: bool | None = None,
     body: ExportSelection = Body(default=ExportSelection()),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(no_recruiter),  # no bulk data leaves with field staff
 ):
     """Riders as a styled .xlsx download. Honours the same filters as the
     list endpoint so the export matches the on-screen scope."""

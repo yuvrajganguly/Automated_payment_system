@@ -98,13 +98,10 @@ export function PersonPage() {
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        {seesMoney && (
-          <>
-            <Stat label="Current Balance" value={fmt(person.current_balance ?? 0)} bad={(person.current_balance ?? 0) < 0} />
-            <Stat label="Arrears Outstanding" value={fmt(person.arrears_outstanding ?? 0)} bad={(person.arrears_outstanding ?? 0) > 0} />
-            <Stat label="Total Dues" value={fmt((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0))} bad={((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0)) > 0} />
-          </>
-        )}
+        {/* Everyone sees where the rider stands; only money roles see the ledger behind it. */}
+        <Stat label="Current Balance" value={fmt(person.current_balance ?? 0)} bad={(person.current_balance ?? 0) < 0} />
+        <Stat label="Arrears Outstanding" value={fmt(person.arrears_outstanding ?? 0)} bad={(person.arrears_outstanding ?? 0) > 0} />
+        <Stat label="Total Dues" value={fmt((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0))} bad={((person.arrears_outstanding ?? 0) - (person.current_balance ?? 0)) > 0} />
         <Stat label="Rider IDs" value={person.riders.length.toString()} />
         <Stat label="Open EV"
               value={person.ev?.ev_id ?? '-'}

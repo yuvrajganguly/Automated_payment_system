@@ -96,16 +96,16 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
         }
         for h in history_rows
     ]
-    # Recruiters onboard people and manage the fleet; balances are not theirs
-    # to see. The Android app hides the fields; the API must not leak them.
-    money_visible = user.get("role") != "recruiter"
+    # Recruiters see where a rider STANDS (balance, arrears) so they don't
+    # ask for money that was already added — but never the ledger behind it
+    # (2026-09-05; until then the two numbers were nulled for them too).
     out = PersonOut(
         person_id=pr["person_id"],
         display_name=pr["display_name"],
         deduction_company=pr["deduction_company"],
         deduction_rider_id=pr["deduction_rider_id"],
-        current_balance=pr["current_balance"] if money_visible else None,
-        arrears_outstanding=pr["arrears_outstanding"] if money_visible else None,
+        current_balance=pr["current_balance"],
+        arrears_outstanding=pr["arrears_outstanding"],
         riders=riders,
         ev=ev_summary,
         ev_history=ev_history,

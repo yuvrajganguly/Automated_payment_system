@@ -139,11 +139,18 @@ def test_recruiter_is_fenced_off_money_and_admin_routes(db, client):
     )
 
 
-def test_person_money_hidden_from_recruiter(db, client):
+def test_recruiter_sees_standing_but_not_ledger_or_exports(db, client):
+    """A recruiter sees the balance and arrears (so they don't request money
+    that is already there) but not the transactions behind them, and cannot
+    pull spreadsheets."""
     pid = make_person(db, "Rich Rider", balance=50_000, arrears=20_000)
     db.commit()
-    r = client.get(f"/api/persons/{pid}", headers=_login(client, _RECRUITER)).json()
-    assert r["current_balance"] is None and r["arrears_outstanding"] is None
+    h = _login(client, _RECRUITER)
+    r = client.get(f"/api/persons/{pid}", headers=h).json()
+    assert r["current_balance"] == 500.0 and r["arrears_outstanding"] == 200.0
+    assert client.get(f"/api/ledger/{pid}", headers=h).status_code == 403
+    assert client.post("/api/riders/export", json={"ids": []}, headers=h).status_code == 403
+    assert client.post("/api/evs/export", json={"ids": []}, headers=h).status_code == 403
     r = client.get(f"/api/persons/{pid}", headers=_login(client, _ADMIN)).json()
     assert r["current_balance"] == 500.0 and r["arrears_outstanding"] == 200.0
 

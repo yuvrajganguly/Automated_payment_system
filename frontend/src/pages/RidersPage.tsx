@@ -11,6 +11,7 @@ import type { Company, RiderOut } from '../api/types'
 
 export function RidersPage() {
   const { user } = useAuth()
+  const isRecruiter = user?.role === 'recruiter'
   const isAdmin = user?.role === 'admin' || user?.role === 'creator'
   const [riders, setRiders] = useState<RiderOut[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -48,7 +49,9 @@ export function RidersPage() {
     <div className="max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">Riders</h1>
-        <ExportButton path="/riders/export" name="riders.xlsx" ids={visibleRiders.map((r) => r.rider_id + '|' + r.company)} />
+        {!isRecruiter && (
+          <ExportButton path="/riders/export" name="riders.xlsx" ids={visibleRiders.map((r) => r.rider_id + '|' + r.company)} />
+        )}
       </div>
       <p className="text-slate-500 text-sm mb-6">Browse the roster. Click a Person ID to open the full profile.</p>
 

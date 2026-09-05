@@ -6,7 +6,7 @@ from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from payout.api.auth import get_current_user, require_admin, require_recruiter
+from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -54,7 +54,7 @@ def list_ev_models(_: dict = Depends(get_current_user)) -> list[EvModelOut]:
 def export_ev_units(
     status: str | None = None,
     body: ExportSelection = Body(default=ExportSelection()),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(no_recruiter),  # no bulk data leaves with field staff
 ):
     """EV units as a styled .xlsx download."""
     with get_connection() as conn:
