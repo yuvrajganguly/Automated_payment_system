@@ -228,3 +228,57 @@ def test_duplicate_name_can_be_added_anyway_but_not_duplicate_account(db, client
         },
     )
     assert r.status_code == 409
+
+
+def test_second_rider_id_copies_bank_and_phone_from_the_person(db, client):
+    """Adding a rider id at another company to a known person carries their
+    account, IFSC and phone across when left blank — and says so. A value
+    typed on the form wins over the copy. Phone is stored at onboarding."""
+    r = client.post(
+        "/api/riders",
+        json={
+            "company": "Blitz",
+            "name": "Copy Rider",
+            "account_no": "5550001",
+            "ifsc": "HDFC0000123",
+            "mob_no": "98765 43210",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["mob_no"] == "98765 43210"  # used to be dropped on the floor
+    pid = r.json()["person_id"]
+    r = client.post(
+        "/api/riders",
+        json={"company": "Myntra", "name": "Copy Rider", "person_id": pid, "rider_id": "MY-COPY"},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert (body["account_no"], body["ifsc"], body["mob_no"]) == (
+        "5550001",
+        "HDFC0000123",
+        "98765 43210",
+    )
+    assert body["copied_from"]["fields"] == ["account_no", "ifsc", "mob_no"]
+    assert body["copied_from"]["from"].endswith("@Blitz")
+    row = db.execute(
+        "SELECT account_no, ifsc, mob_no FROM rider_master WHERE rider_id='MY-COPY'"
+    ).fetchone()
+    assert (row["account_no"], row["ifsc"], row["mob_no"]) == (
+        "5550001",
+        "HDFC0000123",
+        "98765 43210",
+    )
+    # A different account given explicitly is kept, only the blanks are copied.
+    r = client.post(
+        "/api/riders",
+        json={
+            "company": "Dealshare",
+            "name": "Copy Rider",
+            "person_id": pid,
+            "rider_id": "DS-COPY",
+            "account_no": "7770002",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["account_no"] == "7770002"
+    assert r.json()["copied_from"]["fields"] == ["ifsc", "mob_no"]

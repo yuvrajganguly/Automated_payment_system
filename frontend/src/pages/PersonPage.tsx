@@ -220,10 +220,10 @@ export function PersonPage() {
         </table>
       </Section>
 
-      {isAdmin && (
+      {(isAdmin || user?.role === 'recruiter') && (
         <AddAtAnotherCompanyCard personId={person.person_id}
                                  displayName={person.display_name}
-                                 existingCompanies={person.riders.map((r) => r.company)}
+                                 existingRiders={person.riders}
                                  companies={companies}
                                  onAdded={load} />
       )}
@@ -960,9 +960,9 @@ function RiderRow({
 }
 
 function AddAtAnotherCompanyCard({
-  personId, displayName, existingCompanies, companies, onAdded,
+  personId, displayName, existingRiders, companies, onAdded,
 }: {
-  personId: number; displayName: string; existingCompanies: string[];
+  personId: number; displayName: string; existingRiders: PersonOut['riders'];
   companies: CompanyOpt[]; onAdded: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -970,25 +970,36 @@ function AddAtAnotherCompanyCard({
   // rider_id at a company they're already on (split worker codes, replaced ID,
   // etc.). The (rider_id, company) PK on rider_master still prevents duplicates.
   const allCompanies = companies.map((c) => c.company_name)
-  const usedSet = new Set(existingCompanies)
+  const usedSet = new Set(existingRiders.map((r) => r.company))
+  // The person's details travel with them: prefill bank account, IFSC and
+  // phone from the row they already have (the server does the same for
+  // anything left blank), and say where they came from.
+  const source = existingRiders.find((r) => r.is_active) ?? existingRiders[0]
   const empty = {
     company: '', rider_id: '',
-    hub: '', vehicle: '', account_no: '', ifsc: '',
+    hub: source?.hub ?? '', vehicle: '',
+    account_no: source?.account_no ?? '', ifsc: source?.ifsc ?? '', mob_no: source?.mob_no ?? '',
   }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [tone, setTone] = useState<'ok' | 'err'>('ok')
+  const prefilled = source && (source.account_no || source.ifsc || source.mob_no)
+    ? [source.mob_no && 'phone', source.account_no && 'account', source.ifsc && 'IFSC'].filter(Boolean).join(', ')
+    : ''
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const r = await api.post<{ rider_id: string }>('/riders', {
+      const r = await api.post<{ rider_id: string; copied_from: { from: string; fields: string[] } | null }>('/riders', {
         ...form,
         name: displayName,
         person_id: personId,
       })
-      setTone('ok'); setMsg(`Added at ${form.company} (rider_id=${r.rider_id})`)
+      const copied = r.copied_from
+        ? ` · ${r.copied_from.fields.map((f) => ({ account_no: 'account', ifsc: 'IFSC', mob_no: 'phone' }[f] ?? f)).join(', ')} copied from ${r.copied_from.from}`
+        : ''
+      setTone('ok'); setMsg(`Added at ${form.company} (rider_id=${r.rider_id})${copied}`)
       setForm({ ...empty, company: '' })
       onAdded()
     } catch (err) {
@@ -1030,6 +1041,13 @@ function AddAtAnotherCompanyCard({
                  on={(v) => setForm({ ...form, account_no: v })} />
           <Field label="IFSC" v={form.ifsc}
                  on={(v) => setForm({ ...form, ifsc: v.toUpperCase() })} />
+          <Field label="Phone" v={form.mob_no}
+                 on={(v) => setForm({ ...form, mob_no: v })} />
+          {prefilled && source && (
+            <p className="col-span-2 text-xs text-slate-500 -mt-1">
+              {prefilled} filled in from {source.rider_id}@{source.company} — edit if this company uses different details.
+            </p>
+          )}
           <div className="col-span-2 flex gap-2 items-center mt-1">
             <button type="submit" disabled={busy || !form.company}
                     className="bg-brand hover:bg-brand-700 text-white px-3 py-1.5 rounded disabled:opacity-50">

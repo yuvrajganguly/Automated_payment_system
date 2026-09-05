@@ -48,9 +48,11 @@ class RiderIn(BaseModel):
     vehicle: str | None = None
     account_no: str | None = None
     ifsc: str | None = None
+    mob_no: str | None = None
     # Attach this new rider_master row to an existing person, instead of
     # creating a fresh one by display_name lookup. Used when adding a person
-    # to a second company.
+    # to a second company. Bank account, IFSC and phone left blank are then
+    # copied from the person's latest rider row (see RiderOut.copied_from).
     person_id: int | None = None
     # A rider with the same NAME at this company already exists and the
     # operator has seen the warning and wants a separate person anyway
@@ -79,6 +81,9 @@ class RiderOut(BaseModel):
     ifsc: str | None = None
     mob_no: str | None = None
     is_active: bool = True
+    # Set on create-for-existing-person when blank fields were filled from
+    # another of their rider rows: {"from": "JI10000@Jiffy", "fields": [...]}.
+    copied_from: dict | None = None
 
 
 class RiderPatch(BaseModel):

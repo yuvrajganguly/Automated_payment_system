@@ -101,7 +101,7 @@ def _conflict_message(conflict: dict, action: str = "save") -> str:
 
 
 def _insert_rider_into_db(
-    conn, *, rider_id, company, name, hub, vehicle, account_no, ifsc, person_id=None
+    conn, *, rider_id, company, name, hub, vehicle, account_no, ifsc, person_id=None, mob_no=None
 ):
     """Shared write path used by both POST and bulk import.
     Returns (created: bool, rider_id: str, person_id: int).
@@ -156,8 +156,18 @@ def _insert_rider_into_db(
     veh = (vehicle or "").strip().upper() or "BIKE"
     conn.execute(
         "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, "
-        "account_no, ifsc) VALUES (?,?,?,?,?,?,?,?)",
-        (rider_id, company, person_id, name, hub, veh, account_no, ifsc),
+        "account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            rider_id,
+            company,
+            person_id,
+            name,
+            hub,
+            veh,
+            account_no,
+            ifsc,
+            (mob_no or "").strip() or None,
+        ),
     )
     # A real id tagged to a person who was carrying a system placeholder at
     # this company: the placeholder is retired (history moves onto the real id).
@@ -626,6 +636,27 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                     f"That {label} is already on #{other['person_id']} {other['display_name']}. "
                     "Same person? Add them to this company from their profile instead.",
                 )
+        # Adding a second rider id to a known person: bank account, IFSC and
+        # phone are the person's, not the company's — copy whatever was left
+        # blank from their latest rider row and say so in the response.
+        account_no, ifsc, mob_no = body.account_no, body.ifsc, body.mob_no
+        copied_from: dict | None = None
+        if body.person_id is not None:
+            src = conn.execute(
+                "SELECT rider_id, company, account_no, ifsc, mob_no FROM rider_master "
+                "WHERE person_id=? ORDER BY is_active DESC, created_at DESC, rider_id DESC LIMIT 1",
+                (body.person_id,),
+            ).fetchone()
+            if src:
+                fields = []
+                if not (account_no or "").strip() and src["account_no"]:
+                    account_no, fields = src["account_no"], [*fields, "account_no"]
+                if not (ifsc or "").strip() and src["ifsc"]:
+                    ifsc, fields = src["ifsc"], [*fields, "ifsc"]
+                if not (mob_no or "").strip() and src["mob_no"]:
+                    mob_no, fields = src["mob_no"], [*fields, "mob_no"]
+                if fields:
+                    copied_from = {"from": f"{src['rider_id']}@{src['company']}", "fields": fields}
         _, rider_id, person_id = _insert_rider_into_db(
             conn,
             rider_id=body.rider_id,
@@ -633,8 +664,9 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             name=body.name,
             hub=body.hub,
             vehicle=body.vehicle,
-            account_no=body.account_no,
-            ifsc=body.ifsc,
+            account_no=account_no,
+            ifsc=ifsc,
+            mob_no=mob_no,
             person_id=body.person_id,
         )
         if aadhaar or pan:
@@ -654,8 +686,10 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             details={
                 "hub": body.hub,
                 "vehicle": body.vehicle,
-                "account_no": body.account_no,
-                "ifsc": body.ifsc,
+                "account_no": account_no,
+                "ifsc": ifsc,
+                "mob_no": mob_no,
+                "copied_from": copied_from,
                 "placeholder": rider_id.startswith(PLACEHOLDER_PREFIX),
             },
         )
@@ -667,8 +701,10 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         name=body.name,
         hub=body.hub,
         vehicle=body.vehicle,
-        account_no=body.account_no,
-        ifsc=body.ifsc,
+        account_no=account_no,
+        ifsc=ifsc,
+        mob_no=mob_no,
+        copied_from=copied_from,
         is_active=True,
     )
 
