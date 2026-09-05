@@ -233,7 +233,10 @@ CREATE TABLE IF NOT EXISTS users (
     phone         TEXT,                           -- E.164 (+91…); second login id
     created_at    TEXT DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone) WHERE phone IS NOT NULL;
+-- idx_users_phone (unique, partial) is created by migration 0010, which runs
+-- AFTER this script: on a database that predates the column, creating the
+-- index here would fail before the migration could add the column
+-- (the 2026-09-05 crash-loop on the live server).
 
 -- ── company_cycles ──────────────────────────────────────────────────────────
 -- One row per committed engine run (per company per cycle). Records the

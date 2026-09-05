@@ -21,6 +21,7 @@ _NEW_COLUMNS = [
     ("cod_holds", "hub"),
     ("cod_holds", "worker_name"),
     ("cod_holds", "hub_code"),
+    ("users", "phone"),
 ]
 
 
@@ -66,6 +67,11 @@ def test_pre_runner_database_gets_every_migration():
         "    worker_name  TEXT,\n",
         "",
     )
+    old_schema = old_schema.replace(
+        "    phone         TEXT,                           -- E.164 (+91…); second login id\n",
+        "",
+    )
+    assert "phone         TEXT" not in old_schema
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
     assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema
 
