@@ -17,3 +17,5 @@ payout.db*
 *.recovered
 *.recovered2
 *.bak_rate_fix*
+# the Android app is built by its own CI job, never by the server image
+android/

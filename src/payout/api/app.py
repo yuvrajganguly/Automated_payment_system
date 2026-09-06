@@ -20,6 +20,9 @@ from payout.api.routes import (
     analytics as analytics_routes,
 )
 from payout.api.routes import (
+    app as app_routes,
+)
+from payout.api.routes import (
     arrears as arrears_routes,
 )
 from payout.api.routes import (
@@ -172,6 +175,7 @@ app.add_middleware(RupeeizeMiddleware)
 # every signed-in role; their WRITE routes are gated individually.
 _NO_RECRUITER = [Depends(no_recruiter)]
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
+app.include_router(app_routes.router, prefix="/api/app", tags=["app"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
 app.include_router(
     cycle_routes.router, prefix="/api/cycles", tags=["cycles"], dependencies=_NO_RECRUITER

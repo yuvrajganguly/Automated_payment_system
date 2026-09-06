@@ -279,6 +279,23 @@ CREATE TABLE IF NOT EXISTS users (
 -- index here would fail before the migration could add the column
 -- (the 2026-09-05 crash-loop on the live server).
 
+-- ── refresh_tokens ──────────────────────────────────────────────────────────
+-- Long-lived sessions for the recruiter app (payout/auth/sessions.py). Only
+-- the SHA-256 of the token is kept; rotation links old → new via replaced_by.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash    TEXT NOT NULL UNIQUE,
+    email         TEXT NOT NULL,
+    client        TEXT,                         -- "android <model>" as the app reports it
+    created_at    TEXT DEFAULT (datetime('now')),
+    last_used_at  TEXT,
+    expires_at    TEXT NOT NULL,
+    revoked_at    TEXT,
+    revoke_reason TEXT,
+    replaced_by   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_email ON refresh_tokens (email);
+
 -- ── company_cycles ──────────────────────────────────────────────────────────
 -- One row per committed engine run (per company per cycle). Records the
 -- headline numbers so dashboards can render cross-company stats without

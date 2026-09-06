@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
@@ -17,9 +17,17 @@ from payout.api.auth import (
     get_current_user,
     set_auth_cookie,
 )
+from payout.api.config import ACCESS_TOKEN_EXPIRES
 from payout.api.ratelimit import rate_limit
-from payout.api.schemas import ChangePasswordIn, TokenOut, UserOut
+from payout.api.schemas import ChangePasswordIn, LogoutIn, RefreshIn, TokenOut, UserOut
 from payout.auth import hash_password
+from payout.auth.sessions import (
+    RefreshError,
+    issue_refresh_token,
+    revoke_all,
+    revoke_refresh_token,
+    rotate_refresh_token,
+)
 from payout.db import get_connection
 from payout.notifications import email_configured, send_email
 
@@ -182,6 +190,7 @@ def reset_password(body: ResetPasswordIn) -> dict:
             "UPDATE users SET password_hash=? WHERE email=?",
             (hash_password(body.new_password), email),
         )
+        revoke_all(conn, email, reason="password reset")
         conn.execute(
             "UPDATE password_reset_tokens SET used_at=datetime('now') WHERE id=?",
             (token["id"],),
@@ -190,12 +199,23 @@ def reset_password(body: ResetPasswordIn) -> dict:
     return {"ok": True, "message": "Password updated. You can sign in now."}
 
 
+_refresh_limit = rate_limit("refresh", limit=60, window_seconds=15 * 60)
+
+
 @router.post("/login", response_model=TokenOut, dependencies=[Depends(_login_limit)])
-def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()) -> TokenOut:
+def login(
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    device: str | None = Form(None),
+) -> TokenOut:
     """Standard OAuth2 password flow. `username` is the user's email or phone.
 
     Sets the JWT as an httpOnly cookie for browser clients and also returns it
-    in the body so API/script clients can use a Bearer header."""
+    in the body so API/script clients can use a Bearer header.
+
+    The recruiter app sends `device` (e.g. "android Pixel 7") and gets a
+    refresh token as well, so the phone stays signed in for 30 days of use
+    without ever asking for the password again (POST /auth/refresh)."""
     user = authenticate(form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -204,15 +224,69 @@ def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()) 
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = create_access_token(subject=user["email"], role=user["role"])
-    set_auth_cookie(response, token)
-    return TokenOut(access_token=token, role=user["role"], email=user["email"])
+    refresh = None
+    if device and device.strip():
+        with get_connection() as conn:
+            refresh = issue_refresh_token(conn, user["email"], device.strip())
+            conn.commit()
+    else:
+        set_auth_cookie(response, token)
+    return TokenOut(
+        access_token=token,
+        role=user["role"],
+        email=user["email"],
+        expires_in=int(ACCESS_TOKEN_EXPIRES.total_seconds()),
+        refresh_token=refresh,
+    )
+
+
+@router.post("/refresh", response_model=TokenOut, dependencies=[Depends(_refresh_limit)])
+def refresh(body: RefreshIn) -> TokenOut:
+    """Trade a refresh token for a new access token — and a new refresh
+    token; the old one is retired. A retired token presented again means a
+    copy exists somewhere, and every session of the account is revoked."""
+    with get_connection() as conn:
+        try:
+            email, new_refresh, _client = rotate_refresh_token(conn, body.refresh_token)
+        except RefreshError as exc:
+            conn.commit()  # the theft-response revocation must stick
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        row = conn.execute("SELECT role FROM users WHERE email=?", (email,)).fetchone()
+        conn.commit()
+    token = create_access_token(subject=email, role=row["role"])
+    return TokenOut(
+        access_token=token,
+        role=row["role"],
+        email=email,
+        expires_in=int(ACCESS_TOKEN_EXPIRES.total_seconds()),
+        refresh_token=new_refresh,
+    )
 
 
 @router.post("/logout")
-def logout(response: Response) -> dict:
-    """Clear the auth cookie. Safe to call even when not logged in."""
+def logout(response: Response, body: LogoutIn | None = Body(None)) -> dict:
+    """Clear the auth cookie and, if the app sends its refresh token, revoke
+    it. Safe to call even when not logged in."""
     clear_auth_cookie(response)
+    if body and body.refresh_token:
+        with get_connection() as conn:
+            revoke_refresh_token(conn, body.refresh_token)
+            conn.commit()
     return {"ok": True}
+
+
+@router.post("/logout-everywhere")
+def logout_everywhere(response: Response, user: dict = Depends(get_current_user)) -> dict:
+    """Revoke all of my app sessions (e.g. after losing a phone)."""
+    clear_auth_cookie(response)
+    with get_connection() as conn:
+        n = revoke_all(conn, user["email"], reason="signed out everywhere by self")
+        conn.commit()
+    return {"ok": True, "sessions_revoked": n}
 
 
 @router.get("/me", response_model=UserOut)
@@ -258,5 +332,6 @@ def change_password(body: ChangePasswordIn, user: dict = Depends(get_current_use
             "UPDATE users SET password_hash=? WHERE email=?",
             (hash_password(body.new_password), user["email"]),
         )
+        revoke_all(conn, user["email"], reason="password changed")
         conn.commit()
     return {"ok": True}

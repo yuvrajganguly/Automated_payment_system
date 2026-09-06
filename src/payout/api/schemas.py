@@ -19,6 +19,19 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
     role: str
     email: str
+    # Seconds until access_token expires; app clients refresh before then.
+    expires_in: int | None = None
+    # Only when the login named a device (the recruiter app): a long-lived
+    # token to trade for new access tokens at POST /auth/refresh. Shown once.
+    refresh_token: str | None = None
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+
+class LogoutIn(BaseModel):
+    refresh_token: str | None = None
 
 
 class UserOut(BaseModel):

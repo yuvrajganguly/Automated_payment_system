@@ -1,0 +1,13 @@
+<resources>
+    <!-- Splash: the app draws its own UI with Compose; this only covers the cold start. -->
+    <style name="Theme.Qwikserve.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Qwikserve</item>
+    </style>
+    <style name="Theme.Qwikserve" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

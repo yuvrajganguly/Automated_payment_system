@@ -318,8 +318,6 @@ def _0013_company_payment_model(conn: Any) -> None:
     add_column(conn, "companies", "cadence", "TEXT NOT NULL DEFAULT 'weekly'")
     add_column(conn, "companies", "per_order_rate", "INTEGER")
     add_column(conn, "companies", "notes", "TEXT")
-    # Parameterised: a double-quoted literal is a string to SQLite but an
-    # identifier to Postgres (CI caught exactly that).
     conn.execute("UPDATE companies SET cadence='slots' WHERE company_name=?", ("Spencer's",))
 
 
@@ -417,6 +415,32 @@ def _0016_pidge_delhivery_retire_bluedart_dealshare(conn: Any) -> None:
     )
 
 
+def _0017_refresh_tokens(conn: Any) -> None:
+    """Refresh tokens for the recruiter app's long-lived sessions
+    (2026-09-06). Mirrors the table in schema.py."""
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS refresh_tokens ("
+        "  id            INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  token_hash    TEXT NOT NULL UNIQUE,"
+        "  email         TEXT NOT NULL,"
+        "  client        TEXT,"
+        "  created_at    TEXT DEFAULT (datetime('now')),"
+        "  last_used_at  TEXT,"
+        "  expires_at    TEXT NOT NULL,"
+        "  revoked_at    TEXT,"
+        "  revoke_reason TEXT,"
+        "  replaced_by   INTEGER"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_email ON refresh_tokens (email)")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -437,6 +461,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
         "0016_pidge_delhivery_retire_bluedart_dealshare",
         _0016_pidge_delhivery_retire_bluedart_dealshare,
     ),
+    ("0017_refresh_tokens", _0017_refresh_tokens),
 ]
 
 _TRACKING_DDL = (

@@ -79,9 +79,12 @@ def list_documents(person_id: int, _: dict = Depends(get_current_user)) -> list[
 
 
 @person_router.get("/{person_id}/photo")
-def person_photo(person_id: int, _: dict = Depends(get_current_user)) -> Response:
+def person_photo(
+    person_id: int, size: str | None = None, _: dict = Depends(get_current_user)
+) -> Response:
     """The rider's profile picture: the most recent 'photo' document. 404 when
-    there is none, so an <img> can fall back to initials."""
+    there is none, so an <img> can fall back to initials. ``size=thumb``
+    returns a 160 px square-fit JPEG for list tiles (cached in memory)."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT content_type, storage_key FROM rider_documents "
@@ -95,11 +98,44 @@ def person_photo(person_id: int, _: dict = Depends(get_current_user)) -> Respons
         data = get_storage().get(row["storage_key"])
     except FileNotFoundError as exc:
         raise HTTPException(410, "The photo is missing from the document store") from exc
+    if size == "thumb":
+        return Response(
+            content=_thumb(row["storage_key"], data),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
     return Response(
         content=data,
         media_type=row["content_type"],
         headers={"Cache-Control": "private, max-age=60"},
     )
+
+
+_THUMB_PX = 160
+_thumb_cache: dict[str, bytes] = {}
+
+
+def _thumb(key: str, data: bytes) -> bytes:
+    """160 px JPEG for list tiles. Keyed by storage key (a new photo gets a
+    new key), so the cache never serves a stale face."""
+    hit = _thumb_cache.get(key)
+    if hit is not None:
+        return hit
+    import io
+
+    from PIL import Image, ImageOps
+
+    im = Image.open(io.BytesIO(data))
+    im = ImageOps.exif_transpose(im)
+    im = ImageOps.fit(im, (_THUMB_PX, _THUMB_PX))
+    if im.mode not in ("RGB", "L"):
+        im = im.convert("RGB")
+    out = io.BytesIO()
+    im.save(out, format="JPEG", quality=80, optimize=True)
+    if len(_thumb_cache) > 2000:
+        _thumb_cache.clear()
+    _thumb_cache[key] = out.getvalue()
+    return _thumb_cache[key]
 
 
 @person_router.post("/{person_id}/documents", response_model=DocumentOut, status_code=201)

@@ -118,6 +118,7 @@ def test_every_mutating_route_requires_auth(client):
     anon_ok = {
         "/api/auth/login",
         "/api/auth/logout",
+        "/api/auth/refresh",  # the refresh token IS the credential; a bad one is 401
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
     }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import pandas as pd
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
@@ -328,14 +328,23 @@ def export_riders(
 
 @router.get("", response_model=list[RiderOut])
 def list_riders(
+    response: Response,
     company: str | None = None,
     hub: str | None = None,
     active: bool | None = None,
+    q: str | None = Query(None, description="matches name, rider id, phone or hub"),
+    limit: int | None = Query(None, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
     _: dict = Depends(get_current_user),
 ) -> list[RiderOut]:
     """List riders. The ``vehicle`` column is derived from whether the rider's
     person currently holds an open ev_assignment — ``EV`` when they do,
-    ``BIKE`` otherwise — independent of whatever was set at rider creation."""
+    ``BIKE`` otherwise — independent of whatever was set at rider creation.
+
+    ``q`` searches name / rider id / phone / hub (case-insensitive, any
+    part); ``limit`` + ``offset`` page through the result and the total
+    before paging is sent as the ``X-Total-Count`` header — the recruiter
+    app's search and sync use these."""
     where, params = ["1=1"], []
     if company is not None:
         where.append("rm.company=?")
@@ -346,7 +355,22 @@ def list_riders(
     if active is not None:
         where.append("rm.is_active=?")
         params.append(1 if active else 0)
+    if q and q.strip():
+        needle = f"%{q.strip().lower()}%"
+        where.append(
+            "(LOWER(rm.name) LIKE ? OR LOWER(rm.rider_id) LIKE ? OR LOWER(COALESCE(rm.mob_no,'')) "
+            "LIKE ? OR LOWER(COALESCE(rm.hub,'')) LIKE ?)"
+        )
+        params += [needle, needle, needle, needle]
+    page = ""
+    page_params: list = []
+    if limit is not None:
+        page = " LIMIT ? OFFSET ?"
+        page_params = [limit, offset]
     with get_connection() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM rider_master rm WHERE {' AND '.join(where)}", params
+        ).fetchone()[0]
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
@@ -354,9 +378,10 @@ def list_riders(
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
-            f"WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company",
-            params,
+            f"WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
+            params + page_params,
         ).fetchall()
+    response.headers["X-Total-Count"] = str(int(total))
     return [RiderOut(**_rider_dict(r)) for r in rows]
 
 

@@ -32,21 +32,38 @@ Accounts are created by the creator: `POST /users {"email","password","role":"re
 ## Auth
 
 ```
-POST /auth/login          form: username=<email or phone>&password=<pw>   (phone: 10 digits or +country code)
-                          → {"access_token","token_type":"bearer","role","email"}
-GET  /auth/me             → {"email","role"}
-POST /auth/logout
+POST /auth/login          form: username=<email or phone>&password=<pw>&device=<"android <model>">
+                          → {"access_token","token_type":"bearer","role","email","expires_in":43200,
+                             "refresh_token":"qrt_…"}          (refresh_token only when device is sent)
+POST /auth/refresh        {"refresh_token"} → same shape, NEW refresh_token (the old one is retired)
+GET  /auth/me             → {"email","role","phone"}
+POST /auth/logout         {"refresh_token"}   revokes this phone's session
+POST /auth/logout-everywhere                  revokes all of my sessions (needs a valid access token)
 ```
 
 Send `Authorization: Bearer <access_token>` on every call (the cookie the
-web console uses is not needed). Tokens last 12 h; the role is re-read from
-the database on every request, so a role change or deactivation takes effect
-immediately. Login is rate-limited server-side.
+web console uses is not needed). The access token lasts 12 h; the app keeps
+the **refresh token** in encrypted storage and calls `/auth/refresh` when a
+request comes back 401 (or shortly before `expires_in` runs out). Every
+refresh rotates the token — store the new one, discard the old. Presenting a
+retired token again revokes every session of the account (a copy exists
+somewhere), and the user must sign in again. Refresh tokens live 30 days from
+issue; a password change, a creator "set password", "sign out everywhere" or
+deactivation revokes them at once. The role is re-read from the database on
+every request, so a role change takes effect immediately. Login and refresh
+are rate-limited server-side.
+
+A refresh that answers 401 means: clear stored tokens and show the sign-in
+screen with the server's `detail` as the reason.
 
 ## Riders
 
 ```
-GET   /riders?company=&q=                 roster (rider_id, company, person_id, name, hub, vehicle, bank, is_active)
+GET   /app/bootstrap                      one call for first paint: me, active companies, hubs, ev_models, counts, api_version
+GET   /riders?company=&hub=&active=&q=&limit=&offset=
+                                          roster (rider_id, company, person_id, name, hub, vehicle, bank, phone, is_active);
+                                          q matches name / rider id / phone / hub; X-Total-Count header = total before paging
+GET   /persons/{person_id}/photo[?size=thumb]   the profile photo (thumb = 160 px JPEG for tiles); 404 = none
 GET   /riders/{rider_id}?company=
 POST  /riders                             {"company","name","rider_id"?,"hub"?,"vehicle"?,"account_no"?,"ifsc"?,"person_id"?}
                                           rider_id blank → placeholder QSPEND<NNNN>; person_id → attach to an existing person (2nd company)
