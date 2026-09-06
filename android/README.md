@@ -15,10 +15,14 @@ The debug build talks to `https://app.qwikserve.in/api/`; change
 (`http://10.0.2.2:8000/api/` from the emulator is allowed by the debug
 network config).
 
+Code lives under `com.qwikserve.recruiter` (Kotlin allows a package named `in`, but the
+annotation processors do not resolve imports through it); the installed app id is still
+`in.qwikserve.recruiter`.
+
 ## Layout
 
 ```
-app/src/main/kotlin/in/qwikserve/recruiter/
+app/src/main/kotlin/com/qwikserve/recruiter/
   QwikApp.kt            Hilt application; Coil uses the API's OkHttp client (photos need the token)
   MainActivity.kt       splash → edge-to-edge → AppRoot
   di/AppModule.kt       Json, OkHttp (auth interceptor + refresh authenticator), Retrofit, Room

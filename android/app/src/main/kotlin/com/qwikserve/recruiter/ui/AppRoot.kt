@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui
+package com.qwikserve.recruiter.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -10,9 +10,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import `in`.qwikserve.recruiter.ui.login.LoginScreen
-import `in`.qwikserve.recruiter.ui.person.PersonScreen
-import `in`.qwikserve.recruiter.ui.riders.RidersScreen
+import com.qwikserve.recruiter.ui.login.LoginScreen
+import com.qwikserve.recruiter.ui.person.PersonScreen
+import com.qwikserve.recruiter.ui.riders.RidersScreen
 
 object Routes {
     const val LOGIN = "login"

@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "in.qwikserve.recruiter"
+    namespace = "com.qwikserve.recruiter"
     compileSdk = 35
 
     defaultConfig {

@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter
+package com.qwikserve.recruiter
 
 import android.app.Application
 import coil.ImageLoader

@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui
+package com.qwikserve.recruiter.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -6,11 +6,11 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.qwikserve.recruiter.data.api.LogoutIn
-import `in`.qwikserve.recruiter.data.api.PayoutApi
-import `in`.qwikserve.recruiter.data.auth.Session
-import `in`.qwikserve.recruiter.data.auth.TokenAuthenticator
-import `in`.qwikserve.recruiter.data.auth.TokenStore
+import com.qwikserve.recruiter.data.api.LogoutIn
+import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.auth.Session
+import com.qwikserve.recruiter.data.auth.TokenAuthenticator
+import com.qwikserve.recruiter.data.auth.TokenStore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject

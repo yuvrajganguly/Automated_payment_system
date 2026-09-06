@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.di
+package com.qwikserve.recruiter.di
 
 import android.content.Context
 import androidx.room.Room
@@ -7,13 +7,13 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import `in`.qwikserve.recruiter.BuildConfig
-import `in`.qwikserve.recruiter.data.api.PayoutApi
-import `in`.qwikserve.recruiter.data.auth.AuthInterceptor
-import `in`.qwikserve.recruiter.data.auth.TokenAuthenticator
-import `in`.qwikserve.recruiter.data.auth.TokenStore
-import `in`.qwikserve.recruiter.data.db.AppDatabase
-import `in`.qwikserve.recruiter.data.db.RiderDao
+import com.qwikserve.recruiter.BuildConfig
+import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.auth.AuthInterceptor
+import com.qwikserve.recruiter.data.auth.TokenAuthenticator
+import com.qwikserve.recruiter.data.auth.TokenStore
+import com.qwikserve.recruiter.data.db.AppDatabase
+import com.qwikserve.recruiter.data.db.RiderDao
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient

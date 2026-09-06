@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui.common
+package com.qwikserve.recruiter.ui.common
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,8 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
-import `in`.qwikserve.recruiter.BuildConfig
-import `in`.qwikserve.recruiter.ui.theme.QwikColors
+import com.qwikserve.recruiter.BuildConfig
+import com.qwikserve.recruiter.ui.theme.QwikColors
 import java.text.NumberFormat
 import java.util.Locale
 

@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui.person
+package com.qwikserve.recruiter.ui.person
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,17 +36,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.qwikserve.recruiter.data.api.PersonOut
-import `in`.qwikserve.recruiter.data.db.RiderEntity
-import `in`.qwikserve.recruiter.data.repo.RiderRepository
-import `in`.qwikserve.recruiter.ui.common.Amber
-import `in`.qwikserve.recruiter.ui.common.Avatar
-import `in`.qwikserve.recruiter.ui.common.Emerald
-import `in`.qwikserve.recruiter.ui.common.Pill
-import `in`.qwikserve.recruiter.ui.common.Rose
-import `in`.qwikserve.recruiter.ui.common.Skeleton
-import `in`.qwikserve.recruiter.ui.common.StatTile
-import `in`.qwikserve.recruiter.ui.common.rupees
+import com.qwikserve.recruiter.data.api.PersonOut
+import com.qwikserve.recruiter.data.db.RiderEntity
+import com.qwikserve.recruiter.data.repo.RiderRepository
+import com.qwikserve.recruiter.ui.common.Amber
+import com.qwikserve.recruiter.ui.common.Avatar
+import com.qwikserve.recruiter.ui.common.Emerald
+import com.qwikserve.recruiter.ui.common.Pill
+import com.qwikserve.recruiter.ui.common.Rose
+import com.qwikserve.recruiter.ui.common.Skeleton
+import com.qwikserve.recruiter.ui.common.StatTile
+import com.qwikserve.recruiter.ui.common.rupees
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn

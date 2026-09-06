@@ -102,3 +102,6 @@ secrets/*
 *.pem
 *.ppk
 *.dump
+
+# the Android app's data layer is source, not data files
+!android/app/src/main/kotlin/com/qwikserve/recruiter/data/

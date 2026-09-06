@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui.login
+package com.qwikserve.recruiter.ui.login
 
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
@@ -39,9 +39,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.qwikserve.recruiter.data.api.ApiError
-import `in`.qwikserve.recruiter.data.api.PayoutApi
-import `in`.qwikserve.recruiter.data.auth.TokenStore
+import com.qwikserve.recruiter.data.api.ApiError
+import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.auth.TokenStore
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException

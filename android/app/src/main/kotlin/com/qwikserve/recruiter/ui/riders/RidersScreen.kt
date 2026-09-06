@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui.riders
+package com.qwikserve.recruiter.ui.riders
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,12 +41,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.qwikserve.recruiter.data.db.RiderEntity
-import `in`.qwikserve.recruiter.data.repo.RiderRepository
-import `in`.qwikserve.recruiter.ui.common.Avatar
-import `in`.qwikserve.recruiter.ui.common.Emerald
-import `in`.qwikserve.recruiter.ui.common.Pill
-import `in`.qwikserve.recruiter.ui.common.Skeleton
+import com.qwikserve.recruiter.data.db.RiderEntity
+import com.qwikserve.recruiter.data.repo.RiderRepository
+import com.qwikserve.recruiter.ui.common.Avatar
+import com.qwikserve.recruiter.ui.common.Emerald
+import com.qwikserve.recruiter.ui.common.Pill
+import com.qwikserve.recruiter.ui.common.Skeleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow

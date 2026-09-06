@@ -1,4 +1,4 @@
-package `in`.qwikserve.recruiter.ui.theme
+package com.qwikserve.recruiter.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
