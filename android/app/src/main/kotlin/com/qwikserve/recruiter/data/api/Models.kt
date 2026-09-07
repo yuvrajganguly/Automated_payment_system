@@ -76,7 +76,12 @@ data class RiderOut(
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("recruited_by") val recruitedBy: String? = null,
     val zone: String? = null,
+    @SerialName("referred_by") val referredBy: String? = null, // only on the create response
+    @SerialName("copied_from") val copiedFrom: CopiedFrom? = null,
 )
+
+@Serializable
+data class CopiedFrom(val from: String, val fields: List<String> = emptyList())
 
 /** Onboarding body for POST /riders. Blank strings are sent as null. */
 @Serializable
