@@ -42,6 +42,7 @@ import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.Avatar
 import com.qwikserve.recruiter.ui.common.BarButton
+import com.qwikserve.recruiter.ui.common.formWidth
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
@@ -188,14 +189,19 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
     val companies = vm.companies
     LaunchedEffect(companies.size) { if (vm.company.isBlank()) vm.company = companies.firstOrNull() ?: "" }
 
+    // The form keeps a readable width in the middle of a tablet; on a phone
+    // formWidth() is the whole screen, so nothing changes there.
     Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(Modifier.formWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
                 Text("New rider", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink, modifier = Modifier.weight(1f))
                 GhostAction("Cancel", onClick = onBack)
             }
             Rule()
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 24.dp)) {
+            Column(Modifier.formWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 24.dp)) {
                 Kicker("Company")
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) { Chips(companies, vm.company, onSelect = { vm.company = it }) }
@@ -289,7 +295,7 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 }
             }
             Rule()
-            BarButton(if (vm.busy) "Adding…" else "Add rider", onClick = { vm.save(onSaved) }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth())
+            BarButton(if (vm.busy) "Adding…" else "Add rider", onClick = { vm.save(onSaved) }, enabled = !vm.busy, modifier = Modifier.formWidth())
         }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
 import com.qwikserve.recruiter.R
 import com.qwikserve.recruiter.ui.common.BarButton
+import com.qwikserve.recruiter.ui.common.formWidth
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.Rule
@@ -38,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -162,10 +164,15 @@ fun LoginScreen(reason: String?, onSignedIn: () -> Unit, vm: LoginViewModel = hi
     var resetting by rememberSaveable { mutableStateOf(false) }
     var done by rememberSaveable { mutableStateOf<String?>(null) }
 
+    // Phone: everything full width. Tablet: the same screen, but the form keeps
+    // a readable width in the middle while the rules stay full-bleed.
     Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
-        Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+        Column(
+            Modifier.fillMaxSize().systemBarsPadding().imePadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             // Masthead — the winged Q over the design's 46 px wordmark and a 2 px rule.
-            Column(Modifier.padding(horizontal = 20.dp).padding(top = 56.dp, bottom = 22.dp)) {
+            Column(Modifier.formWidth().padding(horizontal = 20.dp).padding(top = 56.dp, bottom = 22.dp)) {
                 Image(
                     painter = painterResource(R.drawable.qwik_logo),
                     contentDescription = "Qwikserve",
@@ -181,7 +188,7 @@ fun LoginScreen(reason: String?, onSignedIn: () -> Unit, vm: LoginViewModel = hi
                 Kicker(if (resetting) "Reset password" else "Recruiter", color = Qwik.Accent700)
             }
             Rule()
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 30.dp)) {
+            Column(Modifier.formWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 30.dp)) {
                 if (resetting) {
                     ResetFields(
                         vm = vm,
@@ -253,14 +260,14 @@ fun LoginScreen(reason: String?, onSignedIn: () -> Unit, vm: LoginViewModel = hi
                     onClick = { vm.leaveReset(); resetting = false },
                     primary = false,
                     enabled = !vm.busy,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.formWidth(),
                 )
             } else {
                 BarButton(
                     if (vm.busy) "Signing in…" else "Sign in",
                     onClick = { done = null; vm.signIn(user, password, onSignedIn) },
                     enabled = !vm.busy,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.formWidth(),
                 )
             }
         }

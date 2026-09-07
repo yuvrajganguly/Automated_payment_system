@@ -48,6 +48,15 @@ or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine —
 Money, and EVs asked for from the fleet desk), **My numbers** (today / week /
 month / all-time onboardings, by company).
 
+Phone and tablet, one app (`ui/common/Layout.kt`): under 600 dp everything is
+full width, exactly as before. From 600 dp (a tablet held upright) the page is
+centred in a 720 dp column so lines stay readable, forms in 520 dp. From
+900 dp (a tablet on its side) the tab strip becomes a **rail** down the left
+with New rider and Sign out at its foot, the list keeps a phone-ish 400–440 dp,
+and tapping a rider opens their profile in a **second pane** beside it instead
+of covering the list — `PersonScreen(embedded = true)`, the same screen the
+phone pushes as a route.
+
 Requests → EVs: "Ask for EVs" files `POST /ev-requests` with a count (chips,
 1–10), the store and a one-line why. The zone is filled in server-side from
 the store, else from the recruiter. An open request can be withdrawn; the

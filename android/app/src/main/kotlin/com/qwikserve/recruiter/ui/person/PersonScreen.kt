@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,8 +48,12 @@ import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -58,39 +63,71 @@ class PersonViewModel @Inject constructor(
     saved: SavedStateHandle,
     private val repo: RiderRepository,
 ) : ViewModel() {
-    val personId: Long = checkNotNull(saved["personId"])
+    /** Which rider this screen is showing. It arrives as a navigation argument
+     *  on a phone, and as a selection in the second pane on a tablet — where
+     *  the same view model is re-pointed at whoever was tapped. */
+    private val _personId = MutableStateFlow(saved.get<Long>("personId") ?: 0L)
+    val personId: Long get() = _personId.value
 
     /** Cached rider rows paint the screen at once; the live person fills the rest. */
-    val cached: StateFlow<List<RiderEntity>> = repo.forPerson(personId)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val cached: StateFlow<List<RiderEntity>> = _personId
+        .flatMapLatest { id -> if (id == 0L) flowOf(emptyList<RiderEntity>()) else repo.forPerson(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     var person by mutableStateOf<PersonOut?>(null)
         private set
     var error by mutableStateOf<String?>(null)
         private set
 
-    init { load() }
+    init { if (personId != 0L) load() }
+
+    /** Point the screen at a rider (no-op if it is already there). */
+    fun show(id: Long) {
+        if (id == 0L || id == _personId.value) return
+        _personId.value = id
+        person = null
+        error = null
+        load()
+    }
 
     fun load() {
+        val id = _personId.value
         viewModelScope.launch {
-            try { person = repo.person(personId); error = null }
-            catch (e: IOException) { error = "Offline — showing what was last synced." }
-            catch (e: Exception) { error = e.message ?: "Could not load this rider" }
+            try {
+                val p = repo.person(id)
+                if (_personId.value == id) { person = p; error = null }
+            } catch (e: IOException) {
+                if (_personId.value == id) error = "Offline — showing what was last synced."
+            } catch (e: Exception) {
+                if (_personId.value == id) error = e.message ?: "Could not load this rider"
+            }
         }
     }
 }
 
+/**
+ * A rider's page. Full screen on a phone (with a Back action), or the right
+ * half of a tablet — [embedded] drops the status-bar padding the shell has
+ * already applied and renames Back to what it does there: clear the pane.
+ */
 @Composable
-fun PersonScreen(personId: Long, onBack: () -> Unit, vm: PersonViewModel = hiltViewModel()) {
+fun PersonScreen(
+    personId: Long,
+    onBack: () -> Unit,
+    embedded: Boolean = false,
+    vm: PersonViewModel = hiltViewModel(),
+) {
+    LaunchedEffect(personId) { vm.show(personId) }
     val cached by vm.cached.collectAsStateWithLifecycle()
     val p = vm.person
     val name = p?.displayName ?: cached.firstOrNull()?.name
     val ctx = LocalContext.current
 
     Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(if (embedded) Modifier.fillMaxSize() else Modifier.fillMaxSize().statusBarsPadding()) {
             // Masthead: back, name, identity line.
             Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
-                GhostAction("← Back", onClick = onBack, color = Qwik.Accent)
+                GhostAction(if (embedded) "✕ Close" else "← Back", onClick = onBack, color = Qwik.Accent)
                 Row(verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
                         Text(name ?: "Rider", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
