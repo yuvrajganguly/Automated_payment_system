@@ -199,7 +199,8 @@ PATCH /evs/maintenance/{id}                   {"to_date"?}  — close the window
 The app puts these behind one tap on a unit: an in-use unit offers "take back
 — spare", "take back — return to the provider" and "send for repair"; a spare
 or returned unit offers "give it to a rider" (with a rider search) and
-"send for repair"; a unit in maintenance offers "back in service", which
+"send for repair"; a vehicle that is not in the system yet is created and
+handed over in one call with `POST /evs {ev_id, provider, model, person_id}`; a unit in maintenance offers "back in service", which
 closes its open window. A rider's page has the same actions from the other
 side — "Give an EV" lists the free units.
 
@@ -279,8 +280,10 @@ rate-limited per IP and write-only.
 GET /activity/changes[?since=<cursor>]   → {"cursor": <last activity id>, "changed": ["rider","ev",…]}
 ```
 
-One indexed read, polled by the web console every 8 seconds while its tab is
-visible. When the cursor moves, the pages reload themselves — a rider
+One indexed read, polled by the web console every 3 seconds while something is
+happening and its tab is visible, backing off to 10 s after two quiet minutes
+and 30 s after ten (any change, or the tab coming back to the front, makes it
+eager again). When the cursor moves, the pages reload themselves — a rider
 onboarded from a phone shows up in the office within seconds instead of at the
 next manual refresh, which is what stops the same rider being onboarded twice.
 `changed` lists the entity types touched since the cursor you sent, so a page

@@ -30,6 +30,7 @@ import com.qwikserve.recruiter.data.api.EvUnitOut
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.TokenStore
 import com.qwikserve.recruiter.data.repo.AppRepository
+import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.ListRow
@@ -122,6 +123,7 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
     // Tapping a unit opens what can be done with it, in its current state.
     var picked by remember { mutableStateOf<EvUnitOut?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
+    var addingUnit by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 10.dp),
@@ -158,7 +160,12 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
         Rule()
         if (vm.error != null) Note(vm.error!!, color = Qwik.Accent700)
         note?.let { Note(it, color = Qwik.Ink) }
-        PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+        // weight, not fillMaxSize: the bar button below needs its 62 dp.
+        PullToRefreshBox(
+            isRefreshing = vm.refreshing,
+            onRefresh = vm::refresh,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
             if (shown.isEmpty()) {
                 Note(
                     when {
@@ -202,6 +209,20 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
                 }
             }
         }
+        Rule()
+        BarButton(
+            "New unit",
+            onClick = { note = null; addingUnit = true },
+            primary = false,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    if (addingUnit) {
+        AddUnitSheet(
+            onDone = { message -> note = message; addingUnit = false; vm.refresh() },
+            onDismiss = { addingUnit = false },
+        )
     }
 
     picked?.let { unit ->

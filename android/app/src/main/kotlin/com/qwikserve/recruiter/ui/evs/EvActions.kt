@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -33,12 +34,15 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.EvAssignIn
+import com.qwikserve.recruiter.data.api.EvModelLite
 import com.qwikserve.recruiter.data.api.EvReturnIn
+import com.qwikserve.recruiter.data.api.EvUnitIn
 import com.qwikserve.recruiter.data.api.EvUnitOut
 import com.qwikserve.recruiter.data.api.MaintenanceClose
 import com.qwikserve.recruiter.data.api.MaintenanceIn
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.db.RiderEntity
+import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
@@ -46,6 +50,7 @@ import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.ListRow
 import com.qwikserve.recruiter.ui.common.SearchField
+import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
@@ -82,8 +87,11 @@ import javax.inject.Inject
 class EvActionsViewModel @Inject constructor(
     private val api: PayoutApi,
     private val riders: RiderRepository,
+    private val app: AppRepository,
     private val json: Json,
 ) : ViewModel() {
+    /** Provider + model rate card, for a unit that is not in the system yet. */
+    val evModels: List<EvModelLite> get() = app.bootstrap.value?.evModels.orEmpty()
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -108,6 +116,7 @@ class EvActionsViewModel @Inject constructor(
         if (loadingIdle) return
         loadingIdle = true
         viewModelScope.launch {
+            runCatching { if (app.bootstrap.value == null) app.refreshBootstrap() }
             runCatching { api.evs() }
                 .onSuccess { all ->
                     idle = all.filter { it.status == "spare" || it.currentPersonId == null }
@@ -116,6 +125,29 @@ class EvActionsViewModel @Inject constructor(
                 }
                 .onFailure { error = it.readable("Could not load the fleet") }
             loadingIdle = false
+        }
+    }
+
+    /** A vehicle that arrived today: create it and hand it over in one call. */
+    fun addAndAssign(
+        evId: String,
+        model: EvModelLite,
+        personId: Long?,
+        notes: String,
+        onDone: (String) -> Unit,
+    ) {
+        val id = evId.trim().uppercase()
+        if (id.isBlank()) { error = "The unit needs its number."; return }
+        act(if (personId == null) "$id added" else "$id added and handed over", onDone) {
+            api.createEv(
+                EvUnitIn(
+                    evId = id,
+                    provider = model.provider,
+                    model = model.modelName,
+                    notes = notes.trim().ifBlank { null },
+                    personId = personId,
+                ),
+            )
         }
     }
 
@@ -313,6 +345,7 @@ fun GiveEvSheet(
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val q by vm.unitQuery.collectAsStateWithLifecycle()
+    var adding by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.clear(); vm.loadIdleUnits() }
     val shown = remember(vm.idle, q) {
         val needle = q.trim().lowercase()
@@ -328,18 +361,34 @@ fun GiveEvSheet(
             Spacer(Modifier.height(6.dp))
             Kicker(personName ?: "This rider")
             Spacer(Modifier.height(14.dp))
-            SearchField(q, onChange = { vm.unitQuery.value = it }, placeholder = "Unit number or model")
+            Segmented(
+                listOf("Free units", "New unit"),
+                selected = if (adding) 1 else 0,
+                onSelect = { adding = it == 1; vm.clear() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(14.dp))
             if (vm.error != null) {
-                Spacer(Modifier.height(10.dp))
                 Text(vm.error!!, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
             }
+            if (adding) {
+                NewUnitForm(
+                    models = vm.evModels,
+                    busy = vm.busy,
+                    action = "Add and hand over",
+                    onAdd = { id, model, notes -> vm.addAndAssign(id, model, personId, notes, onDone) },
+                )
+                return@Column
+            }
+            SearchField(q, onChange = { vm.unitQuery.value = it }, placeholder = "Unit number or model")
             Spacer(Modifier.height(8.dp))
             when {
                 vm.loadingIdle && vm.idle.isEmpty() ->
                     Text("Looking for free units…", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
                 shown.isEmpty() ->
                     Text(
-                        "No free unit matches. Ask the fleet desk from Requests → EVs.",
+                        "No free unit matches. Add it as a new unit above, or ask the fleet desk from Requests → EVs.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Qwik.N700,
                     )
@@ -378,5 +427,88 @@ private fun RiderHits(hits: List<RiderEntity>, busy: Boolean, onPick: (RiderEnti
             )
             Hairline()
         }
+    }
+}
+
+
+/** Unit number, then the provider and model from the rate card. */
+/** Stock arriving for the fleet, with no rider attached yet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddUnitSheet(
+    onDone: (String) -> Unit,
+    onDismiss: () -> Unit,
+    vm: EvActionsViewModel = hiltViewModel(),
+) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(Unit) { vm.clear(); vm.loadIdleUnits() }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Qwik.Bg) {
+        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            Text("New unit", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+            Spacer(Modifier.height(6.dp))
+            Kicker("It joins the fleet as a spare — hand it over whenever")
+            Spacer(Modifier.height(14.dp))
+            if (vm.error != null) {
+                Text(vm.error!!, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+            }
+            NewUnitForm(
+                models = vm.evModels,
+                busy = vm.busy,
+                action = "Add to the fleet",
+                onAdd = { id, model, notes -> vm.addAndAssign(id, model, null, notes, onDone) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NewUnitForm(
+    models: List<EvModelLite>,
+    busy: Boolean,
+    action: String,
+    onAdd: (String, EvModelLite, String) -> Unit,
+) {
+    var id by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
+    var chosen by remember(models) { mutableStateOf(models.firstOrNull()) }
+    if (models.isEmpty()) {
+        Text(
+            "The rate card has not loaded yet — pull down on the EVs tab and try again.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Qwik.N700,
+        )
+        return
+    }
+    Column {
+        Kicker("Unit number")
+        Spacer(Modifier.height(6.dp))
+        SearchField(id, onChange = { id = it.uppercase() }, placeholder = "e.g. CBICEVD0244")
+        Spacer(Modifier.height(14.dp))
+        Kicker("Model")
+        Spacer(Modifier.height(6.dp))
+        Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+            models.forEach { m ->
+                val on = m.modelId == chosen?.modelId
+                ListRow(
+                    title = "${m.provider} ${m.modelName}",
+                    sub = if (on) "selected" else null,
+                    onClick = { chosen = m },
+                    trailing = { if (on) Tag("✓", accent = true) },
+                )
+                Hairline()
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Kicker("Note (optional)")
+        Spacer(Modifier.height(6.dp))
+        SearchField(notes, onChange = { notes = it }, placeholder = "e.g. new from the provider today")
+        Spacer(Modifier.height(16.dp))
+        BarButton(
+            if (busy) "Adding…" else action,
+            onClick = { chosen?.let { onAdd(id, it, notes) } },
+            enabled = !busy && id.isNotBlank() && chosen != null,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

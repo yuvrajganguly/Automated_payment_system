@@ -185,6 +185,19 @@ data class EvReturnIn(
     @SerialName("returned_date") val returnedDate: String? = null, // null = today
 )
 
+/** A unit that is not in the system yet. With [personId] the server creates it
+ *  and hands it over in the same call — which is what happens in a store when
+ *  a new vehicle arrives with the rider standing next to it. */
+@Serializable
+data class EvUnitIn(
+    @SerialName("ev_id") val evId: String,
+    val provider: String,
+    val model: String,
+    val notes: String? = null,
+    @SerialName("person_id") val personId: Long? = null,
+    @SerialName("handover_date") val handoverDate: String? = null,
+)
+
 /** The server answers each action with a small object; the app only needs to
  *  know it worked and, for a return, that the office still owes a close-out. */
 @Serializable

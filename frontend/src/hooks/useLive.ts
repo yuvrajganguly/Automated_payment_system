@@ -15,13 +15,32 @@ import { api } from '../api/client'
  * process, and it costs nothing while the tab is in the background, where it
  * stops entirely.
  */
-const INTERVAL_MS = 8_000
+/**
+ * How often to ask. Three seconds while anything is happening — that is the
+ * window in which two people can start onboarding the same rider, so it is the
+ * number that matters. When nothing has moved for a while the console is
+ * probably parked on someone's second monitor, and the poll backs off; any
+ * change, or the tab coming back to the front, makes it eager again.
+ */
+const BUSY_MS = 3_000
+const CALM_MS = 10_000
+const IDLE_MS = 30_000
+const CALM_AFTER_MS = 2 * 60_000
+const IDLE_AFTER_MS = 10 * 60_000
 
 let cursor = 0
 let changed: string[] = []
+let lastChangeAt = Date.now()
 let timer: ReturnType<typeof setTimeout> | null = null
 let subscribers = 0
 const listeners = new Set<() => void>()
+
+function interval(): number {
+  const quiet = Date.now() - lastChangeAt
+  if (quiet > IDLE_AFTER_MS) return IDLE_MS
+  if (quiet > CALM_AFTER_MS) return CALM_MS
+  return BUSY_MS
+}
 
 function emit() {
   for (const l of listeners) l()
@@ -36,6 +55,7 @@ async function poll() {
     if (res.cursor !== cursor) {
       cursor = res.cursor
       changed = res.changed
+      lastChangeAt = Date.now()
       emit()
     }
   } catch {
@@ -49,11 +69,14 @@ function schedule() {
   timer = setTimeout(async () => {
     await poll()
     if (subscribers > 0) schedule()
-  }, INTERVAL_MS)
+  }, interval())
 }
 
 function onVisible() {
-  if (document.visibilityState === 'visible') void poll()
+  if (document.visibilityState !== 'visible') return
+  lastChangeAt = Date.now() // someone is looking: be eager again
+  void poll()
+  schedule()
 }
 
 function subscribe(listener: () => void): () => void {
@@ -110,4 +133,5 @@ export function lastChanged(): string[] {
 export function resetLive(): void {
   cursor = 0
   changed = []
+  lastChangeAt = Date.now()
 }

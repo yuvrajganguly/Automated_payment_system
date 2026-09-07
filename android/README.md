@@ -85,12 +85,14 @@ on the edge of a signal. On the form the upload happens after the rider is
 created, since the photo hangs off their person id; if it fails the rider is
 still saved and the note says to add it from their page.
 
-EV actions: tapping a unit in the EVs tab opens what can be done with it in
-its state — in use: take back as a spare, return to the provider, send for
+EV actions: the EVs tab has "New unit" at its foot (a vehicle that arrives for
+the fleet joins as a spare), and tapping a unit opens what can be done with it
+in its state — in use: take back as a spare, return to the provider, send for
 repair; spare or returned: give it to a rider (search), send for repair; in
 maintenance: back in service. A rider's page has the same from the other side:
-"Give an EV" lists the free units, and a held one can be taken back either
-way. The rules stay on the server (one open assignment per person, rent stops
+"Give an EV" lists the free units — or, on its "New unit" tab, creates the
+vehicle and hands it over in the same call, for the one that arrived with the
+rider standing next to it. A held one can be taken back either way. The rules stay on the server (one open assignment per person, rent stops
 on the return date, the deposit close-out is an admin's job) — the app asks
 and reports the answer in a sentence.
 

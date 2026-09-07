@@ -85,6 +85,11 @@ interface PayoutApi {
         @Query("mine") mine: Boolean? = null,
     ): List<EvUnitOut>
 
+    /** Add a unit the fleet has never seen. With a person_id it is handed over
+     *  in the same call. */
+    @POST("evs")
+    suspend fun createEv(@Body body: EvUnitIn): EvUnitOut
+
     @POST("evs/assign")
     suspend fun assignEv(@Body body: EvAssignIn): EvActionOut
 
