@@ -62,7 +62,8 @@ _SELECT = (
 def list_referrals(
     conn, *, person_id: int | None = None, status: str | None = None, created_by: str | None = None
 ) -> list[dict]:
-    where, params = [], []
+    where: list[str] = []
+    params: list[object] = []
     if person_id is not None:
         where.append("(r.new_person_id=? OR r.referrer_person_id=?)")
         params += [person_id, person_id]

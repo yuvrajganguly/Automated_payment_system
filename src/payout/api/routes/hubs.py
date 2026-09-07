@@ -129,7 +129,7 @@ def upsert_hub(conn, company: str, hub: str, body: HubIn, user: dict) -> dict:
         raise HTTPException(400, "hub is required")
     if not conn.execute("SELECT 1 FROM companies WHERE company_name=?", (company,)).fetchone():
         raise HTTPException(404, f"Company {company!r} not found")
-    fields = {}
+    fields: dict[str, object] = {}
     if "zone" in body.model_fields_set:
         fields["zone"] = normalize_zone(body.zone)
     for k in ("per_order_rate", "salary", "incentive_per_order", "incentive_per_day"):

@@ -189,8 +189,9 @@ def recruiting_board(user: dict = Depends(get_current_user)) -> dict:
     today = date.today()
     starts = _period_starts(today)
     with get_connection() as conn:
+        params: tuple[str, ...] = ()
         if user["role"] in ("admin", "creator"):
-            where, params = "recruited_by IS NOT NULL AND recruited_by<>''", ()
+            where = "recruited_by IS NOT NULL AND recruited_by<>''"
         else:
             where, params = "recruited_by=?", ((user["email"] or "").lower(),)
         rows = [
