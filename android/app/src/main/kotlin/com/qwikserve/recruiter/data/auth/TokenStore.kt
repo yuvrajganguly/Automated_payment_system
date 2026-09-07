@@ -19,13 +19,17 @@ data class Session(val email: String, val role: String)
  */
 @Singleton
 class TokenStore @Inject constructor(@ApplicationContext context: Context) {
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        "qwik_session",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    /**
+     * Encrypted preferences when the phone's keystore cooperates. Some ROMs
+     * (and a restored backup) hand back a corrupt keyset or refuse the master
+     * key outright, and this object is built during app start — so a keystore
+     * that says no must not be the end of the app. We wipe the file and try
+     * once more, then fall back to ordinary app-private preferences: a signed-in
+     * session on a working phone beats a phone that cannot open the app.
+     */
+    private val prefs: SharedPreferences = encrypted(context)
+        ?: run { wipe(context); encrypted(context) }
+        ?: context.getSharedPreferences(PLAIN_FILE, Context.MODE_PRIVATE)
 
     private val _session = MutableStateFlow(readSession())
     val session: StateFlow<Session?> = _session
@@ -65,6 +69,24 @@ class TokenStore @Inject constructor(@ApplicationContext context: Context) {
     }
 
     private companion object {
+        const val ENCRYPTED_FILE = "qwik_session"
+        const val PLAIN_FILE = "qwik_session_plain"
+
+        fun encrypted(context: Context): SharedPreferences? = runCatching {
+            EncryptedSharedPreferences.create(
+                context,
+                ENCRYPTED_FILE,
+                MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }.getOrNull()
+
+        /** Throw the unreadable keyset away — the worst case is one sign-in. */
+        fun wipe(context: Context) {
+            runCatching { context.deleteSharedPreferences(ENCRYPTED_FILE) }
+        }
+
         const val KEY_ACCESS = "access"
         const val KEY_REFRESH = "refresh"
         const val KEY_EMAIL = "email"

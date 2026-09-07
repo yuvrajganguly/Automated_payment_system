@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Qwikserve</string>
+    <string name="crash_heading">The app closed unexpectedly last time. Here is what happened — send this to whoever maintains the app.</string>
+    <string name="crash_continue">Clear and open the app</string>
 </resources>

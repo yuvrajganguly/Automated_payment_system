@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontLoadingStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,10 +43,15 @@ object Qwik {
     val Divider = Color(0x66201E1D) // ink at 40 %
 }
 
+/**
+ * Archivo, bundled. `OptionalLocal` matters: if a phone's font parser refuses
+ * one of these files, Compose quietly falls back to the system face instead of
+ * throwing at first layout — a plainer screen beats no screen.
+ */
 val Archivo = FontFamily(
-    Font(R.font.archivo_regular, FontWeight.Normal),
-    Font(R.font.archivo_semibold, FontWeight.SemiBold),
-    Font(R.font.archivo_extrabold, FontWeight.ExtraBold),
+    Font(R.font.archivo_regular, FontWeight.Normal, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.archivo_semibold, FontWeight.SemiBold, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.archivo_extrabold, FontWeight.ExtraBold, loadingStrategy = FontLoadingStrategy.OptionalLocal),
 )
 
 private val Scheme = lightColorScheme(
