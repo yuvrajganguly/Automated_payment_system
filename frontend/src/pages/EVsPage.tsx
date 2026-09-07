@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useLiveReload } from '../hooks/useLive'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -56,6 +57,8 @@ export function EVsPage() {
       .finally(() => setBusy(false))
   }
   useEffect(reload, [])
+  // Follow the server: the fleet moves from a phone too.
+  useLiveReload(reload, ['ev', 'ev_request', 'rider'])
 
   return (
     <div className="max-w-7xl mx-auto">

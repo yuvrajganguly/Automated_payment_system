@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
+import { useLiveReload } from '../hooks/useLive'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -83,6 +84,8 @@ export function PersonPage() {
     finally { setBrBusy(false) }
   }
   useEffect(load, [id])
+  // Follow the server: a recruiter may be editing this rider right now.
+  useLiveReload(load, ['rider', 'person', 'ev', 'request', 'document'])
   useEffect(() => { api.get<CompanyOpt[]>('/companies').then(setCompanies).catch(() => {}) }, [])
 
   if (busy && !person) return <Spinner label="Loading…" />

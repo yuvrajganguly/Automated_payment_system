@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,8 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.GhostAction
+import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
+import com.qwikserve.recruiter.ui.evs.GiveEvSheet
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
@@ -139,6 +142,9 @@ fun PersonScreen(
     vm: PersonViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(personId) { vm.show(personId) }
+    val evActions: EvActionsViewModel = hiltViewModel()
+    var giving by remember { mutableStateOf(false) }
+    var evNote by remember { mutableStateOf<String?>(null) }
     val cached by vm.cached.collectAsStateWithLifecycle()
     val p = vm.person
     val name = p?.displayName ?: cached.firstOrNull()?.name
@@ -196,7 +202,11 @@ fun PersonScreen(
                 val ev = p?.ev
                 when {
                     p == null -> Skeleton(200.dp)
-                    ev == null -> Text("No EV assigned.", style = MaterialTheme.typography.bodyLarge, color = Qwik.N700, modifier = Modifier.padding(horizontal = 20.dp))
+                    ev == null -> Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                        Text("No EV assigned.", style = MaterialTheme.typography.bodyLarge, color = Qwik.N700)
+                        Spacer(Modifier.height(6.dp))
+                        GhostAction("Give an EV", onClick = { evNote = null; giving = true })
+                    }
                     else -> Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
                         Text("${ev.evId} · ${ev.provider} ${ev.model}", style = MaterialTheme.typography.titleLarge, color = Qwik.Ink)
                         Text(
@@ -207,7 +217,31 @@ fun PersonScreen(
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        // Taking a vehicle back is two different things, and the
+                        // difference matters to the fleet: a spare goes to the
+                        // next rider, a return goes to the provider.
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            GhostAction(
+                                if (evActions.busy) "Working…" else "Take back — spare",
+                                onClick = { evActions.toSpare(ev.evId) { m -> evNote = m; vm.load() } },
+                                enabled = !evActions.busy,
+                            )
+                            GhostAction(
+                                "Return to provider",
+                                onClick = { evActions.returnUnit(ev.evId) { m -> evNote = m; vm.load() } },
+                                enabled = !evActions.busy,
+                            )
+                        }
                     }
+                }
+                (evNote ?: evActions.error)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (evActions.error != null) Qwik.Accent700 else Qwik.N700,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    )
                 }
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
@@ -246,6 +280,16 @@ fun PersonScreen(
                 Spacer(Modifier.height(32.dp))
             }
         }
+    }
+
+    if (giving) {
+        GiveEvSheet(
+            personId = personId,
+            personName = name,
+            onDone = { message -> evNote = message; giving = false; vm.load() },
+            onDismiss = { giving = false },
+            vm = evActions,
+        )
     }
 }
 

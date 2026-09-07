@@ -18,6 +18,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,6 +119,9 @@ internal fun matches(u: EvUnitOut, state: String) = when (state) {
 fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) {
     val scoped = vm.scoped()
     val shown = vm.shown()
+    // Tapping a unit opens what can be done with it, in its current state.
+    var picked by remember { mutableStateOf<EvUnitOut?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 10.dp),
@@ -153,6 +157,7 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
         }
         Rule()
         if (vm.error != null) Note(vm.error!!, color = Qwik.Accent700)
+        note?.let { Note(it, color = Qwik.Ink) }
         PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             if (shown.isEmpty()) {
                 Note(
@@ -180,7 +185,7 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
                         ListRow(
                             title = u.evId,
                             sub = sub,
-                            onClick = { u.currentPersonId?.let(onOpenPerson) },
+                            onClick = { note = null; picked = u },
                             trailing = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     u.zone?.let { Tag(it) }
@@ -197,5 +202,14 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
                 }
             }
         }
+    }
+
+    picked?.let { unit ->
+        EvUnitSheet(
+            unit = unit,
+            onOpenPerson = { id -> picked = null; onOpenPerson(id) },
+            onDone = { message -> note = message; picked = null; vm.refresh() },
+            onDismiss = { picked = null },
+        )
     }
 }

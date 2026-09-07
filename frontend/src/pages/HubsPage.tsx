@@ -9,6 +9,7 @@
  * the zone of the recruiter who onboarded them until it is classified, and
  * hub-less riders (Blitz and co.) sit under "Misc" in the recruiter app.
  */
+import { useLiveReload } from '../hooks/useLive'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -57,6 +58,8 @@ export function HubsPage() {
       .finally(() => setBusy(false))
   }
   useEffect(reload, [])
+  // Follow the server: stores change as riders arrive.
+  useLiveReload(reload, ['hub', 'rider'])
 
   async function save(row: { company: string; hub: string }, body: Record<string, unknown>) {
     const key = row.company + '/' + row.hub

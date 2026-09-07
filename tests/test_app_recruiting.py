@@ -61,6 +61,10 @@ def test_onboarding_stamps_recruiter_and_location(db, client):
         "ORDER BY id DESC LIMIT 1"
     ).fetchone()
     assert (act["lat"], act["lng"]) == (22.5726, 88.3639) and act["accuracy_m"] == 12.5
+    # …and an admin can read the stamp back, not just find it in the database.
+    boss = _hdr(client, "boss@t.test", "Creator-pass-1")
+    feed = client.get("/api/activity?action=rider.create", headers=boss).json()
+    assert (feed[0]["lat"], feed[0]["lng"], feed[0]["accuracy_m"]) == (22.5726, 88.3639, 12.5)
 
     # Web console (no header) leaves the location empty; garbage is ignored, not a 400.
     _onboard(client, _hdr(client), "Bikash Roy", rider_id="SF-2")
@@ -398,3 +402,17 @@ def test_location_on_app_open_is_throttled_to_30_minutes(db, client):
         client.get("/api/app/locations?email=rec@t.test&limit=1", headers=boss).json()[0]["lat"]
         == 22.58
     )
+
+
+def test_the_console_can_tell_when_something_moved(db, client):
+    """The change cursor: a page polls it and reloads only when it moves."""
+    boss = _hdr(client, "boss@t.test", "Creator-pass-1")
+    start = client.get("/api/activity/changes", headers=boss).json()
+    assert start["changed"] == []
+    _onboard(client, _hdr(client), "Live Rider", rider_id="SF-LIVE")
+    after = client.get(f"/api/activity/changes?since={start['cursor']}", headers=boss).json()
+    assert after["cursor"] > start["cursor"]
+    assert "rider" in after["changed"]
+    # Nothing new since that cursor → nothing to reload.
+    quiet = client.get(f"/api/activity/changes?since={after['cursor']}", headers=boss).json()
+    assert quiet["changed"] == [] and quiet["cursor"] == after["cursor"]

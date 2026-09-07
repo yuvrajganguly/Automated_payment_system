@@ -196,6 +196,13 @@ PATCH /evs/maintenance/{id}                   {"to_date"?}  — close the window
 
 `amend-return`, `backrent` and everything that changes money stay admin-only.
 
+The app puts these behind one tap on a unit: an in-use unit offers "take back
+— spare", "take back — return to the provider" and "send for repair"; a spare
+or returned unit offers "give it to a rider" (with a rider search) and
+"send for repair"; a unit in maintenance offers "back in service", which
+closes its open window. A rider's page has the same actions from the other
+side — "Give an EV" lists the free units.
+
 ## Referrals
 
 ```
@@ -265,6 +272,19 @@ start when the previous run never drew a frame — that second one is what
 catches deaths with no exception at all. Unauthenticated because the crash
 usually happens before anyone can sign in; fields are capped, the route is
 rate-limited per IP and write-only.
+
+## Live console (the change cursor)
+
+```
+GET /activity/changes[?since=<cursor>]   → {"cursor": <last activity id>, "changed": ["rider","ev",…]}
+```
+
+One indexed read, polled by the web console every 8 seconds while its tab is
+visible. When the cursor moves, the pages reload themselves — a rider
+onboarded from a phone shows up in the office within seconds instead of at the
+next manual refresh, which is what stops the same rider being onboarded twice.
+`changed` lists the entity types touched since the cursor you sent, so a page
+can ignore what it does not show.
 
 ## Activity (admins reviewing recruiters)
 

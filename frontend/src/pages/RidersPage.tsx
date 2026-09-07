@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useLiveReload } from '../hooks/useLive'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -31,6 +32,8 @@ export function RidersPage() {
       .finally(() => setBusy(false))
   }
   useEffect(reload, [])
+  // Follow the server: the roster changes from a phone too.
+  useLiveReload(reload, ['rider', 'person'])
 
   // Apply company filter first so Hub options shrink to that company.
   const companyKey = filters['company'] ?? ''

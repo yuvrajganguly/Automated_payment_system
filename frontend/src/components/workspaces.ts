@@ -77,6 +77,7 @@ export const WORKSPACES: Workspace[] = [
       { to: '/users', label: 'Users' },
       { to: '/companies', label: 'Companies', end: true },
       { to: '/hubs', label: 'Hubs' },
+      { to: '/field', label: 'Field' },
       { to: '/settings', label: 'Settings' },
     ],
     extra: ['/system'],

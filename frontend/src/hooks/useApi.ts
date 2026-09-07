@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type RequestOptions } from '../api/client'
+import { useLiveCursor } from './useLive'
 
 export interface ApiState<T> {
   data: T | null
@@ -18,24 +19,30 @@ export interface ApiState<T> {
  * - The error branch is structural — six `.then().finally()` chains used to
  *   leave the UI blank with an unhandled rejection on a network failure.
  * - Pass `null` as `path` to skip fetching (e.g. until an id is known).
- * - Refetches when the tab comes back to the front after `STALE_MS`. A console
- *   left open in a background tab used to keep showing last night's roster —
- *   a rider onboarded from the phone simply wasn't there until a manual
- *   reload, which reads as "the app didn't save it".
+ * - Refetches when the tab comes back to the front after `STALE_MS`, and
+ *   whenever the server's change cursor moves (see `useLive`). A console left
+ *   open used to keep showing last night's roster — a rider onboarded from the
+ *   phone simply wasn't there until a manual reload, which reads as "the app
+ *   didn't save it" and ends with the rider onboarded twice. Pass
+ *   `{ live: false }` for a page that is expensive to rebuild and does not
+ *   need to be current to the second.
  */
 const STALE_MS = 30_000
 
 export function useApi<T>(
   path: string | null,
   deps: readonly unknown[] = [],
-  opts: RequestOptions = {},
+  opts: RequestOptions & { live?: boolean } = {},
 ): ApiState<T> {
+  const cursor = useLiveCursor()
+  const { live, ...request } = opts
+  const followsServer = live !== false
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(path !== null)
   const [tick, setTick] = useState(0)
-  const optsRef = useRef(opts)
-  optsRef.current = opts
+  const optsRef = useRef(request)
+  optsRef.current = request
   const fetchedAt = useRef(0)
 
   useEffect(() => {
@@ -61,7 +68,7 @@ export function useApi<T>(
       })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deps are the caller's cache key
-  }, [path, tick, ...deps])
+  }, [path, tick, followsServer ? cursor : 0, ...deps])
 
   useEffect(() => {
     if (path === null) return

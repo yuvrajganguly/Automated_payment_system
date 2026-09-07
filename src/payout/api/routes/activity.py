@@ -3,6 +3,12 @@
 GET /api/activity?email=&action=&entity_type=&person_id=&since=&limit=
     admin/creator: everything, filterable by who; recruiter: own rows only.
 GET /api/activity/people   who has activity, with counts (for the filter)
+
+Rows carry ``lat`` / ``lng`` / ``accuracy_m`` when the caller sent
+``X-Client-Location`` — the recruiter app stamps its writes, so an admin can
+see where an onboarding actually happened. It is null for everything done
+from the web console. Where the recruiter *was* over a day is a different
+question with a different answer: ``GET /app/locations``.
 GET /api/activity/actions  action codes → labels
 """
 
@@ -61,7 +67,7 @@ def list_activity(
         params.append(since)
     sql = (
         "SELECT id, at, email, role, action, entity_type, entity_id, entity_label, person_id, "
-        "details FROM activity_log"
+        "details, lat, lng, accuracy_m FROM activity_log"
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -70,6 +76,35 @@ def list_activity(
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
     return [_row(r) for r in rows]
+
+
+@router.get("/changes")
+def activity_changes(
+    since: int | None = Query(default=None, ge=0, description="the cursor you last saw"),
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """A cheap "has anything happened?" for the console to poll.
+
+    The web console used to paint itself once and then quietly go out of date:
+    a rider onboarded from the phone was on the server immediately, but a page
+    opened before that kept showing the roster without them — which is how two
+    people onboard the same rider twice. Rather than push events at browsers
+    (this runs as a single uvicorn process today, but should not depend on
+    that), the console asks for a cursor every few seconds. It is one indexed
+    read of the activity log, and `changed` tells the page whether the thing it
+    is showing is the thing that moved.
+    """
+    with get_connection() as conn:
+        cursor = conn.execute("SELECT COALESCE(MAX(id), 0) FROM activity_log").fetchone()[0]
+        changed: list[str] = []
+        if since is not None:
+            rows = conn.execute(
+                "SELECT DISTINCT entity_type FROM activity_log "
+                "WHERE id > ? AND entity_type IS NOT NULL",
+                (since,),
+            ).fetchall()
+            changed = sorted(str(r[0]) for r in rows)
+    return {"cursor": int(cursor or 0), "changed": changed}
 
 
 @router.get("/people")

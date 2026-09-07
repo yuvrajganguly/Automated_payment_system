@@ -9,6 +9,7 @@ import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.PATCH
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -83,6 +84,26 @@ interface PayoutApi {
         @Query("zone") zone: String? = null,
         @Query("mine") mine: Boolean? = null,
     ): List<EvUnitOut>
+
+    @POST("evs/assign")
+    suspend fun assignEv(@Body body: EvAssignIn): EvActionOut
+
+    /** Retire the unit: off the rider, back to the provider. */
+    @POST("evs/return")
+    suspend fun returnEv(@Body body: EvReturnIn): EvActionOut
+
+    /** Take it back but keep it — available for the next rider. */
+    @POST("evs/to-spare")
+    suspend fun evToSpare(@Body body: EvReturnIn): EvActionOut
+
+    @GET("evs/maintenance")
+    suspend fun maintenance(@Query("ev_id") evId: String? = null): List<MaintenanceOut>
+
+    @POST("evs/maintenance")
+    suspend fun openMaintenance(@Body body: MaintenanceIn): MaintenanceOut
+
+    @PATCH("evs/maintenance/{id}")
+    suspend fun closeMaintenance(@Path("id") id: Long, @Body body: MaintenanceClose): MaintenanceOut
 
     @GET("requests")
     suspend fun requests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<MoneyRequest>

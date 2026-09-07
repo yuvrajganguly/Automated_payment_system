@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { resetLive } from '../hooks/useLive'
 import { useNavigate } from 'react-router-dom'
 import { api, configureClient } from '../api/client'
 import type { User } from '../api/types'
@@ -84,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     api.logout().catch(() => {})
+    resetLive()
     clearSession()
     navigate('/login', { replace: true })
   }

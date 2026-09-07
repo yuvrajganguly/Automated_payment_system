@@ -168,6 +168,56 @@ data class DocumentOut(
     @SerialName("size_bytes") val sizeBytes: Long = 0,
 )
 
+/* ── EV actions: hand one over, take it back, park it, fix it ── */
+
+@Serializable
+data class EvAssignIn(
+    @SerialName("ev_id") val evId: String,
+    @SerialName("person_id") val personId: Long? = null,
+    @SerialName("handover_date") val handoverDate: String? = null, // null = today
+)
+
+@Serializable
+data class EvReturnIn(
+    @SerialName("ev_id") val evId: String? = null,
+    @SerialName("rider_id") val riderId: String? = null,
+    val company: String? = null,
+    @SerialName("returned_date") val returnedDate: String? = null, // null = today
+)
+
+/** The server answers each action with a small object; the app only needs to
+ *  know it worked and, for a return, that the office still owes a close-out. */
+@Serializable
+data class EvActionOut(
+    @SerialName("ev_id") val evId: String? = null,
+    @SerialName("person_id") val personId: Long? = null,
+    val assigned: Boolean = false,
+    val returned: Boolean = false,
+    val spare: Boolean = false,
+    @SerialName("handover_date") val handoverDate: String? = null,
+    @SerialName("returned_date") val returnedDate: String? = null,
+)
+
+@Serializable
+data class MaintenanceIn(
+    @SerialName("ev_id") val evId: String,
+    @SerialName("from_date") val fromDate: String,
+    @SerialName("to_date") val toDate: String? = null, // open-ended
+    val reason: String? = null,
+)
+
+@Serializable
+data class MaintenanceClose(@SerialName("to_date") val toDate: String? = null)
+
+@Serializable
+data class MaintenanceOut(
+    val id: Long,
+    @SerialName("ev_id") val evId: String,
+    @SerialName("from_date") val fromDate: String,
+    @SerialName("to_date") val toDate: String? = null,
+    val reason: String? = null,
+)
+
 /* ── EV requests: "I need 3 EVs at Belur" ── */
 
 @Serializable
