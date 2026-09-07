@@ -48,6 +48,15 @@ or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine —
 Money, and EVs asked for from the fleet desk), **My numbers** (today / week /
 month / all-time onboardings, by company).
 
+Start-up and diagnostics: the launcher is `LaunchActivity`, a plain Activity
+with no Hilt, no Compose and no theme of ours — whatever else breaks on a phone
+we have never seen, that one still opens. `CrashLog` (installed from
+`QwikApp.attachBaseContext`, the earliest point the app owns) writes a
+breadcrumb per start-up step and catches uncaught exceptions; a run that never
+reaches `ui.first_frame` makes the next launch show the trail and the stack
+trace as plain selectable text, with Copy. There is no logcat on a recruiter's
+phone in a store, so the app has to be able to say what happened to it.
+
 Phone and tablet, one app (`ui/common/Layout.kt`): under 600 dp everything is
 full width, exactly as before. From 600 dp (a tablet held upright) the page is
 centred in a 720 dp column so lines stay readable, forms in 520 dp. From
