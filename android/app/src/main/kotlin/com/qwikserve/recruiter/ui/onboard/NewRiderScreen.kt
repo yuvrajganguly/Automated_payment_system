@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +40,7 @@ import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.RiderIn
 import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
+import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.Avatar
 import com.qwikserve.recruiter.ui.common.BarButton
@@ -47,6 +49,7 @@ import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.login.Field
@@ -79,8 +82,12 @@ import javax.inject.Inject
 class NewRiderViewModel @Inject constructor(
     private val riders: RiderRepository,
     private val app: AppRepository,
+    private val photos: PhotoRepository,
     private val json: Json,
 ) : ViewModel() {
+    /** Taken with the camera or picked from the gallery; uploaded once the
+     *  rider exists, because the photo hangs off their person id. */
+    var photo by mutableStateOf<Uri?>(null)
     var company by mutableStateOf("")
     var name by mutableStateOf("")
     var riderId by mutableStateOf("")
@@ -155,10 +162,14 @@ class NewRiderViewModel @Inject constructor(
                         referredByPersonId = referrer?.personId,
                     ),
                 )
+                val photoFailed = photo?.let { uri ->
+                    runCatching { photos.uploadPhoto(out.personId, uri) }.isFailure
+                } ?: false
                 val note = buildString {
                     append(out.name ?: name.trim()); append(" added")
                     if (out.riderId.startsWith("QSPEND")) append(" with a placeholder id")
                     out.referredBy?.let { append(" · referred by $it") }
+                    if (photoFailed) append(" · photo did not upload, add it from their page")
                 }
                 onDone(out.personId, note)
             } catch (e: HttpException) {
@@ -208,9 +219,11 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 ErrorLine(err["company"])
                 Spacer(Modifier.height(14.dp))
 
-                Field("Full name") { Input(vm.name, { vm.name = it }, placeholder = "Srijit Purkait", cap = KeyboardCapitalization.Words) }
+                PhotoTile(picked = vm.photo, size = 96.dp, onPicked = { vm.photo = it })
+                Spacer(Modifier.height(16.dp))
+                Field("Full name") { Input(vm.name, { vm.name = it }, placeholder = "Name as on the Aadhaar", cap = KeyboardCapitalization.Words) }
                 ErrorLine(err["name"])
-                Field("Rider id (the company's)") { Input(vm.riderId, { vm.riderId = it }, placeholder = "FE5943521 — blank for a placeholder", cap = KeyboardCapitalization.Characters) }
+                Field("Rider id (the company's)") { Input(vm.riderId, { vm.riderId = it }, placeholder = "Leave blank for a placeholder id", cap = KeyboardCapitalization.Characters) }
                 ErrorLine(null)
                 Field("Hub / store") {
                     Input(vm.hub, { vm.hub = it }, placeholder = "Salt Lake", cap = KeyboardCapitalization.Words)
@@ -227,7 +240,7 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 Spacer(Modifier.height(6.dp))
                 Kicker("Identity")
                 Spacer(Modifier.height(8.dp))
-                Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "2345 6789 0123", keyboard = KeyboardType.Number) }
+                Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
                 ErrorLine(err["aadhaar"])
                 Field("PAN") { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
                 ErrorLine(err["pan"])
@@ -235,7 +248,7 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 Spacer(Modifier.height(6.dp))
                 Kicker("Bank account")
                 Spacer(Modifier.height(8.dp))
-                Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "5550001234", keyboard = KeyboardType.Number) }
+                Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Digits only", keyboard = KeyboardType.Number) }
                 ErrorLine(err["account"])
                 Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "HDFC0000123", cap = KeyboardCapitalization.Characters) }
                 ErrorLine(err["ifsc"])

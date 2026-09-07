@@ -75,6 +75,16 @@ Requests → EVs: "Ask for EVs" files `POST /ev-requests` with a count (chips,
 the store, else from the recruiter. An open request can be withdrawn; the
 office fulfils or rejects it from the web Requests page.
 
+Photos: the onboarding form opens with a photo tile, and a rider's page has
+the same tile — tap for Camera or Gallery. Neither needs a runtime permission
+(the app never declares CAMERA, so `ACTION_IMAGE_CAPTURE` just works; the
+picture picker hands back one image). `PhotoRepository` turns the camera's
+4–6 MB into ~200 kB (1 280 px, JPEG 80, EXIF rotation applied) before
+`POST /persons/{id}/documents` with `doc_type=photo` — a recruiter is usually
+on the edge of a signal. On the form the upload happens after the rider is
+created, since the photo hangs off their person id; if it fails the rider is
+still saved and the note says to add it from their page.
+
 Location ("Option 1"): each time the app comes to the foreground it takes one
 fix, reverse-geocodes the area on the phone and posts it to `/app/location`;
 the server keeps at most one row per 30 minutes. Writes also carry

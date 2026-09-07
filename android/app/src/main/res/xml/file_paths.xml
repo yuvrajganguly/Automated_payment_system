@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where the camera app is allowed to write a rider's photo before we
+         shrink it and send it on. Our own cache; nothing else is shared. -->
+    <cache-path name="photos" path="photos/" />
+</paths>

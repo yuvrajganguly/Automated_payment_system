@@ -159,6 +159,15 @@ data class MoneyRequest(
     @SerialName("applied_amount") val appliedAmount: Double? = null,
 )
 
+@Serializable
+data class DocumentOut(
+    val id: Long,
+    @SerialName("person_id") val personId: Long,
+    @SerialName("doc_type") val docType: String = "",
+    val filename: String = "",
+    @SerialName("size_bytes") val sizeBytes: Long = 0,
+)
+
 /* ── EV requests: "I need 3 EVs at Belur" ── */
 
 @Serializable

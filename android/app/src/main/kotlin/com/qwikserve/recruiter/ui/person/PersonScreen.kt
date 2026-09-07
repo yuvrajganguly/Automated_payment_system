@@ -36,11 +36,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.qwikserve.recruiter.data.api.PersonOut
 import com.qwikserve.recruiter.data.db.RiderEntity
+import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
-import com.qwikserve.recruiter.ui.common.Avatar
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
 import com.qwikserve.recruiter.ui.common.Skeleton
 import com.qwikserve.recruiter.ui.common.Tag
@@ -62,6 +63,7 @@ import javax.inject.Inject
 class PersonViewModel @Inject constructor(
     saved: SavedStateHandle,
     private val repo: RiderRepository,
+    private val photos: PhotoRepository,
 ) : ViewModel() {
     /** Which rider this screen is showing. It arrives as a navigation argument
      *  on a phone, and as a selection in the second pane on a tablet — where
@@ -79,7 +81,26 @@ class PersonViewModel @Inject constructor(
     var error by mutableStateOf<String?>(null)
         private set
 
+    /** Bumped after a new photo lands, so the cached thumbnail is re-fetched. */
+    var photoVersion by mutableStateOf(0)
+        private set
+    var uploadingPhoto by mutableStateOf(false)
+        private set
+
     init { if (personId != 0L) load() }
+
+    /** Camera or gallery → the rider's profile picture. */
+    fun setPhoto(uri: Uri) {
+        if (uploadingPhoto) return
+        val id = _personId.value
+        uploadingPhoto = true
+        viewModelScope.launch {
+            runCatching { photos.uploadPhoto(id, uri) }
+                .onSuccess { if (_personId.value == id) photoVersion++ }
+                .onFailure { error = "The photo did not upload. Try again when the signal is better." }
+            uploadingPhoto = false
+        }
+    }
 
     /** Point the screen at a rider (no-op if it is already there). */
     fun show(id: Long) {
@@ -142,7 +163,15 @@ fun PersonScreen(
                         }
                     }
                     Spacer(Modifier.width(12.dp))
-                    Avatar(personId, name, size = 56.dp, thumb = false)
+                    PhotoTile(
+                        picked = null,
+                        personId = personId,
+                        name = name,
+                        version = vm.photoVersion,
+                        size = 72.dp,
+                        busy = vm.uploadingPhoto,
+                        onPicked = vm::setPhoto,
+                    )
                 }
             }
             Rule()

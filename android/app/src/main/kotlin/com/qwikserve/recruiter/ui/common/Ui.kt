@@ -275,10 +275,12 @@ fun ListRow(
     Hairline()
 }
 
-/** Rider photo tile: the server thumbnail if there is one, initials otherwise. Square. */
+/** Rider photo tile: the server thumbnail if there is one, initials otherwise.
+ *  Square. [version] busts the image cache after a new photo is uploaded. */
 @Composable
-fun Avatar(personId: Long, name: String?, size: Dp = 44.dp, thumb: Boolean = true) {
-    val url = BuildConfig.API_BASE_URL + "persons/$personId/photo" + if (thumb) "?size=thumb" else ""
+fun Avatar(personId: Long, name: String?, size: Dp = 44.dp, thumb: Boolean = true, version: Int = 0) {
+    val url = BuildConfig.API_BASE_URL + "persons/$personId/photo" +
+        (if (thumb) "?size=thumb" else "?full=1") + (if (version > 0) "&v=$version" else "")
     Box(
         modifier = Modifier.size(size).background(Qwik.N200).border(1.dp, Qwik.N400),
         contentAlignment = Alignment.Center,
