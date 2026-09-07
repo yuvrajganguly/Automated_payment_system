@@ -279,6 +279,26 @@ CREATE TABLE IF NOT EXISTS referrals (
 );
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals (referrer_person_id, status);
 
+-- EV requests: a recruiter asking the fleet desk for N vehicles for a store.
+-- A queue for the office (open → fulfilled / rejected / cancelled); the
+-- actual allotment still happens on the EV pages. No money here.
+CREATE TABLE IF NOT EXISTS ev_requests (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at         TEXT DEFAULT (datetime('now')),
+    created_by         TEXT NOT NULL,               -- recruiter email
+    quantity           INTEGER NOT NULL,            -- units asked for
+    hub                TEXT,                        -- store they are asking for
+    company            TEXT,
+    zone               TEXT,                        -- store's zone, else the recruiter's
+    note               TEXT,
+    status             TEXT NOT NULL DEFAULT 'open', -- open | fulfilled | rejected | cancelled
+    fulfilled_quantity INTEGER,                     -- units actually given
+    resolved_by        TEXT,
+    resolved_at        TEXT,
+    resolution_note    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ev_requests_status ON ev_requests (status, created_at DESC);
+
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).
 --   payout_sheet : '0' (index) or 'pattern:<substr>' to match a sheet by name.

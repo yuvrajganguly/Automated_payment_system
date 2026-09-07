@@ -68,6 +68,127 @@ export function RequestsPage() {
           list.data.map((r) => <RequestRow key={r.id} r={r} canResolve={!isRecruiter} onDone={list.reload} />)
         )}
       </section>
+
+      <EvRequests tab={tab} canResolve={!isRecruiter} />
+    </div>
+  )
+}
+
+/** Vehicles asked for from the field — "3 EVs for Belur". No money moves;
+ *  fulfilling only closes the ask, the allotment still happens on the EV pages. */
+export interface EvRequest {
+  id: number
+  created_at: string
+  created_by: string
+  quantity: number
+  hub: string | null
+  company: string | null
+  zone: string | null
+  note: string | null
+  status: 'open' | 'fulfilled' | 'rejected' | 'cancelled'
+  fulfilled_quantity: number | null
+  resolved_by: string | null
+  resolved_at: string | null
+  resolution_note: string | null
+}
+
+const EV_STATUS_CLS: Record<string, string> = {
+  open: 'bg-amber-400/15 text-amber-200',
+  fulfilled: 'bg-emerald-500/15 text-emerald-300',
+  rejected: 'bg-rose-500/15 text-rose-300',
+  cancelled: 'bg-slate-500/15 text-slate-300',
+}
+
+function EvRequests({ tab, canResolve }: { tab: 'open' | 'all'; canResolve: boolean }) {
+  const list = useApi<EvRequest[]>(`/ev-requests${tab === 'open' ? '?status=open' : ''}`, [tab])
+  return (
+    <>
+      <h2 className="page-title text-lg mt-8 mb-1">EV requests</h2>
+      <p className="text-slate-500 text-sm mb-3">
+        Vehicles the field has asked for. Fulfilling closes the ask — hand the units over on the EV pages as usual.
+      </p>
+      <section className="panel overflow-hidden">
+        {list.loading ? (
+          <div className="p-6"><Spinner /></div>
+        ) : list.error ? (
+          <div className="p-4 text-sm text-critical">{list.error}</div>
+        ) : !list.data?.length ? (
+          <div className="p-4 text-sm text-slate-500">
+            {tab === 'open' ? 'No open EV requests.' : 'No EV requests yet.'}
+          </div>
+        ) : (
+          list.data.map((r) => <EvRequestRow key={r.id} r={r} canResolve={canResolve} onDone={list.reload} />)
+        )}
+      </section>
+    </>
+  )
+}
+
+function EvRequestRow({ r, canResolve, onDone }: { r: EvRequest; canResolve: boolean; onDone: () => void }) {
+  const [mode, setMode] = useState<'idle' | 'fulfil' | 'reject'>('idle')
+  const [qty, setQty] = useState(String(r.quantity))
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const act = async () => {
+    setBusy(true); setError(null)
+    try {
+      const body: Record<string, unknown> = {}
+      if (note.trim()) body.note = note.trim()
+      if (mode === 'fulfil' && Number(qty) !== r.quantity) body.quantity = Number(qty)
+      await api.post(`/ev-requests/${r.id}/${mode}`, body)
+      setMode('idle'); onDone()
+    } catch (e) { setError((e as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  const where = [r.hub, r.company, r.zone].filter(Boolean).join(' · ') || 'no store given'
+  return (
+    <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-100 first:border-t-0">
+      <div className="min-w-[200px]">
+        <div className="font-medium text-slate-900">{r.quantity} EV{r.quantity > 1 ? 's' : ''}</div>
+        <div className="text-xs text-slate-500">#{r.id} · by {r.created_by} · {r.created_at}</div>
+      </div>
+      <div className="text-sm flex-1 min-w-[240px]">
+        <span className="text-slate-900">{where}</span>
+        {r.note ? <span className="text-slate-500"> — {r.note}</span> : null}
+        {r.status !== 'open' && (
+          <div className="text-xs text-slate-500 mt-0.5">
+            {r.status} by {r.resolved_by} on {r.resolved_at}
+            {r.status === 'fulfilled' && r.fulfilled_quantity != null && r.fulfilled_quantity !== r.quantity
+              ? ` — ${r.fulfilled_quantity} given` : ''}
+            {r.resolution_note ? ` — ${r.resolution_note}` : ''}
+          </div>
+        )}
+      </div>
+      <span className={'pill ' + (EV_STATUS_CLS[r.status] ?? '')}>{r.status}</span>
+      {canResolve && r.status === 'open' && (
+        mode === 'idle' ? (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setMode('fulfil')} className="btn-primary">Fulfil</button>
+            <button onClick={() => setMode('reject')} className="btn-ghost">Reject</button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {mode === 'fulfil' && (
+              <label className="text-xs text-slate-500 flex items-center gap-1">
+                Units
+                <input type="number" min="0" step="1" value={qty} onChange={(e) => setQty(e.target.value)}
+                       className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-20" />
+              </label>
+            )}
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+                   placeholder={mode === 'fulfil' ? 'note (optional)' : 'reason for rejecting (optional)'}
+                   className="border border-slate-300 rounded-lg px-2 py-1 text-sm w-56" />
+            <button onClick={act} disabled={busy || (mode === 'fulfil' && !(Number(qty) >= 0))} className="btn-primary">
+              {busy ? '…' : mode === 'fulfil' ? 'Confirm fulfil' : 'Confirm reject'}
+            </button>
+            <button onClick={() => setMode('idle')} disabled={busy} className="btn-ghost">Cancel</button>
+          </div>
+        )
+      )}
+      {error && <div className="w-full text-sm text-critical">{error}</div>}
     </div>
   )
 }

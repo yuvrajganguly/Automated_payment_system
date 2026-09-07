@@ -44,8 +44,14 @@ Navigation: no drawer. Five tabs across the top — **Today** (things that need 
 visit, grouped by store, for the recruiter's zone: COD to collect, EV holders
 with dues, EVs to pick up from inactive riders), **Riders** (All riders with a
 North/South zone filter, or My riders), **EVs** (All fleet by zone and state,
-or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine),
-**My numbers** (today / week / month / all-time onboardings, by company).
+or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine —
+Money, and EVs asked for from the fleet desk), **My numbers** (today / week /
+month / all-time onboardings, by company).
+
+Requests → EVs: "Ask for EVs" files `POST /ev-requests` with a count (chips,
+1–10), the store and a one-line why. The zone is filled in server-side from
+the store, else from the recruiter. An open request can be withdrawn; the
+office fulfils or rejects it from the web Requests page.
 
 Location ("Option 1"): each time the app comes to the foreground it takes one
 fix, reverse-geocodes the area on the phone and posts it to `/app/location`;
@@ -56,4 +62,13 @@ Nothing runs in the background.
 Session: sign in once with email or phone; the app keeps a 30-day rotating
 refresh token in encrypted storage and never asks again unless the server
 revokes it (password changed, signed out everywhere, deactivated) — then the
-sign-in screen shows the server's reason.
+sign-in screen shows the server's reason. Accounts are made by an admin who
+hands over the first password; "Forgot password?" on the sign-in screen emails
+a six-digit code (`/auth/forgot-password` → `/auth/reset-password`), good for
+ten minutes.
+
+Icon and splash: the Qwikserve mark (red winged Q) on white — adaptive
+foreground in `mipmap-*/ic_launcher_foreground.png`, legacy icons composited
+on white, `drawable-xxxhdpi/splash_logo.png` for the cold-start window and
+`qwik_logo.png` above the sign-in wordmark. All generated from
+`frontend/public/icon-512.png` with the black ground keyed out.

@@ -159,6 +159,48 @@ data class MoneyRequest(
     @SerialName("applied_amount") val appliedAmount: Double? = null,
 )
 
+/* ── EV requests: "I need 3 EVs at Belur" ── */
+
+@Serializable
+data class EvRequest(
+    val id: Long,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("created_by") val createdBy: String? = null,
+    val quantity: Int = 1,
+    val hub: String? = null,
+    val company: String? = null,
+    val zone: String? = null,
+    val note: String? = null,
+    val status: String = "open", // open | fulfilled | rejected | cancelled
+    @SerialName("fulfilled_quantity") val fulfilledQuantity: Int? = null,
+    @SerialName("resolved_by") val resolvedBy: String? = null,
+    @SerialName("resolved_at") val resolvedAt: String? = null,
+    @SerialName("resolution_note") val resolutionNote: String? = null,
+)
+
+@Serializable
+data class EvRequestIn(
+    val quantity: Int,
+    val hub: String? = null,
+    val company: String? = null,
+    val note: String? = null,
+)
+
+/* ── Password reset by emailed code ── */
+
+@Serializable
+data class ForgotPasswordIn(val email: String)
+
+@Serializable
+data class ResetPasswordIn(
+    val email: String,
+    val otp: String,
+    @SerialName("new_password") val newPassword: String,
+)
+
+@Serializable
+data class OkOut(val ok: Boolean = true, val message: String? = null)
+
 /* ── Today: things to do, grouped by store ── */
 
 @Serializable

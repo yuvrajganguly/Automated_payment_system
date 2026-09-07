@@ -29,6 +29,14 @@ interface PayoutApi {
     @GET("auth/me")
     suspend fun me(): UserOut
 
+    /** Email a 6-digit reset code. Accepts an email or a phone number; the code
+     *  always goes to the account's email address. */
+    @POST("auth/forgot-password")
+    suspend fun forgotPassword(@Body body: ForgotPasswordIn): OkOut
+
+    @POST("auth/reset-password")
+    suspend fun resetPassword(@Body body: ResetPasswordIn): OkOut
+
     @GET("app/bootstrap")
     suspend fun bootstrap(): Bootstrap
 
@@ -65,6 +73,15 @@ interface PayoutApi {
 
     @GET("requests")
     suspend fun requests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<MoneyRequest>
+
+    @GET("ev-requests")
+    suspend fun evRequests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<EvRequest>
+
+    @POST("ev-requests")
+    suspend fun createEvRequest(@Body body: EvRequestIn): EvRequest
+
+    @POST("ev-requests/{id}/cancel")
+    suspend fun cancelEvRequest(@Path("id") id: Long): EvRequest
 
     @GET("activity")
     suspend fun activity(@Query("since") since: String? = null, @Query("limit") limit: Int? = null): List<ActivityRow>

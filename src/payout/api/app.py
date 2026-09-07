@@ -53,6 +53,9 @@ from payout.api.routes import (
     ev_rent as ev_rent_routes,
 )
 from payout.api.routes import (
+    ev_requests as ev_request_routes,
+)
+from payout.api.routes import (
     evs as evs_routes,
 )
 from payout.api.routes import (
@@ -239,6 +242,7 @@ app.include_router(
     dependencies=_NO_RECRUITER,
 )
 app.include_router(requests_routes.router, prefix="/api/requests", tags=["requests"])
+app.include_router(ev_request_routes.router, prefix="/api/ev-requests", tags=["requests"])
 app.include_router(activity_routes.router, prefix="/api/activity", tags=["activity"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])

@@ -1,4 +1,5 @@
 <resources>
-    <color name="ic_launcher_background">#EC3013</color>
-    <color name="splash_background">#EC3013</color>
+    <!-- The Qwikserve mark (red winged Q) sits on white — launcher and splash. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="splash_background">#FFFFFF</color>
 </resources>

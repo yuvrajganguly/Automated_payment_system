@@ -56,6 +56,25 @@ are rate-limited server-side.
 A refresh that answers 401 means: clear stored tokens and show the sign-in
 screen with the server's `detail` as the reason.
 
+### Forgotten password (emailed code)
+
+Accounts are created by an admin, who hands over the first password. When a
+recruiter forgets it, the app asks the server for a one-time code instead of
+routing it through the office:
+
+```
+POST /auth/forgot-password   {"email": "<email or phone>"} → {"ok": true, "message": …}
+POST /auth/reset-password    {"email", "otp": "123456", "new_password"} → {"ok": true, …}
+```
+
+The code is six digits, lives 10 minutes, dies after five wrong guesses, and
+always goes to the account's **email** (a phone number is accepted on the
+first call and resolved to that address). The answer to `forgot-password` is
+identical for known and unknown accounts — don't tell the user whether the
+address exists. A successful reset revokes every session of that account, so
+the app must sign in again. Both routes are rate-limited per IP, and a server
+without SMTP configured answers 503 with a message pointing at the admin.
+
 ## Riders
 
 ```
@@ -215,6 +234,23 @@ POST /requests/{id}/reject         admin — {"note"?}
 Approving posts an `ADJUSTMENT` on the person's ledger whose remark names
 the request and the recruiter; a credit also settles EV arrears automatically.
 
+## EV requests (asking the fleet desk for vehicles)
+
+```
+POST /ev-requests                  {"quantity": 1..25, "hub"?, "company"?, "note"?}  → 201 request (status "open")
+GET  /ev-requests?status=&zone=    recruiter: own requests; admin: all. Open first.
+GET  /ev-requests/summary          {"open": n, "units": n}   (recruiter: own)
+POST /ev-requests/{id}/fulfil      admin — {"quantity"?: <units actually given>, "note"?}
+POST /ev-requests/{id}/reject      admin — {"note"?}
+POST /ev-requests/{id}/cancel      the recruiter who filed it (or an admin) withdraws it
+```
+
+`quantity` is a count of vehicles, not money — nothing here is rupeeized and
+nothing touches the ledger. The `zone` is filled in from the store's zone if
+the store is classified, else from the recruiter's own zone, so the fleet
+desk can read the queue North/South. Fulfilling only closes the ask; the
+units are still handed over on the EV pages as usual.
+
 ## Activity (admins reviewing recruiters)
 
 ```
@@ -228,7 +264,8 @@ GET /activity/actions       {action: label}
 Actions: `rider.create rider.update rider.rename rider.link rider.delete
 person.merge ev.create ev.assign ev.return ev.spare ev.maintenance_open
 ev.maintenance_close document.upload document.delete request.create
-request.approve request.reject`. `details` is a small JSON object — for
+request.approve request.reject ev_request.create ev_request.fulfil
+ev_request.reject ev_request.cancel`. `details` is a small JSON object — for
 `rider.update` it is `{"changed": {"hub": ["old", "new"], …}}`.
 
 ## Errors

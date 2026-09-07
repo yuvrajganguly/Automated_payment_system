@@ -594,6 +594,39 @@ def _0021_referrals(conn: Any) -> None:
         conn.execute(idx)
 
 
+def _0022_ev_requests(conn: Any) -> None:
+    """EV requests (2026-09-07): a recruiter asking the fleet desk for N EVs
+    for a store. A queue, not money — nothing here touches the ledger."""
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS ev_requests ("
+        "  id                 INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  created_at         TEXT DEFAULT (datetime('now')),"
+        "  created_by         TEXT NOT NULL,"
+        "  quantity           INTEGER NOT NULL,"
+        "  hub                TEXT,"
+        "  company            TEXT,"
+        "  zone               TEXT,"
+        "  note               TEXT,"
+        "  status             TEXT NOT NULL DEFAULT 'open',"
+        "  fulfilled_quantity INTEGER,"
+        "  resolved_by        TEXT,"
+        "  resolved_at        TEXT,"
+        "  resolution_note    TEXT"
+        ")"
+    )
+    idx = (
+        "CREATE INDEX IF NOT EXISTS idx_ev_requests_status ON ev_requests (status, created_at DESC)"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+        conn.executescript(translate_ddl(idx))
+    else:
+        conn.execute(ddl)
+        conn.execute(idx)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -619,6 +652,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0019_recruiter_locations", _0019_recruiter_locations),
     ("0020_ev_closeouts", _0020_ev_closeouts),
     ("0021_referrals", _0021_referrals),
+    ("0022_ev_requests", _0022_ev_requests),
 ]
 
 _TRACKING_DDL = (
