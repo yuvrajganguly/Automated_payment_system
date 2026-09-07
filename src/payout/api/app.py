@@ -74,6 +74,9 @@ from payout.api.routes import (
     providers as providers_routes,
 )
 from payout.api.routes import (
+    referrals as referral_routes,
+)
+from payout.api.routes import (
     requests as requests_routes,
 )
 from payout.api.routes import (
@@ -185,6 +188,7 @@ _NO_RECRUITER = [Depends(no_recruiter)]
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
 app.include_router(app_routes.router, prefix="/api/app", tags=["app"])
 app.include_router(hub_routes.router, prefix="/api/hubs", tags=["hubs"])
+app.include_router(referral_routes.router, prefix="/api/referrals", tags=["referrals"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
 app.include_router(
     cycle_routes.router, prefix="/api/cycles", tags=["cycles"], dependencies=_NO_RECRUITER

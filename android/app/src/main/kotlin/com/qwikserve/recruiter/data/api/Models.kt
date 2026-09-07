@@ -46,6 +46,9 @@ data class Counts(
 )
 
 @Serializable
+data class CompanyHub(val company: String, val hub: String, val zone: String? = null)
+
+@Serializable
 data class Bootstrap(
     @SerialName("api_version") val apiVersion: Int,
     @SerialName("server_time") val serverTime: String,
@@ -53,7 +56,8 @@ data class Bootstrap(
     val companies: List<CompanyLite>,
     val hubs: List<String>,
     @SerialName("hub_zones") val hubZones: Map<String, String?> = emptyMap(),
-    val zones: List<String> = listOf("North", "South"),
+    @SerialName("company_hubs") val companyHubs: List<CompanyHub> = emptyList(),
+    val zones: List<String> = listOf("North", "South", "Misc"),
     @SerialName("ev_models") val evModels: List<EvModelLite> = emptyList(),
     val counts: Counts = Counts(),
 )
@@ -72,6 +76,23 @@ data class RiderOut(
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("recruited_by") val recruitedBy: String? = null,
     val zone: String? = null,
+)
+
+/** Onboarding body for POST /riders. Blank strings are sent as null. */
+@Serializable
+data class RiderIn(
+    val company: String,
+    val name: String,
+    @SerialName("rider_id") val riderId: String? = null,
+    val hub: String? = null,
+    @SerialName("mob_no") val mobNo: String? = null,
+    @SerialName("account_no") val accountNo: String? = null,
+    val ifsc: String? = null,
+    @SerialName("aadhaar_no") val aadhaarNo: String? = null,
+    @SerialName("pan_no") val panNo: String? = null,
+    @SerialName("person_id") val personId: Long? = null,
+    @SerialName("allow_duplicate_name") val allowDuplicateName: Boolean = false,
+    @SerialName("referred_by_person_id") val referredByPersonId: Long? = null,
 )
 
 @Serializable

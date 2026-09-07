@@ -34,6 +34,7 @@ export interface Company {
   hold_status_column?: string | null
   active_riders?: number
   rider_ids?: number
+  hubs?: number
 }
 
 export interface RiderResultRow {
@@ -97,6 +98,8 @@ export interface CycleResult {
   unreadable_riders: { rider_id: string; name: string; cell: string }[]
   /** Unknown ids that matched the company in `rider_ids_shared_with` and were linked automatically. */
   auto_linked: { rider_id: string; person_id: number; name: string; linked_from: string }[]
+  referral_bonuses?: { referral_id: number; new_person_id: number; new_name: string; installment: number;
+    amount: number; person_id: number; rider_id: string; name: string }[]
   committed: boolean
   totals: Record<string, number>
 }
@@ -189,6 +192,10 @@ export interface EvUnitOut {
   current_person_id: number | null
   current_rider_name: string | null
   hub: string | null
+  zone?: string | null
+  recruited_by?: string | null
+  holder_active?: boolean | null
+  total_dues?: number | null
   handover_date: string | null
   rent_charged_through: string | null
 }

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import { DangerZone } from './PersonPage'
 import { healNote, type HealSummary } from '../lib/format'
+import { CloseoutModal, closeoutNote, type CloseoutPrompt, type CloseoutResult } from '../components/CloseoutModal'
 
 const fmt = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -41,6 +42,8 @@ export function EvProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [closeout, setCloseout] = useState<CloseoutPrompt | null>(null)
+  const [closeoutMsg, setCloseoutMsg] = useState<string | null>(null)
 
   const load = () => {
     if (!id) return
@@ -74,7 +77,14 @@ export function EvProfilePage() {
           </span>
         )}
       </div>
-
+      {closeoutMsg && <p className="text-emerald-700 text-sm mb-3">{closeoutMsg}</p>}
+      {closeout && (
+        <CloseoutModal prompt={closeout}
+          onClose={() => setCloseout(null)}
+          onDone={(r: CloseoutResult) => {
+            setCloseout(null); setCloseoutMsg(`${r.ev_id} closed out — ${closeoutNote(r)}.`); load()
+          }} />
+      )}
 
       <Section title="Current Holder">
         {cur ? (
@@ -96,10 +106,10 @@ export function EvProfilePage() {
       {isAdmin && (
         <div className="grid md:grid-cols-2 gap-4 mb-6">
           <AssignCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
-          <ReturnCard evId={u.ev_id} status={u.status} hasHolder={!!cur} onChanged={load} />
+          <ReturnCard evId={u.ev_id} status={u.status} hasHolder={!!cur} onChanged={load} onCloseout={setCloseout} />
           <MaintenanceOpenCard evId={u.ev_id} disabled={!!openMaint} onLogged={load} />
           <MaintenanceCloseCard openRow={openMaint} onClosed={load} />
-          <MarkSpareCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} />
+          <MarkSpareCard evId={u.ev_id} hasHolder={!!cur} onChanged={load} onCloseout={setCloseout} />
           <AmendReturnCard evId={u.ev_id} assignments={profile.assignments} onChanged={load} />
         </div>
       )}
@@ -208,8 +218,8 @@ function AssignCard({ evId, hasHolder, onChanged }:
   </Card>
 }
 
-function ReturnCard({ evId, status, hasHolder, onChanged }:
-  { evId: string; status: string; hasHolder: boolean; onChanged: () => void }) {
+function ReturnCard({ evId, status, hasHolder, onChanged, onCloseout }:
+  { evId: string; status: string; hasHolder: boolean; onChanged: () => void; onCloseout: (p: CloseoutPrompt) => void }) {
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const canReturn = status !== 'returned'
@@ -218,8 +228,9 @@ function ReturnCard({ evId, status, hasHolder, onChanged }:
     try {
       const body: Record<string, string> = { ev_id: evId }
       if (date) body.returned_date = date
-      const r = await api.post<{ heal?: HealSummary }>('/evs/return', body)
+      const r = await api.post<{ heal?: HealSummary; closeout?: CloseoutPrompt | null }>('/evs/return', body)
       setMsg('Returned' + healNote(r.heal)); setDate(''); onChanged()
+      if (r.closeout) onCloseout(r.closeout)
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -342,8 +353,8 @@ function AmendReturnCard({ evId, assignments, onChanged }:
   </Card>
 }
 
-function MarkSpareCard({ evId, hasHolder, onChanged }:
-  { evId: string; hasHolder: boolean; onChanged: () => void }) {
+function MarkSpareCard({ evId, hasHolder, onChanged, onCloseout }:
+  { evId: string; hasHolder: boolean; onChanged: () => void; onCloseout: (p: CloseoutPrompt) => void }) {
   const [date, setDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -352,8 +363,9 @@ function MarkSpareCard({ evId, hasHolder, onChanged }:
     try {
       const body: Record<string, string> = { ev_id: evId }
       if (date) body.returned_date = date
-      const r = await api.post<{ heal?: HealSummary }>('/evs/to-spare', body)
+      const r = await api.post<{ heal?: HealSummary; closeout?: CloseoutPrompt | null }>('/evs/to-spare', body)
       setMsg('Marked spare' + healNote(r.heal)); setDate(''); onChanged()
+      if (r.closeout) onCloseout(r.closeout)
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }

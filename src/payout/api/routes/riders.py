@@ -13,6 +13,7 @@ from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderO
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
+from payout.domain.referrals import ReferralError, create_referral
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
 from payout.money import to_paise
@@ -387,9 +388,9 @@ def list_riders(
     z = zone_filter(zone)
     if z:
         if z == "unassigned":
-            where.append("hz.zone IS NULL")
+            where.append("COALESCE(hz.zone, ru.zone) IS NULL")
         else:
-            where.append("LOWER(hz.zone)=?")
+            where.append("LOWER(COALESCE(hz.zone, ru.zone))=?")
             params.append(z)
     page = ""
     page_params: list = []
@@ -399,7 +400,10 @@ def list_riders(
     base = (
         "FROM rider_master rm "
         "LEFT JOIN ev_assignments ea ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
-        "LEFT JOIN hub_zones hz ON hz.hub = rm.hub "
+        "LEFT JOIN company_hubs hz ON hz.company = rm.company AND hz.hub = rm.hub "
+        # Zone: the store's zone when it has one; otherwise the zone of the
+        # recruiter who onboarded the rider (Blitz and other hub-less riders).
+        "LEFT JOIN users ru ON ru.email = rm.recruited_by "
     )
     with get_connection() as conn:
         total = conn.execute(
@@ -409,7 +413,7 @@ def list_riders(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
             f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
-            f"       rm.recruited_by, hz.zone "
+            f"       rm.recruited_by, COALESCE(hz.zone, ru.zone) AS zone "
             f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
             params + page_params,
         ).fetchall()
@@ -745,6 +749,18 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                 "pan_no=COALESCE(?, pan_no) WHERE person_id=?",
                 (aadhaar, pan, person_id),
             )
+        referral = None
+        if body.referred_by_person_id is not None:
+            try:
+                referral = create_referral(
+                    conn,
+                    new_person_id=person_id,
+                    referrer_person_id=body.referred_by_person_id,
+                    company=body.company,
+                    created_by=user.get("email") or "",
+                )
+            except ReferralError as exc:
+                raise HTTPException(400, str(exc)) from exc
         record_activity(
             conn,
             user,
@@ -761,6 +777,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                 "mob_no": mob_no,
                 "copied_from": copied_from,
                 "placeholder": rider_id.startswith(PLACEHOLDER_PREFIX),
+                "referred_by": referral["referrer_name"] if referral else None,
             },
         )
         conn.commit()
@@ -777,6 +794,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         copied_from=copied_from,
         is_active=True,
         recruited_by=user.get("email"),
+        referred_by=referral["referrer_name"] if referral else None,
     )
 
 

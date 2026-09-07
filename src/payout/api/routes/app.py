@@ -36,13 +36,19 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
             )
         ]
         hub_rows = conn.execute(
-            "SELECT h.hub, hz.zone FROM "
-            "(SELECT DISTINCT hub FROM rider_master WHERE hub IS NOT NULL AND hub <> '' "
-            " UNION SELECT hub FROM hub_zones) h "
-            "LEFT JOIN hub_zones hz ON hz.hub=h.hub ORDER BY h.hub"
+            "SELECT h.company, h.hub, ch.zone FROM "
+            "(SELECT DISTINCT company, hub FROM rider_master WHERE hub IS NOT NULL AND hub <> '' "
+            " UNION SELECT company, hub FROM company_hubs) h "
+            "LEFT JOIN company_hubs ch ON ch.company=h.company AND ch.hub=h.hub "
+            "WHERE COALESCE(ch.is_active, 1)=1 ORDER BY h.hub, h.company"
         ).fetchall()
-        hubs = [r["hub"] for r in hub_rows]
-        hub_zones = {r["hub"]: r["zone"] for r in hub_rows}
+        hubs = sorted({r["hub"] for r in hub_rows})
+        hub_zones: dict[str, str | None] = {}
+        for r in hub_rows:
+            hub_zones[r["hub"]] = hub_zones.get(r["hub"]) or r["zone"]
+        company_hubs = [
+            {"company": r["company"], "hub": r["hub"], "zone": r["zone"]} for r in hub_rows
+        ]
         riders_active = conn.execute(
             "SELECT COUNT(*) FROM rider_master WHERE is_active=1"
         ).fetchone()[0]
@@ -71,7 +77,8 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
         "companies": companies,
         "hubs": hubs,
         "hub_zones": hub_zones,
-        "zones": ["North", "South"],
+        "company_hubs": company_hubs,
+        "zones": list(ZONES),
         "ev_models": providers,
         "counts": {
             "rider_ids_active": int(riders_active),
@@ -233,11 +240,18 @@ def _todo_rows(conn) -> list[dict]:
         "       (SELECT rm.hub FROM rider_master rm WHERE rm.person_id=pr.person_id "
         "          AND rm.hub IS NOT NULL AND rm.hub<>'' "
         "          ORDER BY rm.is_active DESC, rm.created_at DESC LIMIT 1) AS hub, "
+        "       (SELECT ch.zone FROM rider_master rm "
+        "          JOIN company_hubs ch ON ch.company=rm.company AND ch.hub=rm.hub "
+        "          WHERE rm.person_id=pr.person_id AND ch.zone IS NOT NULL "
+        "          ORDER BY rm.is_active DESC LIMIT 1) AS hub_zone, "
         "       (SELECT GROUP_CONCAT(DISTINCT rm.company) FROM rider_master rm "
         "          WHERE rm.person_id=pr.person_id AND rm.is_active=1) AS companies, "
         "       (SELECT rm.mob_no FROM rider_master rm WHERE rm.person_id=pr.person_id "
         "          AND rm.mob_no IS NOT NULL AND rm.mob_no<>'' "
-        "          ORDER BY rm.is_active DESC LIMIT 1) AS mob_no "
+        "          ORDER BY rm.is_active DESC LIMIT 1) AS mob_no, "
+        "       (SELECT ru.zone FROM rider_master rm JOIN users ru ON ru.email=rm.recruited_by "
+        "          WHERE rm.person_id=pr.person_id AND ru.zone IS NOT NULL LIMIT 1) "
+        "          AS recruiter_zone "
         "FROM person_registry pr "
         "LEFT JOIN ev_arrears ea ON ea.person_id=pr.person_id "
         "LEFT JOIN balances b ON b.person_id=pr.person_id "
@@ -262,6 +276,8 @@ def _todo_rows(conn) -> list[dict]:
             "mob_no": r["mob_no"],
             "ev_id": r["ev_id"],
             "ev_model": r["model"],
+            "recruiter_zone": r["recruiter_zone"],
+            "hub_zone": r["hub_zone"],
         }
         if int(r["cod_outstanding"] or 0) > 0:
             items.append(
@@ -308,18 +324,19 @@ def todo(
     if want not in ("all", "unassigned") and want.title() not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}, unassigned or all")
     with get_connection() as conn:
-        zones = {r["hub"]: r["zone"] for r in conn.execute("SELECT hub, zone FROM hub_zones")}
         items = _todo_rows(conn)
     stores: dict[str, dict] = {}
     for it in items:
-        hub_zone = zones.get(it["hub"])
+        # A store's zone; a hub-less rider (Blitz and co.) sits in "Misc"
+        # under the zone of the recruiter who onboarded them.
+        hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
         if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
             continue
         store = stores.setdefault(
-            it["hub"] or "No store on file",
-            {"hub": it["hub"] or "", "zone": hub_zone, "items": []},
+            it["hub"] or "Misc",
+            {"hub": it["hub"] or "Misc", "zone": hub_zone, "items": []},
         )
         store["items"].append(it)
     # Counts are keyed "<kind>_items" so the money middleware never mistakes

@@ -15,6 +15,9 @@ from __future__ import annotations
 # that a DELETE in this order never violates a foreign key: children first.
 PERSON_REFS: tuple[tuple[str, str], ...] = (
     ("payment_lines", "person_id"),  # -> transactions(id) too: must go first
+    ("referrals", "new_person_id"),
+    ("referrals", "referrer_person_id"),
+    ("ev_closeouts", "person_id"),  # -> ev_assignments(assignment_id) too: before it
     ("rider_documents", "person_id"),  # index rows only; objects stay in the store
     ("money_requests", "person_id"),
     ("ev_daily_ledger", "assigned_person_id"),

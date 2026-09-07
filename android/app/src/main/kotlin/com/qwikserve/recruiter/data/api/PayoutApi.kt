@@ -53,6 +53,9 @@ interface PayoutApi {
     @GET("persons/{id}")
     suspend fun person(@Path("id") personId: Long): PersonOut
 
+    @POST("riders")
+    suspend fun createRider(@Body body: RiderIn): RiderOut
+
     @GET("evs")
     suspend fun evs(
         @Query("status") status: String? = null,

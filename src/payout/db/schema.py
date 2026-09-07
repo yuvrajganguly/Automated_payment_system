@@ -80,8 +80,29 @@ CREATE TABLE IF NOT EXISTS ev_assignments (
     handover_date TEXT,           -- NULL => rent the full cycle (legacy riders)
     returned_date TEXT,           -- NULL => currently held
     rent_charged_through TEXT,    -- last date EV rent billed through
+    closeout_pending INTEGER NOT NULL DEFAULT 0, -- 1 = closed, deposit not yet settled (ev_closeouts)
     created_at    TEXT DEFAULT (datetime('now'))
 );
+-- What happened to the security deposit when an EV assignment closed. One
+-- row per closed assignment once an admin has completed the close-out; the
+-- assignment carries closeout_pending=1 until then. Money in paise.
+CREATE TABLE IF NOT EXISTS ev_closeouts (
+    assignment_id   INTEGER PRIMARY KEY REFERENCES ev_assignments(assignment_id),
+    ev_id           TEXT NOT NULL,
+    person_id       INTEGER NOT NULL REFERENCES person_registry(person_id),
+    sd_returned     INTEGER NOT NULL DEFAULT 0,   -- 1 = deposit handed back to the rider in cash
+    sd_amount       INTEGER NOT NULL DEFAULT 0,   -- deposit held (₹2,700 normally)
+    damage_charges  INTEGER NOT NULL DEFAULT 0,
+    rent_charges    INTEGER NOT NULL DEFAULT 0,   -- rent the admin says is owed
+    rent_applied    INTEGER NOT NULL DEFAULT 0,   -- rent actually cleared from the deposit
+    refund_due      INTEGER NOT NULL DEFAULT 0,   -- deposit left over for the rider (>= 0)
+    refund_mode     TEXT,                         -- next_payout | cash | NULL
+    shortfall       INTEGER NOT NULL DEFAULT 0,   -- charges beyond the deposit, added to dues
+    note            TEXT,
+    created_by      TEXT,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+
 -- At most one open assignment per person.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_assignment
     ON ev_assignments (person_id) WHERE returned_date IS NULL;
@@ -199,15 +220,27 @@ CREATE TABLE IF NOT EXISTS hub_codes (
     PRIMARY KEY (company, code)
 );
 
--- ── hub_zones ───────────────────────────────────────────────────────────────
--- Which zone (North / South) a hub belongs to. Hubs themselves are free text
--- on rider_master; a hub with no row here is "unassigned" until an admin
--- classifies it on the web (Admin → Hubs).
-CREATE TABLE IF NOT EXISTS hub_zones (
-    hub        TEXT PRIMARY KEY,
-    zone       TEXT NOT NULL,                  -- North | South
-    updated_at TEXT DEFAULT (datetime('now')),
-    updated_by TEXT
+-- ── company_hubs ───────────────────────────────────────────────────────────
+-- Stores (hubs) per company. Hubs are free text on rider rows — they arrive
+-- with company files and with onboarding — and this table is where an admin
+-- says which zone (North / South / Misc) each one is in and, for companies
+-- we pay ourselves (per order / salary), what that store pays when it
+-- differs from the company default. A rider's zone is their hub's zone, or
+-- the zone of the recruiter who onboarded them when the hub has none. Money
+-- in paise. Rows are created for every (company, hub) seen on the roster.
+CREATE TABLE IF NOT EXISTS company_hubs (
+    company             TEXT NOT NULL,
+    hub                 TEXT NOT NULL,
+    zone                TEXT,                    -- North | South | Misc | NULL (unassigned)
+    per_order_rate      INTEGER,                 -- per-order companies: overrides companies.per_order_rate
+    salary              INTEGER,                 -- salary companies: default salary for riders here
+    incentive_per_order INTEGER,                 -- salary companies: overrides the company figure
+    incentive_per_day   INTEGER,
+    notes               TEXT,
+    is_active           INTEGER NOT NULL DEFAULT 1,
+    updated_at          TEXT DEFAULT (datetime('now')),
+    updated_by          TEXT,
+    PRIMARY KEY (company, hub)
 );
 
 -- Where a recruiter was when they opened the app (recruiter app, "Option 1"
@@ -225,6 +258,26 @@ CREATE TABLE IF NOT EXISTS recruiter_locations (
     source     TEXT DEFAULT 'app_open'
 );
 CREATE INDEX IF NOT EXISTS idx_recruiter_locations_email ON recruiter_locations (email, at DESC);
+
+-- Referrals: an existing rider brought a new one. Once the new rider has
+-- worked 4 weeks (28 days from onboarding, still active, at least one payout
+-- received) the referrer earns ₹1,000 in two ₹500 instalments — the first in
+-- the payout processed after the month is reached, the second in the next.
+-- Paid as ADJUSTMENT credits inside the payout engine; money in paise.
+CREATE TABLE IF NOT EXISTS referrals (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    new_person_id        INTEGER NOT NULL UNIQUE REFERENCES person_registry(person_id),
+    referrer_person_id   INTEGER NOT NULL REFERENCES person_registry(person_id),
+    company              TEXT,                        -- company of the new rider id
+    created_by           TEXT,
+    created_at           TEXT DEFAULT (datetime('now')),
+    qualified_on         TEXT,                        -- date the 4 weeks were reached
+    installments_paid    INTEGER NOT NULL DEFAULT 0,  -- 0..2
+    last_paid_cycle_end  TEXT,
+    status               TEXT NOT NULL DEFAULT 'open', -- open | paying | paid | void
+    note                 TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals (referrer_person_id, status);
 
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).

@@ -26,6 +26,7 @@ from payout.domain.holds import (
     load_hub_names,
     persist_holds,
 )
+from payout.domain.referrals import pay_installments
 from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from payout.money import to_rupees
 from payout.parsers import parse_file
@@ -87,6 +88,8 @@ class RiderResult:
     # Delivered/completed orders pulled straight from the company file when the
     # company config declares an orders_column. None when not available.
     orders: float | None = None
+    # Referral instalments credited to this rider in this cycle (paise).
+    referral_bonus: float = 0.0
 
 
 @dataclass
@@ -129,6 +132,9 @@ class CycleResult:
     # Every rider id present in the payout sheet (known or not). The HOLD sheet
     # uses it to split COD riders into "in this payout" / "not in this payout".
     file_rider_ids: list = field(default_factory=list)
+    # Referral instalments paid this cycle:
+    # {referral_id, new_person_id, new_name, installment, amount, person_id, rider_id, name}
+    referral_bonuses: list = field(default_factory=list)
     committed: bool = False
     totals: dict = field(default_factory=dict)
 
@@ -576,6 +582,23 @@ def process_cycle(
                 rent, rent_days = 0.0, 0
                 ev_id, model = _ev_for(conn, pid)
 
+            # Referral bonuses due to this rider (₹500 instalments once the
+            # rider they referred has worked four weeks) are credited now so
+            # they ride out with this cycle's release.
+            bonuses = pay_installments(
+                conn,
+                referrer_person_id=pid,
+                company=company,
+                cycle_start=cycle_start,
+                cycle_end=cycle_end,
+                created_by=created_by,
+            )
+            referral_bonus = sum(b["amount"] for b in bonuses)
+            if bonuses:
+                result.referral_bonuses.extend(
+                    {**b, "person_id": pid, "rider_id": rec.rider_id, "name": person["name"]}
+                    for b in bonuses
+                )
             prev_bal = _balance(conn, pid)
             arr_out = _arrears_out(conn, pid)
             # DORMANT DEBT: the person returned their EV (no open assignment,
@@ -954,6 +977,7 @@ def process_cycle(
                 account_no=person["account_no"],
                 ifsc=person["ifsc"],
                 orders=getattr(rec, "orders", None),
+                referral_bonus=referral_bonus,
             )
             (result.pay_rows if s.released > 0 else result.dues_rows).append(rr)
 

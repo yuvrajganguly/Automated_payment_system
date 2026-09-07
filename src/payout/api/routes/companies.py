@@ -22,6 +22,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 
 from payout.api.auth import get_current_user, require_admin
+from payout.api.routes.hubs import HubIn, upsert_hub
 from payout.api.schemas import CADENCES, PAYMENT_MODELS, CompanyIn, CompanyOut, CompanyPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -60,9 +61,12 @@ _EDITABLE = (
 )
 
 
-def _out(r, counts: dict[str, tuple[int, int]] | None = None) -> CompanyOut:
+def _out(
+    r, counts: dict[str, tuple[int, int]] | None = None, hubs: dict[str, int] | None = None
+) -> CompanyOut:
     active, total = (counts or {}).get(r["company_name"], (0, 0))
     return CompanyOut(
+        hubs=(hubs or {}).get(r["company_name"], 0),
         company_name=r["company_name"],
         parser_type=r["parser_type"],
         payout_column=r["payout_column"],
@@ -122,6 +126,18 @@ def _salary_fields(days, inc_order, inc_day) -> tuple[int, int, int]:
     return days, io_, id_
 
 
+def _hub_counts(conn) -> dict[str, int]:
+    """company → number of stores on file (roster hubs ∪ Admin → Hubs rows)."""
+    return {
+        r["company"]: int(r["n"])
+        for r in conn.execute(
+            "SELECT company, COUNT(*) AS n FROM ("
+            " SELECT DISTINCT company, hub FROM rider_master WHERE hub IS NOT NULL AND hub<>'' "
+            " UNION SELECT company, hub FROM company_hubs WHERE is_active=1) h GROUP BY company"
+        )
+    }
+
+
 @router.get("", response_model=list[CompanyOut])
 def list_companies(_: dict = Depends(get_current_user)) -> list[CompanyOut]:
     with get_connection() as conn:
@@ -129,7 +145,8 @@ def list_companies(_: dict = Depends(get_current_user)) -> list[CompanyOut]:
             f"SELECT {_COLS} FROM companies ORDER BY is_active DESC, company_name"
         ).fetchall()
         counts = _rider_counts(conn)
-    return [_out(r, counts) for r in rows]
+        hubs = _hub_counts(conn)
+    return [_out(r, counts, hubs) for r in rows]
 
 
 @router.post("", response_model=CompanyOut, status_code=201)
@@ -198,6 +215,10 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
                 inc_day,
             ),
         )
+        # Stores given with the company are created now, zone included.
+        for h in body.hubs:
+            if h.hub.strip():
+                upsert_hub(conn, name, h.hub, HubIn(zone=h.zone), user)
         record_activity(
             conn,
             user,
@@ -205,13 +226,19 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
             entity_type="company",
             entity_id=name,
             label=name,
-            details={"payment_model": model, "cadence": body.cadence, "per_order_rate": rate},
+            details={
+                "payment_model": model,
+                "cadence": body.cadence,
+                "per_order_rate": rate,
+                "hubs": [h.hub.strip() for h in body.hubs if h.hub.strip()],
+            },
         )
         row = conn.execute(
             f"SELECT {_COLS} FROM companies WHERE company_name=?", (name,)
         ).fetchone()
+        hubs = _hub_counts(conn)
         conn.commit()
-    return _out(row)
+    return _out(row, None, hubs)
 
 
 @router.patch("/{company_name}", response_model=CompanyOut)

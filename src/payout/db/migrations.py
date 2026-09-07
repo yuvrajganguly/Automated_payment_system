@@ -445,19 +445,28 @@ def _0018_recruiter_app_fields(conn: Any) -> None:
     """Recruiter app, day 2 (2026-09-07): where an action happened
     (activity_log.lat/lng/accuracy_m), who onboarded a rider
     (rider_master.recruited_by — backfilled from the activity log's
-    rider.create rows), hub → zone (hub_zones), and which zone a recruiter
-    works (users.zone) so the app's to-do list opens on their stores."""
+    rider.create rows), stores per company with their zone and pay figures
+    (company_hubs), and which zone a recruiter works (users.zone) so the
+    app's to-do list opens on their stores."""
     add_column(conn, "activity_log", "lat", "REAL")
     add_column(conn, "activity_log", "lng", "REAL")
     add_column(conn, "activity_log", "accuracy_m", "REAL")
     add_column(conn, "rider_master", "recruited_by", "TEXT")
     add_column(conn, "users", "zone", "TEXT")
     ddl = (
-        "CREATE TABLE IF NOT EXISTS hub_zones ("
-        "  hub        TEXT PRIMARY KEY,"
-        "  zone       TEXT NOT NULL,"
-        "  updated_at TEXT DEFAULT (datetime('now')),"
-        "  updated_by TEXT"
+        "CREATE TABLE IF NOT EXISTS company_hubs ("
+        "  company             TEXT NOT NULL,"
+        "  hub                 TEXT NOT NULL,"
+        "  zone                TEXT,"
+        "  per_order_rate      INTEGER,"
+        "  salary              INTEGER,"
+        "  incentive_per_order INTEGER,"
+        "  incentive_per_day   INTEGER,"
+        "  notes               TEXT,"
+        "  is_active           INTEGER NOT NULL DEFAULT 1,"
+        "  updated_at          TEXT DEFAULT (datetime('now')),"
+        "  updated_by          TEXT,"
+        "  PRIMARY KEY (company, hub)"
         ")"
     )
     if DB_URL:
@@ -466,6 +475,16 @@ def _0018_recruiter_app_fields(conn: Any) -> None:
         conn.executescript(translate_ddl(ddl))
     else:
         conn.execute(ddl)
+    # Every store already on the roster gets a row (zone unassigned).
+    for r in conn.execute(
+        "SELECT DISTINCT company, hub FROM rider_master WHERE hub IS NOT NULL AND hub<>''"
+    ).fetchall():
+        if not conn.execute(
+            "SELECT 1 FROM company_hubs WHERE company=? AND hub=?", (r["company"], r["hub"])
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO company_hubs (company, hub) VALUES (?,?)", (r["company"], r["hub"])
+            )
     # Backfill: the operator who created a rider row is its recruiter.
     for r in conn.execute(
         "SELECT entity_id, email FROM activity_log WHERE action='rider.create' "
@@ -510,6 +529,71 @@ def _0019_recruiter_locations(conn: Any) -> None:
         conn.execute(idx)
 
 
+def _0020_ev_closeouts(conn: Any) -> None:
+    """EV close-out (2026-09-07): when an EV closes the admin says whether the
+    security deposit went back to the rider, and if not, what it covered
+    (rent, damage) and what is left. Until then the assignment is
+    closeout_pending. Closures before this migration were settled by the old
+    automatic rule (0005 + return-time application) and stay as they are."""
+    add_column(conn, "ev_assignments", "closeout_pending", "INTEGER NOT NULL DEFAULT 0")
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS ev_closeouts ("
+        "  assignment_id   INTEGER PRIMARY KEY REFERENCES ev_assignments(assignment_id),"
+        "  ev_id           TEXT NOT NULL,"
+        "  person_id       INTEGER NOT NULL REFERENCES person_registry(person_id),"
+        "  sd_returned     INTEGER NOT NULL DEFAULT 0,"
+        "  sd_amount       INTEGER NOT NULL DEFAULT 0,"
+        "  damage_charges  INTEGER NOT NULL DEFAULT 0,"
+        "  rent_charges    INTEGER NOT NULL DEFAULT 0,"
+        "  rent_applied    INTEGER NOT NULL DEFAULT 0,"
+        "  refund_due      INTEGER NOT NULL DEFAULT 0,"
+        "  refund_mode     TEXT,"
+        "  shortfall       INTEGER NOT NULL DEFAULT 0,"
+        "  note            TEXT,"
+        "  created_by      TEXT,"
+        "  created_at      TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+
+
+def _0021_referrals(conn: Any) -> None:
+    """Rider referrals (2026-09-07): ₹1,000 to the referrer in two ₹500
+    instalments once the new rider has worked four weeks."""
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS referrals ("
+        "  id                   INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  new_person_id        INTEGER NOT NULL UNIQUE REFERENCES person_registry(person_id),"
+        "  referrer_person_id   INTEGER NOT NULL REFERENCES person_registry(person_id),"
+        "  company              TEXT,"
+        "  created_by           TEXT,"
+        "  created_at           TEXT DEFAULT (datetime('now')),"
+        "  qualified_on         TEXT,"
+        "  installments_paid    INTEGER NOT NULL DEFAULT 0,"
+        "  last_paid_cycle_end  TEXT,"
+        "  status               TEXT NOT NULL DEFAULT 'open',"
+        "  note                 TEXT"
+        ")"
+    )
+    idx = (
+        "CREATE INDEX IF NOT EXISTS idx_referrals_referrer "
+        "ON referrals (referrer_person_id, status)"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+        conn.executescript(translate_ddl(idx))
+    else:
+        conn.execute(ddl)
+        conn.execute(idx)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -533,6 +617,8 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0017_refresh_tokens", _0017_refresh_tokens),
     ("0018_recruiter_app_fields", _0018_recruiter_app_fields),
     ("0019_recruiter_locations", _0019_recruiter_locations),
+    ("0020_ev_closeouts", _0020_ev_closeouts),
+    ("0021_referrals", _0021_referrals),
 ]
 
 _TRACKING_DDL = (

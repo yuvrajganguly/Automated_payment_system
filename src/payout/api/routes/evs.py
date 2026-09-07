@@ -12,6 +12,7 @@ from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
     EvAssignIn,
+    EvCloseoutIn,
     EvModelOut,
     EvReturnIn,
     EvUnitIn,
@@ -24,8 +25,13 @@ from payout.api.schemas import (
 from payout.db import get_connection
 from payout.domain.activity import record_activity
 from payout.domain.adjustments import log_maintenance
-from payout.domain.arrears import settle_from_deposit
 from payout.domain.backrent import apply_backrent, compute_backrent, latest_cycle_end_for
+from payout.domain.closeout import (
+    CloseoutError,
+    apply_closeout,
+    mark_pending,
+    pending_closeouts,
+)
 from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
 from payout.money import to_paise
@@ -135,8 +141,11 @@ def list_ev_units(
             "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id, "  # noqa: E501
             "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "
             "          WHERE rm.person_id=a.person_id AND rm.hub IS NOT NULL AND rm.hub<>'') AS hub, "  # noqa: E501
-            "       (SELECT hz.zone FROM rider_master rm JOIN hub_zones hz ON hz.hub=rm.hub "
-            "          WHERE rm.person_id=a.person_id LIMIT 1) AS zone, "
+            "       COALESCE((SELECT hz.zone FROM rider_master rm "
+            "                   JOIN company_hubs hz ON hz.company=rm.company AND hz.hub=rm.hub "
+            "                   WHERE rm.person_id=a.person_id AND hz.zone IS NOT NULL LIMIT 1), "
+            "                (SELECT ru.zone FROM rider_master rm JOIN users ru ON ru.email=rm.recruited_by "  # noqa: E501
+            "                   WHERE rm.person_id=a.person_id AND ru.zone IS NOT NULL LIMIT 1)) AS zone, "  # noqa: E501
             "       (SELECT GROUP_CONCAT(DISTINCT rm.recruited_by) FROM rider_master rm "
             "          WHERE rm.person_id=a.person_id AND rm.recruited_by IS NOT NULL) AS recruited_by, "  # noqa: E501
             "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=a.person_id "
@@ -370,6 +379,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     """
     today = (body.returned_date or date.today()).isoformat()
     heal = None
+    closeout = None
     with get_connection() as conn:
         a = _find_open_assignment(conn, body)
         if a:
@@ -386,11 +396,11 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
                 retire=True,
                 created_by=_["email"],
             )
-            # EV closed -> the security deposit knocks up to ₹2,700 off what
-            # the rider still owes (damage charges: manual, for now).
-            heal["deposit_applied"] = settle_from_deposit(
-                conn, person_id, created_by=_["email"], ev_id=ev_id
-            )
+            # EV closed -> the admin now answers what happened to the security
+            # deposit (POST /evs/closeouts/{assignment_id}); until then the
+            # assignment is closeout_pending and the web keeps asking.
+            mark_pending(conn, a["assignment_id"])
+            closeout = _closeout_prompt(conn, a["assignment_id"])
         else:
             # Spare: no open assignment. The unit itself must exist.
             ev_id, person_id = body.ev_id, None
@@ -415,6 +425,8 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
     out = {"returned": True, "ev_id": ev_id, "person_id": person_id, "returned_date": today}
     if heal:
         out["heal"] = heal
+    if closeout:
+        out["closeout"] = closeout
     return out
 
 
@@ -470,9 +482,8 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
             retire=False,
             created_by=_["email"],
         )
-        heal["deposit_applied"] = settle_from_deposit(
-            conn, a["person_id"], created_by=_["email"], ev_id=a["ev_id"]
-        )
+        mark_pending(conn, a["assignment_id"])
+        closeout = _closeout_prompt(conn, a["assignment_id"])
         conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (a["ev_id"],))
         _close_open_maintenance(conn, a["ev_id"], today)
         record_activity(
@@ -495,7 +506,73 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
         "person_id": a["person_id"],
         "as_of": today,
         "heal": heal,
+        "closeout": closeout,
     }
+
+
+def _closeout_prompt(conn, assignment_id: int) -> dict | None:
+    """The just-closed assignment as the close-out form needs it."""
+    return next((p for p in pending_closeouts(conn) if p["assignment_id"] == assignment_id), None)
+
+
+@router.get("/closeouts")
+def list_closeouts(
+    pending: bool = True,
+    ev_id: str | None = None,
+    _: dict = Depends(require_admin),
+) -> list[dict]:
+    """Closed assignments still waiting for the deposit answer (``pending``,
+    default), or the recorded close-outs (``pending=false``, optionally for
+    one unit)."""
+    with get_connection() as conn:
+        if pending:
+            return pending_closeouts(conn)
+        where, params = [], []
+        if ev_id:
+            where.append("c.ev_id=?")
+            params.append(ev_id)
+        rows = conn.execute(
+            "SELECT c.*, pr.display_name AS name, a.handover_date, a.returned_date "
+            "FROM ev_closeouts c JOIN person_registry pr ON pr.person_id=c.person_id "
+            "JOIN ev_assignments a ON a.assignment_id=c.assignment_id "
+            + (("WHERE " + " AND ".join(where)) if where else "")
+            + " ORDER BY c.created_at DESC, c.assignment_id DESC LIMIT 500",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+@router.post("/closeouts/{assignment_id}")
+def close_out(assignment_id: int, body: EvCloseoutIn, user: dict = Depends(require_admin)) -> dict:
+    """Answer the deposit question for a closed assignment. Money moves here:
+    rent cleared from the deposit, damage recorded, leftover credited to the
+    next payout (or refunded in cash), excess charges added to dues."""
+    with get_connection() as conn:
+        try:
+            out = apply_closeout(
+                conn,
+                assignment_id,
+                sd_returned=body.sd_returned,
+                sd_amount=None if body.sd_amount is None else to_paise(body.sd_amount),
+                damage_charges=to_paise(body.damage_charges or 0),
+                rent_charges=None if body.rent_charges is None else to_paise(body.rent_charges),
+                credit_next_payout=body.credit_next_payout,
+                note=body.note,
+                created_by=user["email"],
+            )
+        except CloseoutError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        record_activity(
+            conn,
+            user,
+            "ev.closeout",
+            entity_type="ev",
+            entity_id=out["ev_id"],
+            person_id=out["person_id"],
+            details={k: v for k, v in out.items() if k not in ("ev_id", "person_id")},
+        )
+        conn.commit()
+    return out
 
 
 @router.post("/close")

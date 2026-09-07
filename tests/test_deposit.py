@@ -99,8 +99,9 @@ def test_deposit_caps_at_2700(db):
 
 def test_return_applies_deposit_and_small_debtors_stop_being_dormant(db):
     """Absent one week (₹1,250 < cap) then EV returned late: the heal writes
-    off nothing (return date after the cycle), the deposit clears the debt,
-    and the rider is NOT dormant — future payouts flow normally."""
+    off nothing (return date after the cycle); the admin's close-out (deposit
+    held) clears the debt from the deposit and the leftover goes to the
+    rider's next payout, so the rider is NOT dormant."""
     wk = date(2026, 6, 1)
     pid = make_person(db, "SmallDebt", balance=0, arrears=0)
     make_rider(db, pid, "D1", "Blitz", "SmallDebt")
@@ -118,19 +119,40 @@ def test_return_applies_deposit_and_small_debtors_stop_being_dormant(db):
     c = _client(db)
     r = c.post("/api/evs/return", json={"ev_id": "EV-D1", "returned_date": "2026-06-08"})
     assert r.status_code == 200, r.text
-    assert r.json()["heal"]["deposit_applied"] == 1250.0  # rupees at the edge
+    # Nothing settled yet: the web now asks what happened to the deposit.
+    assert "deposit_applied" not in r.json()["heal"]
+    prompt = r.json()["closeout"]
+    assert prompt["ev_id"] == "EV-D1" and prompt["suggested"]["rent_charges"] == 1250.0
+    assert prompt["suggested"]["sd_amount"] == 2700.0
+    assert _out(db, pid) == 125000
+    pending = c.get("/api/evs/closeouts").json()
+    assert [p["assignment_id"] for p in pending] == [prompt["assignment_id"]]
+
+    r = c.post(
+        f"/api/evs/closeouts/{prompt['assignment_id']}",
+        json={"sd_returned": False, "damage_charges": 0, "credit_next_payout": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rent_applied"] == 1250.0 and body["refund_due"] == 1450.0
+    assert body["refund_mode"] == "next_payout" and body["shortfall"] == 0
     assert _out(db, pid) == 0
-    # Not dormant any more: a future payout is NOT held.
+    assert c.get("/api/evs/closeouts").json() == []
+    # Closing out twice is refused.
+    assert c.post(f"/api/evs/closeouts/{prompt['assignment_id']}", json={}).status_code == 400
+    # Not dormant any more, and the ₹1,450 leftover rides out with the next payout.
     r2 = process_cycle(
         "Blitz", date(2026, 6, 8), date(2026, 6, 14), _file([("D1", 2000)]), commit=True
     )
     row = (r2.pay_rows + r2.dues_rows)[0]
     assert row.is_hold is False
+    assert row.prev_balance == 145000 and row.released == 200000 + 145000
 
 
 def test_return_with_big_debt_keeps_surplus_dormant(db):
-    """Two absent weeks + prior arrears (₹5,250 total > cap): deposit knocks
-    off ₹2,700, the surplus stays owed and the rider stays dormant-held."""
+    """Two absent weeks + prior arrears (₹5,250 total > cap): the close-out
+    (deposit held, nothing else) knocks ₹2,700 off, the surplus stays owed
+    and the rider stays dormant-held."""
     wk = date(2026, 6, 1)
     pid = make_person(db, "BigDebt", balance=0, arrears=275000)
     make_rider(db, pid, "D2", "Blitz", "BigDebt")
@@ -148,7 +170,10 @@ def test_return_with_big_debt_keeps_surplus_dormant(db):
     c = _client(db)
     r = c.post("/api/evs/return", json={"ev_id": "EV-D2", "returned_date": "2026-06-08"})
     assert r.status_code == 200, r.text
-    assert r.json()["heal"]["deposit_applied"] == 2700.0
+    aid = r.json()["closeout"]["assignment_id"]
+    r = c.post(f"/api/evs/closeouts/{aid}", json={"sd_returned": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["rent_applied"] == 2700.0 and r.json()["refund_due"] == 0
     assert _out(db, pid) == 275000 + 125000 - CAP
     # Still dormant: future payout held untouched.
     r2 = process_cycle(
@@ -243,3 +268,58 @@ def test_manual_arrears_write_off(db):
     )
     # reason is mandatory
     assert c.post(f"/api/persons/{pid}/arrears/write-off", json={}).status_code == 400
+
+
+def test_closeout_variants(db):
+    """Deposit returned in cash (damage becomes dues); deposit held with damage
+    beyond it (excess becomes dues); deposit held, leftover refunded in cash."""
+    c = _client(db)
+
+    def closed(tag, arrears=0):
+        pid = make_person(db, tag, balance=0, arrears=arrears)
+        make_rider(db, pid, tag, "Blitz", tag)
+        make_ev(db, "EV-" + tag, provider="Raft", model="Regular")
+        aid = assign(db, pid, "EV-" + tag, handover="2026-06-01", charged_through="2026-06-07")
+        db.commit()
+        r = c.post("/api/evs/to-spare", json={"ev_id": "EV-" + tag, "returned_date": "2026-06-08"})
+        assert r.status_code == 200, r.text
+        assert r.json()["closeout"]["assignment_id"] == aid
+        return pid, aid
+
+    def balance(pid):
+        row = db.execute(
+            "SELECT current_balance FROM balances WHERE person_id=?", (pid,)
+        ).fetchone()
+        return int(row["current_balance"]) if row else 0
+
+    # 1) SD given back in cash, ₹400 of damage → the rider owes ₹400.
+    pid, aid = closed("Cash")
+    r = c.post(f"/api/evs/closeouts/{aid}", json={"sd_returned": True, "damage_charges": 400})
+    assert r.status_code == 200, r.text
+    assert r.json()["sd_amount"] == 0 and r.json()["shortfall"] == 400.0
+    assert balance(pid) == -40000
+
+    # 2) SD held, ₹1,000 rent owed, ₹2,000 damage → ₹300 beyond the deposit becomes dues.
+    pid, aid = closed("Big", arrears=100000)
+    r = c.post(f"/api/evs/closeouts/{aid}", json={"sd_returned": False, "damage_charges": 2000})
+    body = r.json()
+    assert body["rent_applied"] == 1000.0 and body["refund_due"] == 0 and body["shortfall"] == 300.0
+    assert _out(db, pid) == 0 and balance(pid) == -30000
+
+    # 3) SD held, nothing owed, refunded in cash → recorded, no book movement.
+    pid, aid = closed("Clean")
+    r = c.post(
+        f"/api/evs/closeouts/{aid}",
+        json={"sd_returned": False, "credit_next_payout": False, "note": "Paid at the hub"},
+    )
+    body = r.json()
+    assert body["refund_due"] == 2700.0 and body["refund_mode"] == "cash"
+    assert balance(pid) == 0
+    hist = c.get("/api/evs/closeouts?pending=false&ev_id=EV-Clean").json()
+    assert len(hist) == 1 and hist[0]["note"] == "Paid at the hub" and hist[0]["name"] == "Clean"
+    # The admin can override the rent figure; the deposit still only clears real debt.
+    pid, aid = closed("Over", arrears=50000)
+    body = c.post(f"/api/evs/closeouts/{aid}", json={"rent_charges": 5000}).json()
+    assert body["rent_charges"] == 5000.0 and body["rent_applied"] == 500.0
+    assert body["refund_due"] == 2200.0 and body["refund_mode"] == "next_payout"
+    assert balance(pid) == 220000

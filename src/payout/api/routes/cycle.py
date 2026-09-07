@@ -64,15 +64,33 @@ def _parse_overrides(raw: str | None) -> CycleOverrides:
     return CycleOverrides(per_rider=per_rider, adjustments=data.get("adjustments", []) or [])
 
 
-def _orders_to_parse_result(company: str, raw: str | None, rate_paise: int | None):
+def _store_rates(conn, company: str) -> dict[str, dict]:
+    """rider_id → the store-level pay figures for that rider's hub (paise),
+    only the fields the store overrides (Admin → Hubs)."""
+    rows = conn.execute(
+        "SELECT rm.rider_id, ch.per_order_rate, ch.salary, ch.incentive_per_order, "
+        "       ch.incentive_per_day "
+        "FROM rider_master rm JOIN company_hubs ch ON ch.company=rm.company AND ch.hub=rm.hub "
+        "WHERE rm.company=?",
+        (company,),
+    ).fetchall()
+    return {
+        r["rider_id"]: {k: v for k, v in dict(r).items() if k != "rider_id" and v is not None}
+        for r in rows
+    }
+
+
+def _orders_to_parse_result(conn, company: str, raw: str | None, rate_paise: int | None):
     """Turn the typed order counts into the records a payout file would give.
 
-    Payout = orders × rate in paise, exactly what a parsed file yields. A rider
-    listed twice is summed; zero-order riders are kept so the cycle treats
-    them as present (no rent missed for being absent)."""
+    Payout = orders × rate in paise, exactly what a parsed file yields. The
+    rate is the rider's store's when the store has one (Admin → Hubs), else
+    the company's. A rider listed twice is summed; zero-order riders are kept
+    so the cycle treats them as present (no rent missed for being absent)."""
     from payout.domain.models import ParseResult, RiderRecord
 
-    if not rate_paise:
+    store = _store_rates(conn, company)
+    if not rate_paise and not any("per_order_rate" in v for v in store.values()):
         raise HTTPException(400, f"{company} has no per-order rate set (Admin → Companies).")
     if not raw:
         raise HTTPException(400, f"{company} is paid per order — enter the order counts.")
@@ -96,18 +114,22 @@ def _orders_to_parse_result(company: str, raw: str | None, rate_paise: int | Non
     if not counts:
         raise HTTPException(400, "No riders with order counts were given.")
     # Parsed records carry paise (the parsers call to_paise); do the same.
-    records = [
-        RiderRecord(rider_id=rid, payout=int(round(n * rate_paise)), orders=n)
-        for rid, n in counts.items()
-    ]
-    rate = rate_paise / 100.0
+    records = []
+    for rid, n in counts.items():
+        rate_for = store.get(rid, {}).get("per_order_rate") or rate_paise
+        if not rate_for:
+            raise HTTPException(
+                400, f"{rid} has no per-order rate — set one for its store or the company."
+            )
+        records.append(RiderRecord(rider_id=rid, payout=int(round(n * rate_for)), orders=n))
+    rate = (rate_paise or 0) / 100.0
     return ParseResult(
         company=company,
         records=records,
         sheet="orders entered by hand",
         matched_columns={
             "rider_id": "rider_id",
-            "payout": f"orders × ₹{rate:g}",
+            "payout": f"orders × ₹{rate:g}" + (" (store rates where set)" if store else ""),
             "orders": "orders",
         },
         warnings=[],
@@ -135,8 +157,9 @@ def _salary_to_parse_result(conn, company: str, raw: str | None, co) -> tuple[ob
             400, "attendance must be a JSON list of {rider_id, days_present, orders}"
         ) from exc
     expected = int(co["salary_expected_days"] or 26)
-    inc_order = int(co["incentive_per_order"] or 0)
-    inc_day = int(co["incentive_per_day"] or 0)
+    co_inc_order = int(co["incentive_per_order"] or 0)
+    co_inc_day = int(co["incentive_per_day"] or 0)
+    store = _store_rates(conn, company)
     salaries = {
         r["rider_id"]: (int(r["salary"] or 0), r["person_id"], r["name"])
         for r in conn.execute(
@@ -168,9 +191,16 @@ def _salary_to_parse_result(conn, company: str, raw: str | None, co) -> tuple[ob
     records, lines = [], []
     for rid, it in seen.items():
         salary, pid, name = salaries.get(rid, (0, None, None))
+        st = store.get(rid, {})
+        # Rider's own salary first, then the store's default (Admin → Hubs).
+        salary = salary or int(st.get("salary") or 0)
+        inc_order = int(st.get("incentive_per_order", co_inc_order))
+        inc_day = int(st.get("incentive_per_day", co_inc_day))
         if rid in salaries and not salary:
             raise HTTPException(
-                400, f"{name or rid} has no salary set — enter it in the table first."
+                400,
+                f"{name or rid} has no salary set — enter it in the table, or set a "
+                "default for their store under Admin → Hubs.",
             )
         days_off = max(0.0, expected - it["days_present"])
         base = int(round(salary - days_off * salary / expected))
@@ -392,7 +422,8 @@ async def run_cycle(
             "Change how it pays under Admin → Companies if that is wrong.",
         )
     if model == "per_order":
-        parsed = _orders_to_parse_result(company, orders, co["per_order_rate"])
+        with get_connection() as conn:
+            parsed = _orders_to_parse_result(conn, company, orders, co["per_order_rate"])
     elif model == "salary":
         pass
     else:

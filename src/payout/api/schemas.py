@@ -73,6 +73,14 @@ class CompanyOut(BaseModel):
     hold_status_column: str | None = None
     active_riders: int = 0
     rider_ids: int = 0
+    hubs: int = 0  # stores on file for this company (Admin → Hubs)
+
+
+class CompanyHubIn(BaseModel):
+    """A store given while creating a company: name + optional zone."""
+
+    hub: str
+    zone: str | None = None  # North | South | Misc
 
 
 class CompanyIn(BaseModel):
@@ -98,6 +106,8 @@ class CompanyIn(BaseModel):
     hold_key_column: str | None = None
     hold_amount_column: str | None = None
     hold_status_column: str | None = None
+    # Stores this company operates from, created alongside it.
+    hubs: list[CompanyHubIn] = []
 
 
 class CompanyPatch(BaseModel):
@@ -144,6 +154,8 @@ class RiderIn(BaseModel):
     # Optional identity numbers, stored on the person.
     aadhaar_no: str | None = None
     pan_no: str | None = None
+    # An existing rider who brought this one in (referral bonus after 4 weeks).
+    referred_by_person_id: int | None = None
 
 
 class IdentityIn(BaseModel):
@@ -167,6 +179,7 @@ class RiderOut(BaseModel):
     salary: int | None = None  # paise per cycle (salary companies); rupeeized out
     recruited_by: str | None = None  # users.email of who onboarded this rider id
     zone: str | None = None  # North | South from the hub, None when unassigned
+    referred_by: str | None = None  # referrer's name, only on the create response
     # Set on create-for-existing-person when blank fields were filled from
     # another of their rider rows: {"from": "JI10000@Jiffy", "fields": [...]}.
     copied_from: dict | None = None
@@ -307,6 +320,17 @@ class EvUnitOut(BaseModel):
     total_dues: int | None = None  # holder's EV-rent arrears + general dues (paise; rupeeized out)
     handover_date: str | None = None
     rent_charged_through: str | None = None
+
+
+class EvCloseoutIn(BaseModel):
+    """The admin's answer when an EV assignment has closed. Rupees in."""
+
+    sd_returned: bool = False  # deposit handed back to the rider in cash
+    sd_amount: float | None = None  # deposit held; default ₹2,700
+    damage_charges: float = 0
+    rent_charges: float | None = None  # default: what the books say is owed
+    credit_next_payout: bool = True  # leftover deposit → rider's next payout (else cash)
+    note: str | None = None
 
 
 class EvAssignIn(BaseModel):

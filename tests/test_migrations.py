@@ -31,6 +31,7 @@ _NEW_COLUMNS = [
     ("rider_master", "recruited_by"),
     ("users", "zone"),
     ("activity_log", "lat"),
+    ("ev_assignments", "closeout_pending"),
 ]
 
 
@@ -102,10 +103,16 @@ def test_pre_runner_database_gets_every_migration():
         "-- North | South: the recruiter's patch (app to-do list)\n",
         "",
     )
+    old_schema = old_schema.replace(
+        "    closeout_pending INTEGER NOT NULL DEFAULT 0, "
+        "-- 1 = closed, deposit not yet settled (ev_closeouts)\n",
+        "",
+    )
+    assert "closeout_pending INTEGER" not in old_schema
     assert "phone         TEXT" not in old_schema and "zone          TEXT" not in old_schema
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
     assert "payment_model" not in old_schema and "salary_expected_days" not in old_schema
-    # New whole tables (hub_zones, recruiter_locations) may stay: their
+    # New whole tables (company_hubs, recruiter_locations…) may stay: their
     # migrations are CREATE IF NOT EXISTS and must be no-ops when they exist.
     assert "recruited_by" not in old_schema and "accuracy_m   REAL" not in old_schema
     assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema

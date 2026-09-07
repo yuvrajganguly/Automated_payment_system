@@ -9,6 +9,7 @@ import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { EvModelOut, EvUnitOut, MaintenanceOut } from '../api/types'
 import { healNote, type HealSummary } from '../lib/format'
+import { CloseoutModal, PendingCloseouts, closeoutNote, type CloseoutPrompt, type CloseoutResult } from '../components/CloseoutModal'
 
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -24,6 +25,11 @@ export function EVsPage() {
   const [hubFilter, setHubFilter] = useUrlList('hub')
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // EV close-out: the deposit question, asked right after a return / spare and
+  // kept in a list until answered.
+  const [closeout, setCloseout] = useState<CloseoutPrompt | null>(null)
+  const [closeoutTick, setCloseoutTick] = useState(0)
+  const [closeoutMsg, setCloseoutMsg] = useState<string | null>(null)
   const hubOptions = Array.from(new Set(
     units.flatMap((u) => (u.hub ?? '').split(',').map((h) => h.trim()).filter(Boolean)),
   )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
@@ -62,6 +68,16 @@ export function EVsPage() {
       <p className="text-slate-500 text-sm mb-6">Rate card, current units, assignments, and maintenance history.</p>
       {busy && <Spinner />}
       {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+      {isAdmin && <PendingCloseouts refreshKey={closeoutTick} onPick={setCloseout} />}
+      {closeoutMsg && <p className="text-emerald-700 text-sm mb-3">{closeoutMsg}</p>}
+      {closeout && (
+        <CloseoutModal prompt={closeout}
+          onClose={() => setCloseout(null)}
+          onDone={(r: CloseoutResult) => {
+            setCloseout(null); setCloseoutTick((t) => t + 1)
+            setCloseoutMsg(`${r.ev_id} closed out — ${closeoutNote(r)}.`); reload()
+          }} />
+      )}
 
       <Section title="Rate Card">
         <table className="w-full text-sm">
@@ -173,8 +189,8 @@ export function EVsPage() {
         <div className="grid md:grid-cols-2 gap-4">
           <AddEvCard models={models} onAdded={reload} />
           <AssignEvCard onChanged={reload} />
-          <ReturnEvCard onChanged={reload} />
-          <MarkSpareEvCard onChanged={reload} />
+          <ReturnEvCard onChanged={reload} onCloseout={(p) => { setCloseout(p); setCloseoutTick((t) => t + 1) }} />
+          <MarkSpareEvCard onChanged={reload} onCloseout={(p) => { setCloseout(p); setCloseoutTick((t) => t + 1) }} />
           <MaintenanceCard onLogged={reload} />
         </div>
       )}
@@ -336,7 +352,7 @@ function AssignEvCard({ onChanged }: { onChanged: () => void }) {
   </FormCard>
 }
 
-function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
+function ReturnEvCard({ onChanged, onCloseout }: { onChanged: () => void; onCloseout: (p: CloseoutPrompt) => void }) {
   const empty = { ev_id: '', rider_id: '', company: '', returned_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
@@ -348,8 +364,9 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
       if (form.rider_id) body.rider_id = form.rider_id
       if (form.company) body.company = form.company
       if (form.returned_date) body.returned_date = form.returned_date
-      const r = await api.post<{ heal?: HealSummary }>('/evs/return', body)
+      const r = await api.post<{ heal?: HealSummary; closeout?: CloseoutPrompt | null }>('/evs/return', body)
       setMsg('Returned' + healNote(r.heal)); setForm(empty); onChanged()
+      if (r.closeout) onCloseout(r.closeout)
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }
@@ -373,7 +390,7 @@ function ReturnEvCard({ onChanged }: { onChanged: () => void }) {
   </FormCard>
 }
 
-function MarkSpareEvCard({ onChanged }: { onChanged: () => void }) {
+function MarkSpareEvCard({ onChanged, onCloseout }: { onChanged: () => void; onCloseout: (p: CloseoutPrompt) => void }) {
   const empty = { ev_id: '', rider_id: '', company: '', returned_date: '' }
   const [form, setForm] = useState(empty)
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null)
@@ -385,8 +402,9 @@ function MarkSpareEvCard({ onChanged }: { onChanged: () => void }) {
       if (form.rider_id) body.rider_id = form.rider_id
       if (form.company) body.company = form.company
       if (form.returned_date) body.returned_date = form.returned_date
-      const r = await api.post<{ heal?: HealSummary }>('/evs/to-spare', body)
+      const r = await api.post<{ heal?: HealSummary; closeout?: CloseoutPrompt | null }>('/evs/to-spare', body)
       setMsg('Marked spare' + healNote(r.heal)); setForm(empty); onChanged()
+      if (r.closeout) onCloseout(r.closeout)
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed') }
     finally { setBusy(false) }
   }

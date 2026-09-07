@@ -60,16 +60,18 @@ screen with the server's `detail` as the reason.
 
 ```
 GET   /app/bootstrap                      one call for first paint: me (incl. zone), active companies, hubs, hub_zones {hub: zone|null},
-                                          zones ["North","South"], ev_models, counts, api_version
+                                          company_hubs [{company,hub,zone}], zones ["North","South","Misc"], ev_models, counts, api_version
 GET   /riders?company=&hub=&active=&q=&limit=&offset=&zone=&mine=&recruited_by=
                                           roster (rider_id, company, person_id, name, hub, vehicle, bank, phone, is_active,
                                           recruited_by, zone); q matches name / rider id / phone / hub;
-                                          zone=North|South|unassigned (by the rider's hub); mine=1 → riders I onboarded;
+                                          zone=North|South|Misc|unassigned (by the rider's store); mine=1 → riders I onboarded;
                                           recruited_by=<email> → theirs (anyone may ask); X-Total-Count header = total before paging
 GET   /persons/{person_id}/photo[?size=thumb]   the profile photo (thumb = 160 px JPEG for tiles); 404 = none
 GET   /riders/{rider_id}?company=
-POST  /riders                             {"company","name","rider_id"?,"hub"?,"vehicle"?,"account_no"?,"ifsc"?,"person_id"?}
-                                          rider_id blank → placeholder QSPEND<NNNN>; person_id → attach to an existing person (2nd company)
+POST  /riders                             {"company","name","rider_id"?,"hub"?,"vehicle"?,"account_no"?,"ifsc"?,"mob_no"?,
+                                           "aadhaar_no"?,"pan_no"?,"person_id"?,"allow_duplicate_name"?,"referred_by_person_id"?}
+                                          rider_id blank → placeholder QSPEND<NNNN>; person_id → attach to an existing person (2nd company);
+                                          referred_by_person_id → records a referral (response carries "referred_by": the referrer's name)
 PATCH /riders/{rider_id}?company=         any of {"name","hub","vehicle","account_no","ifsc","mob_no","is_active","new_rider_id","new_company"}
                                           ("recruited_by" and "salary" are admin-only)
 POST  /riders/rename-rider-id             {"person_id","company","new_rider_id","current_rider_id"?}  — tag the real id; the QSPEND placeholder is retired
@@ -85,8 +87,11 @@ ids from payout files are admin-only.
 ## Zones, stores and the to-do list
 
 ```
-GET   /hubs                               [{hub, zone, riders, evs}] — every hub seen on a rider row (+ pre-classified ones)
-PUT   /hubs/{hub}                         admin: {"zone": "North"|"South"|null}   classify a store; null clears
+GET   /hubs?company=                      [{company, hub, zone, per_order_rate, salary, incentive_per_order, incentive_per_day,
+                                           notes, is_active, riders, evs, payment_model}] — every store per company
+PUT   /hubs/{company}/{hub}               admin: any of {"zone": North|South|Misc|null, "per_order_rate", "salary",
+                                          "incentive_per_order", "incentive_per_day", "notes", "is_active"} (rupees)
+POST  /companies                          …accepts "hubs": [{"hub","zone"?}] to create a company's stores with it
 PATCH /users/{email}/zone                 admin: {"zone": "North"|"South"|null}   the zone a recruiter works
 GET   /app/todo?zone=                     what needs a visit, grouped by store, for one zone (default: my zone; "all";
                                           "unassigned" = stores with no zone yet)
@@ -96,6 +101,11 @@ GET   /app/my-recruiting[?email=]         my onboarding numbers: counts{today, w
                                           by_company[], recent[] (email= is admin-only: another recruiter's)
 GET   /app/recruiting                     every recruiter side by side (admins); a recruiter gets only their own row
 ```
+
+A rider's `zone` is the hub's zone when the hub has one, else the zone of
+the recruiter who onboarded them (`users.zone`) — so hub-less riders (Blitz
+and co.) follow their recruiter. `?zone=unassigned` (alias `misc`) is the
+rest. In the to-do list, hub-less riders sit under a store called "Misc".
 
 To-do items are one visit each and carry `kind`:
 
@@ -166,6 +176,31 @@ PATCH /evs/maintenance/{id}                   {"to_date"?}  — close the window
 ```
 
 `amend-return`, `backrent` and everything that changes money stay admin-only.
+
+## Referrals
+
+```
+GET   /referrals?person_id=&status=&mine=     referrals (either side of person_id; mine=1 → ones I recorded)
+POST  /referrals                              {"new_person_id","referrer_person_id","company"?,"note"?}  → 201; 409 if the rider already has one
+GET   /referrals/rules                        {qualify_days:28, bonus:1000, installments:2, installment_amount:500, text}
+POST  /referrals/{id}/void                    admin: cancel (what was paid stays)
+```
+
+Once the new rider has worked four weeks (28 days from onboarding, still
+active, at least one payout received) the referrer gets ₹1,000 in two ₹500
+instalments — the first in the referrer's payout processed after the month
+is reached, the second in the next. The payout engine pays them; the app
+only records who referred whom.
+
+## EV close-out (web, admins)
+
+When an EV comes back from a rider (`/evs/return`, `/evs/to-spare`) the
+response carries `closeout` and the assignment stays `closeout_pending`
+until an admin answers on the web (`GET /evs/closeouts`, `POST
+/evs/closeouts/{assignment_id}`): was the security deposit returned; if not,
+the deposit held (₹2,700), damage and rent charges, and whether the leftover
+goes into the rider's next payout. Recruiters never see money here; they
+just return the unit.
 
 ## Money requests (the recruiter's only money action)
 

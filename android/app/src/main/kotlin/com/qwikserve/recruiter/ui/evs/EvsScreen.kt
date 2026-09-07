@@ -139,7 +139,7 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Kicker("Zone")
                     Spacer(Modifier.width(10.dp))
-                    Chips(listOf("North", "South", "All"), vm.zone, onSelect = { vm.zone = it })
+                    Chips(listOf("North", "South", "Misc", "All"), vm.zone, onSelect = { vm.zone = it })
                 }
             }
             val states = if (vm.mine) MY_STATES else ALL_STATES

@@ -431,6 +431,21 @@ export function ProcessPayoutPage() {
             </details>
           )}
 
+          {preview.referral_bonuses && preview.referral_bonuses.length > 0 && (
+            <details open className="mb-4 bg-emerald-500/10 border border-emerald-400/30 rounded p-3">
+              <summary className="font-medium cursor-pointer text-emerald-200">
+                {preview.referral_bonuses.length} referral bonus instalment(s) go out with this payout
+              </summary>
+              <ul className="mt-2 text-sm text-emerald-200 list-disc list-inside">
+                {preview.referral_bonuses.map((b) => (
+                  <li key={b.referral_id + '-' + b.installment}>
+                    {b.name} (<span className="font-mono">{b.rider_id}</span>) gets {fmt(b.amount)} — instalment {b.installment} of 2 for referring {b.new_name}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {preview.unknown_riders && preview.unknown_riders.length > 0 && (
             <div className="mb-4 bg-rose-500/10 border border-rose-400/30 rounded p-3 flex items-start justify-between gap-3">
               <div>

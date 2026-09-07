@@ -38,6 +38,7 @@ import com.qwikserve.recruiter.data.api.Todo
 import com.qwikserve.recruiter.data.api.TodoItem
 import com.qwikserve.recruiter.data.api.TodoStore
 import com.qwikserve.recruiter.data.repo.AppRepository
+import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
@@ -117,16 +118,18 @@ class TodayViewModel @Inject constructor(
 fun TodayScreen(
     onOpenPerson: (Long) -> Unit,
     onGoTab: (Tab) -> Unit,
+    onNewRider: () -> Unit,
     vm: TodayViewModel = hiltViewModel(),
 ) {
     val todo = vm.todo
     val boot = vm.bootstrap
     val myZone = boot?.me?.zone
-    val zoneOptions = (if (myZone != null) listOf("My zone") else emptyList()) + listOf("North", "South", "All")
+    val zoneOptions = (if (myZone != null) listOf("My zone") else emptyList()) + (boot?.zones ?: listOf("North", "South", "Misc")) + listOf("All")
     val selected = vm.zone ?: if (myZone != null) "My zone" else "All"
     val ctx = LocalContext.current
 
-    PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 12.dp)) {
@@ -243,6 +246,9 @@ fun TodayScreen(
             item { Spacer(Modifier.height(28.dp)) }
         }
     }
+    Rule()
+    BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
+    }
 }
 
 @Composable
@@ -251,7 +257,7 @@ private fun StoreHeader(store: TodoStore) {
         Modifier.fillMaxWidth().background(Qwik.Surface).padding(horizontal = 20.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(store.hub.ifBlank { "No store on file" }, style = MaterialTheme.typography.titleMedium, color = Qwik.Ink, modifier = Modifier.weight(1f))
+        Text(store.hub.ifBlank { "Misc" }, style = MaterialTheme.typography.titleMedium, color = Qwik.Ink, modifier = Modifier.weight(1f))
         Kicker(listOfNotNull(store.zone, "${store.items.size} to do").joinToString(" · "))
     }
     Hairline()

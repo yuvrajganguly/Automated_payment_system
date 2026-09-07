@@ -132,26 +132,35 @@ def test_hub_zones_filter_riders_and_fleet(db, client):
     make_ev(db, "EV-SPARE")
     db.commit()
 
-    # Hubs are listed even before any zone is set; unassigned first.
-    hubs = client.get("/api/hubs", headers=rec).json()
+    # Stores are listed per company even before any zone is set; unassigned first.
+    hubs = client.get("/api/hubs?company=Shadowfax", headers=rec).json()
     assert [h["hub"] for h in hubs] == ["Garia", "Howrah", "Salt Lake"]
-    assert all(h["zone"] is None for h in hubs)
+    assert all(h["zone"] is None and h["company"] == "Shadowfax" for h in hubs)
     assert {h["hub"]: (h["riders"], h["evs"]) for h in hubs}["Salt Lake"] == (1, 1)
+    assert hubs[0]["payment_model"] == "per_order"
 
     # Recruiters cannot classify; admins can, and any spelling of the zone works.
-    assert client.put("/api/hubs/Garia", json={"zone": "South"}, headers=rec).status_code == 403
-    assert (
-        client.put("/api/hubs/Salt Lake", json={"zone": "north"}, headers=boss).status_code == 200
-    )
-    assert client.put("/api/hubs/Garia", json={"zone": "South"}, headers=boss).status_code == 200
-    assert client.put("/api/hubs/Garia", json={"zone": "East"}, headers=boss).status_code == 400
-    # A hub with no riders yet can be classified ahead of time.
-    assert client.put("/api/hubs/New Town", json={"zone": "North"}, headers=boss).status_code == 200
-    hubs = {h["hub"]: h["zone"] for h in client.get("/api/hubs", headers=rec).json()}
+    put = lambda hub, body, h: client.put(f"/api/hubs/Shadowfax/{hub}", json=body, headers=h)  # noqa: E731
+    assert put("Garia", {"zone": "South"}, rec).status_code == 403
+    assert put("Salt Lake", {"zone": "north"}, boss).status_code == 200
+    assert put("Garia", {"zone": "South"}, boss).status_code == 200
+    assert put("Garia", {"zone": "East"}, boss).status_code == 400
+    assert put("Garia", {"zone": "misc"}, boss).json()["zone"] == "Misc"
+    assert put("Garia", {"zone": "South"}, boss).status_code == 200
+    # A store with no riders yet can be classified ahead of time; unknown company → 404.
+    assert put("New Town", {"zone": "North"}, boss).status_code == 200
+    assert client.put("/api/hubs/Nope/X", json={"zone": "North"}, headers=boss).status_code == 404
+    hubs = {
+        h["hub"]: h["zone"] for h in client.get("/api/hubs?company=Shadowfax", headers=rec).json()
+    }
     assert hubs == {"Salt Lake": "North", "Garia": "South", "Howrah": None, "New Town": "North"}
     assert (
-        db.execute("SELECT COUNT(*) FROM activity_log WHERE action='hub.zone'").fetchone()[0] == 3
+        db.execute("SELECT COUNT(*) FROM activity_log WHERE action='hub.update'").fetchone()[0] == 5
     )
+    # Store-level pay for a per-order company, rupees in and out.
+    r = put("Salt Lake", {"per_order_rate": 18, "notes": "busy store"}, boss).json()
+    assert r["per_order_rate"] == 18.0 and r["zone"] == "North" and r["notes"] == "busy store"
+    assert put("Salt Lake", {"per_order_rate": -1}, boss).status_code == 400
 
     north = client.get("/api/riders?zone=north", headers=rec)
     assert [r["rider_id"] for r in north.json()] == ["SF-1"] and north.headers[
@@ -172,10 +181,11 @@ def test_hub_zones_filter_riders_and_fleet(db, client):
     # Bootstrap carries the zone map so the app can label hubs offline.
     b = client.get("/api/app/bootstrap", headers=rec).json()
     assert b["hub_zones"]["Salt Lake"] == "North" and b["hub_zones"]["Howrah"] is None
-    assert "New Town" in b["hubs"] and b["zones"] == ["North", "South"]
+    assert "New Town" in b["hubs"] and b["zones"] == ["North", "South", "Misc"]
+    assert {"company": "Shadowfax", "hub": "New Town", "zone": "North"} in b["company_hubs"]
 
     # Clearing a zone.
-    assert client.put("/api/hubs/Garia", json={"zone": None}, headers=boss).status_code == 200
+    assert put("Garia", {"zone": None}, boss).status_code == 200
     assert client.get("/api/riders?zone=South", headers=rec).json() == []
 
 
@@ -301,8 +311,8 @@ def test_todo_groups_store_visits_by_zone(db, client):
         db.execute("UPDATE rider_master SET hub=? WHERE rider_id=?", (hub, rid))
     db.execute("UPDATE rider_master SET hub='Howrah' WHERE rider_id IN ('SF-4','SF-5')")
     db.commit()
-    client.put("/api/hubs/Salt Lake", json={"zone": "North"}, headers=boss)
-    client.put("/api/hubs/Garia", json={"zone": "South"}, headers=boss)
+    client.put("/api/hubs/Shadowfax/Salt Lake", json={"zone": "North"}, headers=boss)
+    client.put("/api/hubs/Shadowfax/Garia", json={"zone": "South"}, headers=boss)
 
     # No zone on the account yet → everything, labelled by store.
     t = client.get("/api/app/todo", headers=rec).json()

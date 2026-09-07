@@ -2,6 +2,7 @@ package com.qwikserve.recruiter.data.repo
 
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.api.PersonOut
+import com.qwikserve.recruiter.data.api.RiderIn
 import com.qwikserve.recruiter.data.api.RiderOut
 import androidx.room.withTransaction
 import com.qwikserve.recruiter.data.db.AppDatabase
@@ -41,6 +42,13 @@ class RiderRepository @Inject constructor(
     }
 
     suspend fun person(personId: Long): PersonOut = api.person(personId)
+
+    /** Onboard a rider (online only), then fold the new row into the cache. */
+    suspend fun create(body: RiderIn): RiderOut {
+        val out = api.createRider(body)
+        dao.upsertAll(listOf(out.toEntity()))
+        return out
+    }
 
     private fun RiderOut.toEntity() = RiderEntity(
         riderId = riderId,

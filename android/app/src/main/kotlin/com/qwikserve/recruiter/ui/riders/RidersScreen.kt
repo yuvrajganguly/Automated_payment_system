@@ -31,6 +31,7 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.Avatar
+import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
@@ -118,7 +119,7 @@ class RidersViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RidersScreen(onOpenPerson: (Long) -> Unit, vm: RidersViewModel = hiltViewModel()) {
+fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: RidersViewModel = hiltViewModel()) {
     val riders by vm.riders.collectAsStateWithLifecycle()
     val q by vm.query.collectAsStateWithLifecycle()
     val scope by vm.scope.collectAsStateWithLifecycle()
@@ -142,14 +143,14 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, vm: RidersViewModel = hiltViewMod
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Kicker("Zone")
                     Spacer(Modifier.width(10.dp))
-                    Chips(listOf("North", "South", "All"), zone, onSelect = { vm.zone.value = it })
+                    Chips(listOf("North", "South", "Misc", "All"), zone, onSelect = { vm.zone.value = it })
                 }
             }
             SearchField(q, onChange = { vm.query.value = it }, placeholder = "Name, rider id, phone or hub")
         }
         Rule()
         if (vm.error != null) Note(vm.error!!, color = Qwik.Accent700)
-        PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(isRefreshing = vm.refreshing, onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
             when {
                 vm.hasCache == false && riders.isEmpty() && vm.refreshing -> SkeletonList()
                 riders.isEmpty() -> Note(
@@ -179,6 +180,8 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, vm: RidersViewModel = hiltViewMod
                 }
             }
         }
+        Rule()
+        BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
     }
 }
 

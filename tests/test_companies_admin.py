@@ -364,3 +364,64 @@ def test_parse_attendance_sheet(db, client):
     ]
     assert [u["rider_id"] for u in body["unknown"]] == ["S-9"]
     assert body["matched"]["days_present"] == "Days Present"
+
+
+def test_store_rates_and_hubs_on_company_create(db, client):
+    """A store can pay differently from the company (per-order rate here),
+    and a new company can be created with its stores and zones."""
+    pid = make_person(db, "Busy Store", balance=0, arrears=0)
+    make_rider(db, pid, "SF-10", "Shadowfax", "Busy Store")
+    pid2 = make_person(db, "Plain Store", balance=0, arrears=0)
+    make_rider(db, pid2, "SF-11", "Shadowfax", "Plain Store")
+    db.execute("UPDATE rider_master SET hub='Salt Lake' WHERE rider_id='SF-10'")
+    db.execute("UPDATE rider_master SET hub='Garia' WHERE rider_id='SF-11'")
+    db.commit()
+    r = client.put("/api/hubs/Shadowfax/Salt Lake", json={"per_order_rate": 20, "zone": "North"})
+    assert r.status_code == 200, r.text
+    orders = json.dumps([{"rider_id": "SF-10", "orders": 10}, {"rider_id": "SF-11", "orders": 10}])
+    r = client.post(
+        "/api/cycles/run",
+        data={
+            "company": "Shadowfax",
+            "cycle_start": "2026-06-01",
+            "cycle_end": "2026-06-07",
+            "commit": "false",
+            "orders": orders,
+        },
+    )
+    assert r.status_code == 200, r.text
+    rows = {x["rider_id"]: x for x in r.json()["result"]["pay_rows"]}
+    assert rows["SF-10"]["payout"] == 200.0  # 10 × ₹20 at the store's rate
+    assert rows["SF-11"]["payout"] == 150.0  # 10 × ₹15 at the company's rate
+
+    # New company with its stores in one go.
+    r = client.post(
+        "/api/companies",
+        json={
+            "company_name": "Porter",
+            "payment_model": "per_order",
+            "per_order_rate": 12,
+            "hubs": [
+                {"hub": "Howrah", "zone": "north"},
+                {"hub": "Behala", "zone": "South"},
+                {"hub": " "},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["hubs"] == 2
+    hubs = {h["hub"]: h["zone"] for h in client.get("/api/hubs?company=Porter").json()}
+    assert hubs == {"Howrah": "North", "Behala": "South"}
+    assert (
+        next(c for c in client.get("/api/companies").json() if c["company_name"] == "Porter")[
+            "hubs"
+        ]
+        == 2
+    )
+    # A bad zone in the list refuses the whole create.
+    r = client.post(
+        "/api/companies",
+        json={"company_name": "Dunzo", "hubs": [{"hub": "X", "zone": "West"}]},
+    )
+    assert r.status_code == 400
+    assert client.get("/api/hubs?company=Dunzo").json() == []

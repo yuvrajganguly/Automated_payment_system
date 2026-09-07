@@ -138,6 +138,11 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap tabular-nums">
                       {c.active_riders ?? 0}<span className="text-slate-400"> / {c.rider_ids ?? 0}</span>
+                      <div className="text-[11px]">
+                        <Link to={'/hubs?company=' + encodeURIComponent(c.company_name)} className="text-brand underline decoration-dotted">
+                          {c.hubs ?? 0} store{(c.hubs ?? 0) === 1 ? '' : 's'}
+                        </Link>
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600">
                       {m === 'payout_file' ? (
@@ -375,18 +380,24 @@ function AddCompanyCard({ companies, onAdded }: { companies: Company[]; onAdded:
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [d, setD] = useState<Draft>(blank)
+  const [hubsText, setHubsText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const set = (patch: Partial<Draft>) => setD((cur) => ({ ...cur, ...patch }))
+  // "Salt Lake - North" per line; the zone is optional and any case.
+  const hubs = hubsText.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const m = /^(.*?)\s*[-–:|,]\s*(north|south|misc)\s*$/i.exec(l)
+    return m ? { hub: m[1].trim(), zone: m[2][0].toUpperCase() + m[2].slice(1).toLowerCase() } : { hub: l, zone: null }
+  })
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true); setError(null); setDone(null)
     try {
-      const c = await api.post<Company>('/companies', { company_name: name.trim(), ...toBody(d) })
-      setDone(`${c.company_name} added — ${MODEL_LABEL[modelOf(c)].toLowerCase()}.`)
-      setName(''); setD(blank); onAdded()
+      const c = await api.post<Company>('/companies', { company_name: name.trim(), ...toBody(d), hubs })
+      setDone(`${c.company_name} added — ${MODEL_LABEL[modelOf(c)].toLowerCase()}` + (hubs.length ? ` with ${hubs.length} store${hubs.length === 1 ? '' : 's'}` : '') + '.')
+      setName(''); setD(blank); setHubsText(''); onAdded()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add')
     } finally { setBusy(false) }
@@ -410,6 +421,21 @@ function AddCompanyCard({ companies, onAdded }: { companies: Company[]; onAdded:
             </Field>
           </div>
           <DraftFields d={d} set={set} companies={companies} />
+          <div className="mt-3">
+            <Field label="Stores (hubs)" hint='One per line, with the zone after a dash: "Salt Lake - North". Zone can be set later under Admin → Hubs; per-store rates too.'>
+              <textarea value={hubsText} onChange={(e) => setHubsText(e.target.value)} rows={3} className={input}
+                        placeholder={'Salt Lake - North\nGaria - South'} />
+            </Field>
+            {hubs.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {hubs.map((h, i) => (
+                  <span key={i} className="text-[11px] px-2 py-0.5 rounded bg-slate-100">
+                    {h.hub}{h.zone ? <span className="text-slate-500"> · {h.zone}</span> : <span className="text-red-500"> · no zone</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-3 mt-4">
             <button type="submit" disabled={busy || !name.trim()}
                     className="bg-brand hover:bg-brand-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50">

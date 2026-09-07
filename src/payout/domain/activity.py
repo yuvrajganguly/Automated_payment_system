@@ -37,6 +37,7 @@ ACTIONS: dict[str, str] = {
     "ev.assign": "Assigned EV",
     "ev.return": "Returned EV",
     "ev.spare": "Marked EV spare",
+    "ev.closeout": "Closed out EV deposit",
     "ev.amend_return": "Amended EV return date",
     "ev.maintenance_open": "Sent EV to maintenance",
     "ev.maintenance_close": "Brought EV back from maintenance",
@@ -45,7 +46,9 @@ ACTIONS: dict[str, str] = {
     "request.create": "Requested money change",
     "request.approve": "Approved money request",
     "request.reject": "Rejected money request",
-    "hub.zone": "Set hub zone",
+    "hub.update": "Updated a store",
+    "referral.create": "Recorded a referral",
+    "referral.void": "Cancelled a referral",
 }
 
 

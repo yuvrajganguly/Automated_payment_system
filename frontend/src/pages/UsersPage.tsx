@@ -9,12 +9,14 @@ interface UserRow {
   role: 'user' | 'recruiter' | 'admin' | 'creator'
   is_active: boolean
   phone: string | null
+  zone: string | null
   created_at: string | null
 }
 
 export function UsersPage() {
   const { user } = useAuth()
   const isCreator = user?.role === 'creator'
+  const isAdmin = isCreator || user?.role === 'admin'
   const [rows, setRows] = useState<UserRow[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -46,13 +48,13 @@ export function UsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
-              <Th>Email</Th><Th>Phone</Th><Th>Role</Th><Th>Active</Th><Th>Created</Th>
+              <Th>Email</Th><Th>Phone</Th><Th>Role</Th><Th>Zone</Th><Th>Active</Th><Th>Created</Th>
               {isCreator && <Th>Actions</Th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <UserRowEditor key={r.email} row={r} isCreator={isCreator}
+              <UserRowEditor key={r.email} row={r} isCreator={isCreator} isAdmin={isAdmin}
                              selfEmail={user?.email ?? ''} onChanged={reload} />
             ))}
           </tbody>
@@ -64,9 +66,19 @@ export function UsersPage() {
   )
 }
 
-function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
-  { row: UserRow; isCreator: boolean; selfEmail: string; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | null>(null)
+function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
+  { row: UserRow; isCreator: boolean; isAdmin: boolean; selfEmail: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | 'zone' | null>(null)
+  // The zone a recruiter works (North / South): their app opens on those stores,
+  // and riders they onboard without a hub take this zone.
+  async function setZone(zone: string) {
+    setBusy('zone'); setError(null)
+    try {
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/zone', { zone: zone || null })
+      onChanged()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(null) }
+  }
   const [error, setError] = useState<string | null>(null)
   const isSelf = row.email === selfEmail
 
@@ -153,6 +165,16 @@ function UserRowEditor({ row, isCreator, selfEmail, onChanged }:
              : row.role === 'recruiter' ? 'bg-sky-500/15'
              :                        'bg-slate-100')}>{row.role}</span>
         )}
+      </Td>
+      <Td>
+        {isAdmin && row.role !== 'user' ? (
+          <select value={row.zone ?? ''} onChange={(e) => setZone(e.target.value)} disabled={busy === 'zone'}
+                  className="text-xs border rounded px-2 py-0.5" title="Zone this recruiter works">
+            <option value="">—</option>
+            <option value="North">North</option>
+            <option value="South">South</option>
+          </select>
+        ) : (row.zone ?? '')}
       </Td>
       <Td>
         <span className={'text-xs px-1.5 py-0.5 rounded ' +

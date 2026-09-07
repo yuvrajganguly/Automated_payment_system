@@ -51,6 +51,7 @@ enum class Tab(val label: String) { TODAY("Today"), RIDERS("Riders"), EVS("EVs")
 @Composable
 fun HomeScreen(
     onOpenPerson: (Long) -> Unit,
+    onNewRider: () -> Unit,
     onSignOut: () -> Unit,
     vm: HomeViewModel = hiltViewModel(),
 ) {
@@ -88,8 +89,8 @@ fun HomeScreen(
             TabStrip(selected = tab, onSelect = { tab = it })
             Box(Modifier.weight(1f)) {
                 when (Tab.entries[tab]) {
-                    Tab.TODAY -> TodayScreen(onOpenPerson = onOpenPerson, onGoTab = { tab = it.ordinal })
-                    Tab.RIDERS -> RidersScreen(onOpenPerson = onOpenPerson)
+                    Tab.TODAY -> TodayScreen(onOpenPerson = onOpenPerson, onGoTab = { tab = it.ordinal }, onNewRider = onNewRider)
+                    Tab.RIDERS -> RidersScreen(onOpenPerson = onOpenPerson, onNewRider = onNewRider)
                     Tab.EVS -> EvsScreen(onOpenPerson = onOpenPerson)
                     Tab.REQUESTS -> RequestsScreen(onOpenPerson = onOpenPerson)
                     Tab.STATS -> StatsScreen(onOpenPerson = onOpenPerson)
