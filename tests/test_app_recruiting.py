@@ -189,6 +189,15 @@ def test_my_fleet_follows_my_riders(db, client):
     db.commit()
     mine = client.get("/api/evs?mine=1", headers=rec).json()
     assert [e["ev_id"] for e in mine] == ["EV-A"] and mine[0]["recruited_by"] == "rec@t.test"
+    assert mine[0]["holder_active"] is True and mine[0]["total_dues"] == 0
+    # Holder goes inactive and owes: the fleet row says so (the app's Dues / Inactive views).
+    db.execute("UPDATE rider_master SET is_active=0 WHERE rider_id='SF-1'")
+    db.execute("UPDATE balances SET current_balance=-20000 WHERE person_id=?", (a["person_id"],))
+    db.commit()
+    mine = client.get("/api/evs?mine=1", headers=rec).json()
+    assert mine[0]["holder_active"] is False and mine[0]["total_dues"] == 200.0
+    spare = next(e for e in client.get("/api/evs", headers=rec).json() if e["ev_id"] == "EV-C")
+    assert spare["holder_active"] is None and spare["total_dues"] is None
     assert [e["ev_id"] for e in client.get("/api/evs?mine=1", headers=rec2).json()] == ["EV-B"]
     # Spare units belong to nobody, so "my fleet" never shows them.
     assert "EV-C" not in {e["ev_id"] for e in mine}
@@ -345,3 +354,37 @@ def test_todo_groups_store_visits_by_zone(db, client):
     assert client.get("/api/app/todo?zone=West", headers=rec).status_code == 400
     users = {u["email"]: u.get("zone") for u in client.get("/api/users", headers=boss).json()}
     assert users["rec@t.test"] == "North"
+
+
+def test_location_on_app_open_is_throttled_to_30_minutes(db, client):
+    rec = _hdr(client)
+    boss = _hdr(client, "boss@t.test", "Creator-pass-1")
+    body = {"lat": 22.5726, "lng": 88.3639, "accuracy_m": 15.0, "area": "Salt Lake, Kolkata"}
+    r = client.post("/api/app/location", json=body, headers=rec)
+    assert r.status_code == 200 and r.json()["recorded"] is True
+    # Opening the app again five minutes later records nothing.
+    r = client.post("/api/app/location", json={**body, "lat": 22.58}, headers=rec)
+    assert r.json()["recorded"] is False and r.json()["next_after"]
+    assert db.execute("SELECT COUNT(*) FROM recruiter_locations").fetchone()[0] == 1
+    # …but after the gap it does.
+    from datetime import datetime, timedelta
+
+    earlier = (datetime.utcnow() - timedelta(minutes=31)).strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE recruiter_locations SET at=?", (earlier,))
+    db.commit()
+    r = client.post("/api/app/location", json={**body, "lat": 22.58, "area": None}, headers=rec)
+    assert r.json()["recorded"] is True
+    assert (
+        client.post("/api/app/location", json={"lat": 95, "lng": 0}, headers=rec).status_code == 400
+    )
+
+    mine = client.get("/api/app/locations", headers=rec).json()
+    assert [m["lat"] for m in mine] == [22.58, 22.5726]
+    assert mine[1]["area"] == "Salt Lake, Kolkata" and mine[1]["source"] == "app_open"
+    assert client.get("/api/app/locations?email=boss@t.test", headers=rec).status_code == 403
+    theirs = client.get("/api/app/locations?email=REC@t.test", headers=boss).json()
+    assert len(theirs) == 2 and theirs[0]["email"] == "rec@t.test"
+    assert (
+        client.get("/api/app/locations?email=rec@t.test&limit=1", headers=boss).json()[0]["lat"]
+        == 22.58
+    )

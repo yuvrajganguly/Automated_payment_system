@@ -1,6 +1,11 @@
 package com.qwikserve.recruiter.ui.person
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,52 +13,46 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.qwikserve.recruiter.data.api.PersonOut
 import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.RiderRepository
-import com.qwikserve.recruiter.ui.common.Amber
 import com.qwikserve.recruiter.ui.common.Avatar
-import com.qwikserve.recruiter.ui.common.Emerald
-import com.qwikserve.recruiter.ui.common.Pill
-import com.qwikserve.recruiter.ui.common.Rose
+import com.qwikserve.recruiter.ui.common.GhostAction
+import com.qwikserve.recruiter.ui.common.Hairline
+import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.Rule
 import com.qwikserve.recruiter.ui.common.Skeleton
-import com.qwikserve.recruiter.ui.common.StatTile
+import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
+import com.qwikserve.recruiter.ui.common.shortDate
+import com.qwikserve.recruiter.ui.theme.Qwik
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.IOException
 import javax.inject.Inject
-
 @HiltViewModel
 class PersonViewModel @Inject constructor(
     saved: SavedStateHandle,
@@ -80,116 +79,120 @@ class PersonViewModel @Inject constructor(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PersonScreen(personId: Long, onBack: () -> Unit, vm: PersonViewModel = hiltViewModel()) {
     val cached by vm.cached.collectAsStateWithLifecycle()
     val p = vm.person
     val name = p?.displayName ?: cached.firstOrNull()?.name
+    val ctx = LocalContext.current
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(name ?: "Rider", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-            )
-        },
-    ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(personId, name, size = 72.dp, thumb = false)
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(name ?: "—", style = MaterialTheme.typography.titleLarge)
-                    val ids = p?.aadhaarNo?.let { "Aadhaar " + it.chunked(4).joinToString(" ") }
-                    val pan = p?.panNo?.let { "PAN $it" }
-                    val line = listOfNotNull(ids, pan).joinToString(" · ")
-                    if (line.isNotEmpty()) Text(line, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else if (p != null) Text("No Aadhaar / PAN on file", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else Skeleton(140.dp, 12.dp)
+    Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            // Masthead: back, name, identity line.
+            Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
+                GhostAction("← Back", onClick = onBack, color = Qwik.Accent)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f)) {
+                        Text(name ?: "Rider", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+                        Spacer(Modifier.height(6.dp))
+                        val ids = p?.aadhaarNo?.let { "Aadhaar " + it.chunked(4).joinToString(" ") }
+                        val pan = p?.panNo?.let { "PAN $it" }
+                        val line = listOfNotNull(ids, pan).joinToString(" · ")
+                        when {
+                            line.isNotEmpty() -> Text(line, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
+                            p != null -> Text("No Aadhaar / PAN on file", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
+                            else -> Skeleton(140.dp, 12.dp)
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Avatar(personId, name, size = 56.dp, thumb = false)
                 }
             }
-            if (vm.error != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(vm.error!!, color = Amber, style = MaterialTheme.typography.labelMedium)
-            }
-            Spacer(Modifier.height(16.dp))
-
-            // Standing — visible to recruiters so they never ask for money already added.
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Rule()
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                if (vm.error != null) {
+                    Text(vm.error!!, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(20.dp, 10.dp))
+                }
+                // Standing — visible to recruiters so they never ask for money already added.
                 val bal = p?.currentBalance
                 val arr = p?.arrearsOutstanding
                 val dues = if (bal != null && arr != null) (arr - bal).coerceAtLeast(0.0) else null
-                StatTile("Balance", if (p == null) "…" else rupees(bal), Modifier.weight(1f),
-                    tone = if ((bal ?: 0.0) < 0) Rose else null)
-                StatTile("EV arrears", if (p == null) "…" else rupees(arr), Modifier.weight(1f),
-                    tone = if ((arr ?: 0.0) > 0) Amber else null)
-                StatTile("Total dues", if (p == null) "…" else rupees(dues), Modifier.weight(1f),
-                    tone = if ((dues ?: 0.0) > 0) Rose else Emerald)
-            }
-            Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Standing("Balance", if (p == null) "…" else rupees(bal), Modifier.weight(1f), accent = (bal ?: 0.0) < 0)
+                    Box(Modifier.width(1.dp).height(74.dp).background(Qwik.N400))
+                    Standing("EV arrears", if (p == null) "…" else rupees(arr), Modifier.weight(1f), accent = (arr ?: 0.0) > 0)
+                    Box(Modifier.width(1.dp).height(74.dp).background(Qwik.N400))
+                    Standing("Total dues", if (p == null) "…" else rupees(dues), Modifier.weight(1f), accent = (dues ?: 0.0) > 0)
+                }
+                Rule()
 
-            Section("EV") {
+                Kicker("EV", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 6.dp))
                 val ev = p?.ev
                 when {
                     p == null -> Skeleton(200.dp)
-                    ev == null -> Text("No EV held", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(ev.evId, fontWeight = FontWeight.SemiBold)
-                            Pill("${ev.provider} ${ev.model}", tone = Emerald)
-                        }
+                    ev == null -> Text("No EV assigned.", style = MaterialTheme.typography.bodyLarge, color = Qwik.N700, modifier = Modifier.padding(horizontal = 20.dp))
+                    else -> Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
+                        Text("${ev.evId} · ${ev.provider} ${ev.model}", style = MaterialTheme.typography.titleLarge, color = Qwik.Ink)
                         Text(
                             listOfNotNull(
-                                ev.handoverDate?.let { "since $it" },
-                                ev.rentChargedThrough?.let { "rent through $it" },
+                                ev.handoverDate?.let { "Since " + shortDate(it) },
+                                ev.rentChargedThrough?.let { "rent through " + shortDate(it) },
+                                rupees(ev.weeklyRate) + "/wk",
                             ).joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
                         )
                     }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
 
-            Section("Rider ids") {
-                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive) }
-                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive) }
+                Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
+                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy) }
+                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy) }
                 if (rows.isEmpty()) Skeleton(220.dp)
                 rows.forEach { r ->
-                    Column(Modifier.padding(vertical = 6.dp)) {
+                    Hairline()
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(r.riderId, fontWeight = FontWeight.SemiBold)
-                            Pill(r.company)
-                            if (!r.active) Pill("inactive", tone = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(r.riderId, style = MaterialTheme.typography.titleLarge, color = Qwik.Ink)
+                            Tag(r.company, outline = true)
+                            if (!r.active) Tag("inactive")
                         }
                         val detail = listOfNotNull(
                             r.hub,
                             r.phone,
-                            r.account?.let { "A/c $it" + (r.ifsc?.let { i -> " · $i" } ?: "") },
+                            r.account?.let { "A/c $it" + (r.ifsc?.let { i -> " · $i" } ?: "") } ?: "no account on file",
                         ).joinToString(" · ")
-                        if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700, modifier = Modifier.padding(top = 3.dp))
+                        r.recruitedBy?.let {
+                            Text("Onboarded by " + it.substringBefore('@'), style = MaterialTheme.typography.bodySmall, color = Qwik.N600)
+                        }
                     }
                 }
+                Hairline()
+
+                val phone = rows.firstNotNullOfOrNull { it.phone }
+                if (phone != null) {
+                    Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                        GhostAction("Call $phone", onClick = {
+                            ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { it.isDigit() || it == '+' })))
+                        })
+                    }
+                }
+                Spacer(Modifier.height(32.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun Standing(label: String, value: String, modifier: Modifier = Modifier, accent: Boolean = false) {
+    Column(modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+        Kicker(label)
+        Spacer(Modifier.height(5.dp))
+        Text(value, style = MaterialTheme.typography.headlineSmall, color = if (accent) Qwik.Accent else Qwik.Ink, maxLines = 1)
     }
 }
 
 private data class RiderLine(
     val riderId: String, val company: String, val hub: String?, val phone: String?,
-    val account: String?, val ifsc: String?, val active: Boolean,
+    val account: String?, val ifsc: String?, val active: Boolean, val recruitedBy: String?,
 )
-
-@Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(6.dp))
-            content()
-        }
-    }
-}

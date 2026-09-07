@@ -30,6 +30,9 @@ class TokenStore @Inject constructor(@ApplicationContext context: Context) {
     private val _session = MutableStateFlow(readSession())
     val session: StateFlow<Session?> = _session
 
+    /** The signed-in email (lower-case, as the server stores it), or null. */
+    val email: String? get() = _session.value?.email?.lowercase()
+
     @Volatile var accessToken: String? = prefs.getString(KEY_ACCESS, null)
         private set
     @Volatile var refreshToken: String? = prefs.getString(KEY_REFRESH, null)

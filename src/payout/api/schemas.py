@@ -303,6 +303,8 @@ class EvUnitOut(BaseModel):
     hub: str | None = None
     zone: str | None = None  # from the holder's hub; None when spare / unassigned
     recruited_by: str | None = None  # who onboarded the holder (comma-joined if several)
+    holder_active: bool | None = None  # False = the holder has no active rider id left
+    total_dues: int | None = None  # holder's EV-rent arrears + general dues (paise; rupeeized out)
     handover_date: str | None = None
     rent_charged_through: str | None = None
 

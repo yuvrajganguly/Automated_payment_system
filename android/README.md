@@ -28,10 +28,30 @@ app/src/main/kotlin/com/qwikserve/recruiter/
   di/AppModule.kt       Json, OkHttp (auth interceptor + refresh authenticator), Retrofit, Room
   data/api/             wire models (kotlinx.serialization) + Retrofit interface
   data/auth/            TokenStore (EncryptedSharedPreferences), AuthInterceptor, TokenAuthenticator
-  data/db/              Room: riders cache
-  data/repo/            RiderRepository — read cached, write online
-  ui/                   AppRoot (nav), SessionViewModel, login/, riders/, person/, common/, theme/
+  data/db/              Room: riders cache (with recruited_by and zone for the filters)
+  data/location/        AppOpenLocation (one fix per foreground, ≥30 min apart), header interceptor
+  data/repo/            RiderRepository — read cached, write online; AppRepository — bootstrap
+  ui/                   AppRoot (nav), SessionViewModel, home/ (tab shell), today/, riders/, evs/,
+                        requests/, stats/, person/, login/, common/ (the kit), theme/
 ```
+
+Look: "Modernist" from the saved Claude Design canvas (`Qwikserve Recruiter.html`
+in this folder) — off-white ground, ink, one red accent, square corners, 2 px
+rules, Archivo (bundled as static 400/600/800 TTFs in `res/font`). One theme,
+no dark mode, by design.
+
+Navigation: no drawer. Five tabs across the top — **Today** (things that need a
+visit, grouped by store, for the recruiter's zone: COD to collect, EV holders
+with dues, EVs to pick up from inactive riders), **Riders** (All riders with a
+North/South zone filter, or My riders), **EVs** (All fleet by zone and state,
+or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine),
+**My numbers** (today / week / month / all-time onboardings, by company).
+
+Location ("Option 1"): each time the app comes to the foreground it takes one
+fix, reverse-geocodes the area on the phone and posts it to `/app/location`;
+the server keeps at most one row per 30 minutes. Writes also carry
+`X-Client-Location` so the activity log knows where an action happened.
+Nothing runs in the background.
 
 Session: sign in once with email or phone; the app keeps a 30-day rotating
 refresh token in encrypted storage and never asks again unless the server

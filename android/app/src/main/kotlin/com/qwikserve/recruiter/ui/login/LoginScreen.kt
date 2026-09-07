@@ -1,7 +1,6 @@
 package com.qwikserve.recruiter.ui.login
 
 import android.os.Build
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,8 +14,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.unit.sp
+import com.qwikserve.recruiter.ui.common.BarButton
+import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.theme.Qwik
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -94,69 +100,91 @@ fun LoginScreen(reason: String?, onSignedIn: () -> Unit, vm: LoginViewModel = hi
     var password by rememberSaveable { mutableStateOf("") }
     var show by rememberSaveable { mutableStateOf(false) }
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 28.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("Qwikserve", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-            Text(
-                "Recruiter",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(28.dp))
-            if (reason != null) {
-                Text(reason, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(12.dp))
-            }
-            OutlinedTextField(
-                value = user,
-                onValueChange = { user = it },
-                label = { Text("Email or phone") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                singleLine = true,
-                visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { vm.signIn(user, password, onSignedIn) }),
-                trailingIcon = {
-                    IconButton(onClick = { show = !show }) {
-                        Icon(
-                            if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = if (show) "Hide password" else "Show password",
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (vm.error != null) {
+    Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
+        Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+            // Masthead — the design's 46 px wordmark over a 2 px rule.
+            Column(Modifier.padding(horizontal = 20.dp).padding(top = 84.dp, bottom = 22.dp)) {
+                Text(
+                    "Qwikserve",
+                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 46.sp, lineHeight = 44.sp, letterSpacing = (-1.4).sp),
+                    color = Qwik.Ink,
+                )
                 Spacer(Modifier.height(10.dp))
-                Text(vm.error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                Kicker("Recruiter", color = Qwik.Accent700)
             }
-            Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = { vm.signIn(user, password, onSignedIn) },
-                enabled = !vm.busy,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-            ) {
-                if (vm.busy) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
-                else Text("Sign in")
+            Rule()
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 30.dp)) {
+                if (reason != null) {
+                    Text(reason, color = Qwik.Accent700, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(14.dp))
+                }
+                Field("Email or phone") {
+                    OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it },
+                        placeholder = { Text("you@qwikserve.in", color = Qwik.N600) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                        colors = fieldColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Field("Password") {
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { vm.signIn(user, password, onSignedIn) }),
+                        trailingIcon = {
+                            IconButton(onClick = { show = !show }) {
+                                Icon(
+                                    if (show) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (show) "Hide password" else "Show password",
+                                    tint = Qwik.N700,
+                                )
+                            }
+                        },
+                        colors = fieldColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Text(
+                    vm.error ?: "",
+                    color = Qwik.Accent700,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 5.dp).heightIn(min = 20.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "You stay signed in on this phone. Ask an admin to reset a password.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Qwik.N700,
+                )
             }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Forgot your password? Use Forgot password on the web console, or ask an admin to set one.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
+            Rule()
+            BarButton(if (vm.busy) "Signing in…" else "Sign in", onClick = { vm.signIn(user, password, onSignedIn) }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth())
         }
     }
 }
+
+@Composable
+fun Field(label: String, content: @Composable () -> Unit) {
+    Column {
+        Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp), color = Qwik.N700, modifier = Modifier.padding(bottom = 5.dp))
+        content()
+    }
+}
+
+@Composable
+fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = Qwik.Surface,
+    unfocusedContainerColor = Qwik.Surface,
+    focusedBorderColor = Qwik.Accent,
+    unfocusedBorderColor = Qwik.Divider,
+    cursorColor = Qwik.Accent,
+    focusedTextColor = Qwik.Ink,
+    unfocusedTextColor = Qwik.Ink,
+)

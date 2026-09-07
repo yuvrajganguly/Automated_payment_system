@@ -210,6 +210,22 @@ CREATE TABLE IF NOT EXISTS hub_zones (
     updated_by TEXT
 );
 
+-- Where a recruiter was when they opened the app (recruiter app, "Option 1"
+-- tracking): one row per open, at most one per 30 minutes per account, no
+-- background collection. lat/lng plus a reverse-geocoded area name and the
+-- phone's stated accuracy. Admins read it on the web; recruiters see their own.
+CREATE TABLE IF NOT EXISTS recruiter_locations (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT NOT NULL,
+    at         TEXT DEFAULT (datetime('now')),
+    lat        REAL NOT NULL,
+    lng        REAL NOT NULL,
+    accuracy_m REAL,
+    area       TEXT,                            -- "Salt Lake, Kolkata" from the phone's geocoder
+    source     TEXT DEFAULT 'app_open'
+);
+CREATE INDEX IF NOT EXISTS idx_recruiter_locations_email ON recruiter_locations (email, at DESC);
+
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).
 --   payout_sheet : '0' (index) or 'pattern:<substr>' to match a sheet by name.

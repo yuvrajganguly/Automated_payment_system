@@ -110,6 +110,21 @@ Every item has `person_id`, `name`, `hub`, `companies`, `mob_no`, `ev_id`,
 Stores are ordered by how much is waiting at them. A recruiter with no
 zone on their account sees every store, labelled with its zone.
 
+### Where the recruiter is (app-open location)
+
+```
+POST /app/location        {"lat","lng","accuracy_m"?,"area"?,"source"?="app_open"}
+                          → {"recorded": true|false, "last_at", "next_after"}
+GET  /app/locations?email=&since=&limit=   my trail (newest first); email= is admin-only
+```
+
+Every time the app comes to the foreground it takes one fix and posts it
+here with the phone's reverse-geocoded `area` ("Salt Lake, Kolkata").
+The server keeps **at most one row per 30 minutes per account** — a post
+inside the gap answers `recorded: false` with `next_after`, so the app need
+not keep its own timer (it may, to save a request). There is no background
+collection: no service, no periodic job, nothing while the app is closed.
+
 ### Where an action happened (Level 1 location)
 
 The app may send `X-Client-Location: <lat>,<lng>[,<accuracy_m>]` on any

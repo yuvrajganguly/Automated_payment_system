@@ -10,13 +10,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.qwikserve.recruiter.ui.home.HomeScreen
 import com.qwikserve.recruiter.ui.login.LoginScreen
 import com.qwikserve.recruiter.ui.person.PersonScreen
-import com.qwikserve.recruiter.ui.riders.RidersScreen
 
 object Routes {
     const val LOGIN = "login"
-    const val RIDERS = "riders"
+    const val HOME = "home"
     const val PERSON = "person/{personId}"
     fun person(id: Long) = "person/$id"
 }
@@ -32,19 +32,19 @@ fun AppRoot(vm: SessionViewModel = hiltViewModel()) {
     val nav = rememberNavController()
     NavHost(
         navController = nav,
-        startDestination = if (session == null) Routes.LOGIN else Routes.RIDERS,
+        startDestination = if (session == null) Routes.LOGIN else Routes.HOME,
     ) {
         composable(Routes.LOGIN) {
             LoginScreen(
                 reason = vm.signedOutReason,
                 onSignedIn = {
                     vm.clearReason()
-                    nav.navigate(Routes.RIDERS) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                    nav.navigate(Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
                 },
             )
         }
-        composable(Routes.RIDERS) {
-            RidersScreen(
+        composable(Routes.HOME) {
+            HomeScreen(
                 onOpenPerson = { id -> nav.navigate(Routes.person(id)) },
                 onSignOut = {
                     vm.signOut()

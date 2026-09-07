@@ -8,6 +8,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import com.qwikserve.recruiter.BuildConfig
+import com.qwikserve.recruiter.data.location.LocationHeaderInterceptor
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.AuthInterceptor
 import com.qwikserve.recruiter.data.auth.TokenAuthenticator
@@ -39,11 +40,16 @@ object AppModule {
         TokenAuthenticator(store, json, BuildConfig.API_BASE_URL)
 
     @Provides @Singleton
-    fun okHttp(auth: AuthInterceptor, authenticator: TokenAuthenticator): OkHttpClient =
+    fun okHttp(
+        auth: AuthInterceptor,
+        location: LocationHeaderInterceptor,
+        authenticator: TokenAuthenticator,
+    ): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(auth)
+            .addInterceptor(location)
             .authenticator(authenticator)
             .apply {
                 if (BuildConfig.DEBUG) {

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from payout.api.auth import get_current_user
 from payout.api.routes.hubs import ZONES
@@ -335,3 +336,89 @@ def todo(
         "counts": {**counts, "total": sum(counts.values()), "stores": len(ordered)},
         "stores": ordered,
     }
+
+
+# ── Recruiter location ("Option 1" tracking) ─────────────────────────────────
+# The app records where a recruiter is each time they open it — never in the
+# background — and the server keeps at most one row per 30 minutes per
+# account, whatever the phone sends. Admins read the trail on the web.
+
+LOCATION_MIN_GAP_MIN = 30
+
+
+class LocationIn(BaseModel):
+    lat: float
+    lng: float
+    accuracy_m: float | None = None
+    area: str | None = None  # reverse-geocoded on the phone ("Salt Lake, Kolkata")
+    source: str = "app_open"
+
+
+@router.post("/location")
+def record_location(body: LocationIn, user: dict = Depends(get_current_user)) -> dict:
+    if not (-90 <= body.lat <= 90 and -180 <= body.lng <= 180):
+        raise HTTPException(400, "lat/lng out of range")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with get_connection() as conn:
+        last = conn.execute(
+            "SELECT at FROM recruiter_locations WHERE email=? ORDER BY id DESC LIMIT 1",
+            (user["email"],),
+        ).fetchone()
+        if last and last["at"]:
+            try:
+                last_at = datetime.fromisoformat(str(last["at"]).replace("T", " ")[:19])
+            except ValueError:
+                last_at = None
+            if last_at and now - last_at < timedelta(minutes=LOCATION_MIN_GAP_MIN):
+                nxt = last_at + timedelta(minutes=LOCATION_MIN_GAP_MIN)
+                return {
+                    "recorded": False,
+                    "last_at": last_at.isoformat(timespec="seconds"),
+                    "next_after": nxt.isoformat(timespec="seconds"),
+                }
+        conn.execute(
+            "INSERT INTO recruiter_locations (email, at, lat, lng, accuracy_m, area, source) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                user["email"],
+                now.strftime("%Y-%m-%d %H:%M:%S"),
+                body.lat,
+                body.lng,
+                body.accuracy_m,
+                (body.area or "").strip()[:120] or None,
+                (body.source or "app_open")[:40],
+            ),
+        )
+        conn.commit()
+    return {
+        "recorded": True,
+        "last_at": now.isoformat(timespec="seconds"),
+        "next_after": (now + timedelta(minutes=LOCATION_MIN_GAP_MIN)).isoformat(timespec="seconds"),
+    }
+
+
+@router.get("/locations")
+def list_locations(
+    email: str | None = Query(None, description="admin only: another recruiter"),
+    since: str | None = Query(None, description="ISO date/time lower bound"),
+    limit: int = Query(200, ge=1, le=2000),
+    user: dict = Depends(get_current_user),
+) -> list[dict]:
+    """A recruiter's location trail — their own, or anyone's for admins."""
+    target = user["email"]
+    if email and email.strip().lower() != target:
+        if user["role"] not in ("admin", "creator"):
+            raise HTTPException(403, "Only admins can see another recruiter's locations")
+        target = email.strip().lower()
+    where, params = ["email=?"], [target]
+    if since:
+        where.append("at>=?")
+        params.append(since.replace("T", " "))
+    params.append(limit)
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, email, at, lat, lng, accuracy_m, area, source FROM recruiter_locations "
+            f"WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]

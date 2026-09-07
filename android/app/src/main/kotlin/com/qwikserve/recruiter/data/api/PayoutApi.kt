@@ -32,6 +32,15 @@ interface PayoutApi {
     @GET("app/bootstrap")
     suspend fun bootstrap(): Bootstrap
 
+    @GET("app/todo")
+    suspend fun todo(@Query("zone") zone: String? = null): Todo
+
+    @GET("app/my-recruiting")
+    suspend fun myRecruiting(): MyRecruiting
+
+    @POST("app/location")
+    suspend fun location(@Body body: LocationIn): LocationAck
+
     @GET("riders")
     suspend fun riders(
         @Query("q") q: String? = null,
@@ -43,4 +52,17 @@ interface PayoutApi {
 
     @GET("persons/{id}")
     suspend fun person(@Path("id") personId: Long): PersonOut
+
+    @GET("evs")
+    suspend fun evs(
+        @Query("status") status: String? = null,
+        @Query("zone") zone: String? = null,
+        @Query("mine") mine: Boolean? = null,
+    ): List<EvUnitOut>
+
+    @GET("requests")
+    suspend fun requests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<MoneyRequest>
+
+    @GET("activity")
+    suspend fun activity(@Query("since") since: String? = null, @Query("limit") limit: Int? = null): List<ActivityRow>
 }

@@ -481,6 +481,35 @@ def _0018_recruiter_app_fields(conn: Any) -> None:
         )
 
 
+def _0019_recruiter_locations(conn: Any) -> None:
+    """Recruiter app "Option 1" tracking (2026-09-07): one location row per
+    app open, at most one per 30 minutes, nothing in the background."""
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS recruiter_locations ("
+        "  id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  email      TEXT NOT NULL,"
+        "  at         TEXT DEFAULT (datetime('now')),"
+        "  lat        REAL NOT NULL,"
+        "  lng        REAL NOT NULL,"
+        "  accuracy_m REAL,"
+        "  area       TEXT,"
+        "  source     TEXT DEFAULT 'app_open'"
+        ")"
+    )
+    idx = (
+        "CREATE INDEX IF NOT EXISTS idx_recruiter_locations_email "
+        "ON recruiter_locations (email, at DESC)"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+        conn.executescript(translate_ddl(idx))
+    else:
+        conn.execute(ddl)
+        conn.execute(idx)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -503,6 +532,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ),
     ("0017_refresh_tokens", _0017_refresh_tokens),
     ("0018_recruiter_app_fields", _0018_recruiter_app_fields),
+    ("0019_recruiter_locations", _0019_recruiter_locations),
 ]
 
 _TRACKING_DDL = (

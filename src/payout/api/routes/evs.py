@@ -138,7 +138,14 @@ def list_ev_units(
             "       (SELECT hz.zone FROM rider_master rm JOIN hub_zones hz ON hz.hub=rm.hub "
             "          WHERE rm.person_id=a.person_id LIMIT 1) AS zone, "
             "       (SELECT GROUP_CONCAT(DISTINCT rm.recruited_by) FROM rider_master rm "
-            "          WHERE rm.person_id=a.person_id AND rm.recruited_by IS NOT NULL) AS recruited_by "  # noqa: E501
+            "          WHERE rm.person_id=a.person_id AND rm.recruited_by IS NOT NULL) AS recruited_by, "  # noqa: E501
+            "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=a.person_id "
+            "          AND rm.is_active=1) AS holder_active_ids, "
+            "       (COALESCE((SELECT ea.outstanding FROM ev_arrears ea WHERE ea.person_id=a.person_id), 0) "  # noqa: E501
+            "        + CASE WHEN COALESCE((SELECT b.current_balance FROM balances b "
+            "                              WHERE b.person_id=a.person_id), 0) < 0 "
+            "               THEN -(SELECT b.current_balance FROM balances b WHERE b.person_id=a.person_id) "  # noqa: E501
+            "               ELSE 0 END) AS total_dues "
             "FROM ev_units u "
             "JOIN ev_models m ON m.model_id = u.model_id "
             "LEFT JOIN ev_assignments a ON a.ev_id = u.ev_id AND a.returned_date IS NULL "
@@ -170,6 +177,8 @@ def list_ev_units(
                 hub=r["hub"],
                 zone=r["zone"],
                 recruited_by=r["recruited_by"],
+                holder_active=(int(r["holder_active_ids"] or 0) > 0) if r["person_id"] else None,
+                total_dues=int(r["total_dues"] or 0) if r["person_id"] else None,
                 handover_date=r["handover_date"],
                 rent_charged_through=r["rent_charged_through"],
             )
