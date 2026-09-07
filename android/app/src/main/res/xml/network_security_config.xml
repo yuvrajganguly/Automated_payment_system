@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Production is HTTPS only. Debug builds may talk to a local server. -->
-    <base-config cleartextTrafficPermitted="false" />
-    <debug-overrides>
-        <domain-config cleartextTrafficPermitted="true">
-            <domain includeSubdomains="true">10.0.2.2</domain>
-            <domain includeSubdomains="true">localhost</domain>
-        </domain-config>
-    </debug-overrides>
+    <!-- Production is HTTPS only.
+
+         The loopback exception below sits at the TOP LEVEL, not inside
+         <debug-overrides>. That element accepts only <trust-anchors>; a
+         <domain-config> in there makes Android's parser throw while the system
+         is binding the app — before Application.attachBaseContext, so the
+         process dies with no stack trace anyone can reach. It only bites
+         debuggable builds, which is why CI was green and every phone showed
+         the splash and closed. Naming the emulator host and localhost here is
+         harmless in a release build: neither is reachable in the field. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
 </network-security-config>

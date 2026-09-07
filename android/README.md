@@ -48,7 +48,11 @@ or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine —
 Money, and EVs asked for from the fleet desk), **My numbers** (today / week /
 month / all-time onboardings, by company).
 
-Start-up and diagnostics: the launcher is `LaunchActivity`, a plain Activity
+Start-up and diagnostics: the app reports its own start-up failures to
+`POST /app/crash` — from the uncaught-exception handler, and at the next start
+when the previous run never drew a frame (that one catches the deaths with no
+exception). A copy lands in `Android/data/<package>/files/qwikserve-startup.txt`
+for a phone with no signal. The launcher is `LaunchActivity`, a plain Activity
 with no Hilt, no Compose and no theme of ours — whatever else breaks on a phone
 we have never seen, that one still opens. `CrashLog` (installed from
 `QwikApp.attachBaseContext`, the earliest point the app owns) writes a

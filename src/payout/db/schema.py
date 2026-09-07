@@ -299,6 +299,22 @@ CREATE TABLE IF NOT EXISTS ev_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_ev_requests_status ON ev_requests (status, created_at DESC);
 
+-- What the recruiter app says when it dies. There is no logcat on a phone in
+-- a store, so the app posts its start-up breadcrumb trail (and the stack
+-- trace, when there was one) to POST /app/crash. Unauthenticated: the crash
+-- usually happens before anyone can sign in.
+CREATE TABLE IF NOT EXISTS app_crashes (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      TEXT DEFAULT (datetime('now')),
+    version TEXT,                                -- app versionName
+    device  TEXT,                                -- manufacturer + model
+    android TEXT,                                -- release + API level
+    kind    TEXT NOT NULL DEFAULT 'crash',       -- crash | trail (died with no exception)
+    email   TEXT,                                -- signed-in user, when the app knew
+    trail   TEXT,                                -- start-up breadcrumbs
+    detail  TEXT                                 -- stack trace
+);
+
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).
 --   payout_sheet : '0' (index) or 'pattern:<substr>' to match a sheet by name.

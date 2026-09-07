@@ -121,6 +121,11 @@ def test_every_mutating_route_requires_auth(client):
         "/api/auth/refresh",  # the refresh token IS the credential; a bad one is 401
         "/api/auth/forgot-password",
         "/api/auth/reset-password",
+        # The recruiter app posts its start-up failures here. It cannot sign in
+        # first — the crash it is reporting usually happens before anyone can.
+        # Write-only, capped fields, rate-limited per IP; reading them back is
+        # admin-only (GET /api/app/crashes).
+        "/api/app/crash",
     }
     offenders = []
     for path, methods in app.openapi()["paths"].items():

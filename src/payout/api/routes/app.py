@@ -10,9 +10,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from payout.api.auth import get_current_user
+from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import ZONES
 from payout.db import get_connection
 
@@ -438,5 +439,66 @@ def list_locations(
             "SELECT id, email, at, lat, lng, accuracy_m, area, source FROM recruiter_locations "
             f"WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?",
             params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── crash reports from the phone ─────────────────────────────────────────────
+# An app that dies on launch cannot be debugged from the office: there is no
+# logcat on a recruiter's phone, and the recruiter is in a store. So the app
+# posts its own last breath here — the start-up breadcrumb trail and the stack
+# trace, if there was one. Unauthenticated on purpose: the crash usually
+# happens before anyone can sign in. Rate-limited and size-capped instead.
+_crash_limit = rate_limit("app-crash", limit=40, window_seconds=3600)
+
+
+class CrashIn(BaseModel):
+    version: str | None = Field(default=None, max_length=80)
+    device: str | None = Field(default=None, max_length=200)
+    android: str | None = Field(default=None, max_length=80)
+    kind: str = Field(default="crash", max_length=20)  # crash | trail
+    email: str | None = Field(default=None, max_length=200)  # if the app knew
+    trail: str | None = Field(default=None, max_length=8000)
+    detail: str | None = Field(default=None, max_length=16000)
+
+
+@router.post("/crash", status_code=201, dependencies=[Depends(_crash_limit)])
+def record_crash(body: CrashIn) -> dict:
+    """Store one start-up failure. Returns its id so the phone can say it sent."""
+    kind = body.kind.strip().lower()
+    if kind not in ("crash", "trail"):
+        kind = "crash"
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO app_crashes (version, device, android, kind, email, trail, detail) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                (body.version or "").strip()[:80] or None,
+                (body.device or "").strip()[:200] or None,
+                (body.android or "").strip()[:80] or None,
+                kind,
+                (body.email or "").strip().lower()[:200] or None,
+                (body.trail or "").strip()[:8000] or None,
+                (body.detail or "").strip()[:16000] or None,
+            ),
+        )
+        rid = cur.lastrowid
+        conn.commit()
+    return {"id": rid, "stored": True}
+
+
+@router.get("/crashes")
+def list_crashes(
+    limit: int = Query(50, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+) -> list[dict]:
+    """The phones' crash reports, newest first (admins and creators)."""
+    if user["role"] not in ("admin", "creator"):
+        raise HTTPException(403, "Admins only")
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, at, version, device, android, kind, email, trail, detail "
+            "FROM app_crashes ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
     return [dict(r) for r in rows]

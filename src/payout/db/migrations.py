@@ -627,6 +627,30 @@ def _0022_ev_requests(conn: Any) -> None:
         conn.execute(idx)
 
 
+def _0023_app_crashes(conn: Any) -> None:
+    """Crash reports posted by the recruiter app (2026-09-07): an app that dies
+    on launch has no logcat anyone can read, so it sends its own last breath."""
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS app_crashes ("
+        "  id      INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  at      TEXT DEFAULT (datetime('now')),"
+        "  version TEXT,"
+        "  device  TEXT,"
+        "  android TEXT,"
+        "  kind    TEXT NOT NULL DEFAULT 'crash',"
+        "  email   TEXT,"
+        "  trail   TEXT,"
+        "  detail  TEXT"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -653,6 +677,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0020_ev_closeouts", _0020_ev_closeouts),
     ("0021_referrals", _0021_referrals),
     ("0022_ev_requests", _0022_ev_requests),
+    ("0023_app_crashes", _0023_app_crashes),
 ]
 
 _TRACKING_DDL = (

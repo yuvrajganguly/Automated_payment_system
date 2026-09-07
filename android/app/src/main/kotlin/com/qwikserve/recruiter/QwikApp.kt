@@ -23,6 +23,9 @@ class QwikApp : Application(), ImageLoaderFactory {
         CrashLog.rotateTrail(this)
         CrashLog.install(this)
         CrashLog.breadcrumb(this, "app.attach")
+        // If the run that just ended never drew a frame, tell the office now —
+        // an app that dies before its own screens can still send a postcard.
+        CrashLog.reportPreviousFailure(this)
     }
 
     override fun onCreate() {

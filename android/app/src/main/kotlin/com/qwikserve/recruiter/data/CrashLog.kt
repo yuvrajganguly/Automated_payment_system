@@ -42,8 +42,30 @@ object CrashLog {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             record(app, error, thread.name)
+            // The phone is about to die: tell the server while it still can.
+            CrashReporter.postBlocking(
+                app,
+                kind = "crash",
+                trail = currentTrail(app),
+                detail = lastCrash(app),
+            )
             previous?.uncaughtException(thread, error)
         }
+    }
+
+    /**
+     * Called at every start: if the run that just ended never drew a frame,
+     * send what we know. This is the one that catches the deaths with no
+     * exception — a process the ROM killed leaves a trail but no stack trace.
+     */
+    fun reportPreviousFailure(context: Context) {
+        if (!previousRunFailed(context)) return
+        CrashReporter.postAsync(
+            context,
+            kind = if (lastCrash(context) != null) "crash" else "trail",
+            trail = previousTrail(context),
+            detail = lastCrash(context),
+        )
     }
 
     fun record(context: Context, error: Throwable, thread: String = "unknown") {
@@ -70,6 +92,23 @@ object CrashLog {
     fun breadcrumb(context: Context, step: String) {
         runCatching {
             File(context.filesDir, TRAIL).appendText("${time()}  $step\n")
+            mirror(context)
+        }
+    }
+
+    fun currentTrail(context: Context): String? = read(context, TRAIL)
+
+    /**
+     * A copy where a phone's file manager can reach it —
+     * Android/data/<package>/files/qwikserve-startup.txt — for when the phone
+     * has no signal and the server never hears about it.
+     */
+    private fun mirror(context: Context) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: return
+            File(dir, "qwikserve-startup.txt").writeText(
+                (currentTrail(context) ?: "") + "\n" + (lastCrash(context) ?: ""),
+            )
         }
     }
 

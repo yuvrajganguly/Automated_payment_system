@@ -251,6 +251,21 @@ the store is classified, else from the recruiter's own zone, so the fleet
 desk can read the queue North/South. Fulfilling only closes the ask; the
 units are still handed over on the EV pages as usual.
 
+## Crash reports from the app
+
+```
+POST /app/crash     no auth — {"version","device","android","kind":"crash"|"trail","trail","detail"}  → 201 {"id","stored"}
+GET  /app/crashes   admin — newest first
+```
+
+There is no logcat on a recruiter's phone, so the app reports its own
+start-up failures. It posts on two occasions: from the uncaught-exception
+handler (blocking, a few seconds, before the process dies), and at the next
+start when the previous run never drew a frame — that second one is what
+catches deaths with no exception at all. Unauthenticated because the crash
+usually happens before anyone can sign in; fields are capped, the route is
+rate-limited per IP and write-only.
+
 ## Activity (admins reviewing recruiters)
 
 ```
