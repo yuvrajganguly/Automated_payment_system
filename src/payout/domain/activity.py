@@ -22,6 +22,7 @@ Activity page groups and filters on them.
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from typing import Any
 
 ACTIONS: dict[str, str] = {
@@ -44,7 +45,35 @@ ACTIONS: dict[str, str] = {
     "request.create": "Requested money change",
     "request.approve": "Approved money request",
     "request.reject": "Rejected money request",
+    "hub.zone": "Set hub zone",
 }
+
+
+# Where the caller was when they acted. The recruiter app sends
+# ``X-Client-Location: <lat>,<lng>,<accuracy_m>`` on every write; the API
+# middleware parses it into this context variable so every activity row
+# written during that request carries the stamp (see api/middleware.py).
+# Nothing else about a request is captured — no background tracking.
+client_location: ContextVar[tuple[float, float, float | None] | None] = ContextVar(
+    "client_location", default=None
+)
+
+
+def parse_client_location(header: str | None) -> tuple[float, float, float | None] | None:
+    """``"22.5726,88.3639,12"`` -> (22.5726, 88.3639, 12.0); junk -> None."""
+    if not header:
+        return None
+    parts = [p.strip() for p in header.split(",")]
+    if len(parts) < 2:
+        return None
+    try:
+        lat, lng = float(parts[0]), float(parts[1])
+        acc = float(parts[2]) if len(parts) > 2 and parts[2] else None
+    except ValueError:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return lat, lng, acc
 
 
 def record_activity(
@@ -64,9 +93,11 @@ def record_activity(
         blob = json.dumps(details, default=str, ensure_ascii=False) if details else None
     except (TypeError, ValueError):
         blob = json.dumps({"repr": repr(details)})
+    loc = client_location.get()
+    lat, lng, acc = loc if loc else (None, None, None)
     conn.execute(
         "INSERT INTO activity_log (email, role, action, entity_type, entity_id, entity_label, "
-        "person_id, details) VALUES (?,?,?,?,?,?,?,?)",
+        "person_id, details, lat, lng, accuracy_m) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (
             user.get("email") or "",
             user.get("role"),
@@ -76,6 +107,9 @@ def record_activity(
             label,
             person_id,
             blob,
+            lat,
+            lng,
+            acc,
         ),
     )
 

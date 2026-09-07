@@ -109,7 +109,7 @@ def _load_user(email: str) -> dict | None:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, role, is_active, phone FROM users WHERE email=?", (email,)
+            "SELECT email, role, is_active, phone, zone FROM users WHERE email=?", (email,)
         ).fetchone()
     if not row:
         return None
@@ -118,6 +118,7 @@ def _load_user(email: str) -> dict | None:
         "role": row["role"],
         "is_active": bool(row["is_active"]),
         "phone": row["phone"],
+        "zone": row["zone"],
     }
 
 
@@ -146,7 +147,12 @@ def get_current_user(
             detail="Account is disabled or no longer exists",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return {"email": user["email"], "role": user["role"], "phone": user.get("phone")}
+    return {
+        "email": user["email"],
+        "role": user["role"],
+        "phone": user.get("phone"),
+        "zone": user.get("zone"),
+    }
 
 
 # Role ladder: creator > admin > recruiter > user.

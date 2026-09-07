@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS rider_master (
     email      TEXT,
     is_active  INTEGER NOT NULL DEFAULT 1,
     salary     INTEGER,                        -- paise per cycle (salary companies)
+    recruited_by TEXT,                         -- users.email of the recruiter who onboarded them
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (rider_id, company)
@@ -198,6 +199,17 @@ CREATE TABLE IF NOT EXISTS hub_codes (
     PRIMARY KEY (company, code)
 );
 
+-- ── hub_zones ───────────────────────────────────────────────────────────────
+-- Which zone (North / South) a hub belongs to. Hubs themselves are free text
+-- on rider_master; a hub with no row here is "unassigned" until an admin
+-- classifies it on the web (Admin → Hubs).
+CREATE TABLE IF NOT EXISTS hub_zones (
+    hub        TEXT PRIMARY KEY,
+    zone       TEXT NOT NULL,                  -- North | South
+    updated_at TEXT DEFAULT (datetime('now')),
+    updated_by TEXT
+);
+
 -- ── companies ───────────────────────────────────────────────────────────────
 -- Parser configuration. Onboarding a company = a row here (+ a parser).
 --   payout_sheet : '0' (index) or 'pattern:<substr>' to match a sheet by name.
@@ -272,6 +284,7 @@ CREATE TABLE IF NOT EXISTS users (
     role          TEXT NOT NULL DEFAULT 'user',   -- creator | admin | recruiter | user
     is_active     INTEGER NOT NULL DEFAULT 1,
     phone         TEXT,                           -- E.164 (+91…); second login id
+    zone          TEXT,                           -- North | South: the recruiter's patch (app to-do list)
     created_at    TEXT DEFAULT (datetime('now'))
 );
 -- idx_users_phone (unique, partial) is created by migration 0010, which runs
@@ -418,7 +431,12 @@ CREATE TABLE IF NOT EXISTS activity_log (
     entity_id    TEXT NOT NULL,      -- rider_id@company, person_id, ev_id, doc id ...
     entity_label TEXT,               -- human label (rider name, EV id) for the feed
     person_id    INTEGER,            -- the person concerned, when there is one
-    details      TEXT                -- JSON: fields changed, before/after, notes
+    details      TEXT,               -- JSON: fields changed, before/after, notes
+    -- Where the caller was (recruiter app, X-Client-Location header). Only
+    -- stamped on actions; the app never tracks in the background.
+    lat          REAL,
+    lng          REAL,
+    accuracy_m   REAL
 );
 CREATE INDEX IF NOT EXISTS idx_activity_email  ON activity_log (email, at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_at     ON activity_log (at DESC);

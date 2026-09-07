@@ -441,6 +441,46 @@ def _0017_refresh_tokens(conn: Any) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_email ON refresh_tokens (email)")
 
 
+def _0018_recruiter_app_fields(conn: Any) -> None:
+    """Recruiter app, day 2 (2026-09-07): where an action happened
+    (activity_log.lat/lng/accuracy_m), who onboarded a rider
+    (rider_master.recruited_by — backfilled from the activity log's
+    rider.create rows), hub → zone (hub_zones), and which zone a recruiter
+    works (users.zone) so the app's to-do list opens on their stores."""
+    add_column(conn, "activity_log", "lat", "REAL")
+    add_column(conn, "activity_log", "lng", "REAL")
+    add_column(conn, "activity_log", "accuracy_m", "REAL")
+    add_column(conn, "rider_master", "recruited_by", "TEXT")
+    add_column(conn, "users", "zone", "TEXT")
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS hub_zones ("
+        "  hub        TEXT PRIMARY KEY,"
+        "  zone       TEXT NOT NULL,"
+        "  updated_at TEXT DEFAULT (datetime('now')),"
+        "  updated_by TEXT"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+    # Backfill: the operator who created a rider row is its recruiter.
+    for r in conn.execute(
+        "SELECT entity_id, email FROM activity_log WHERE action='rider.create' "
+        "AND entity_type='rider' ORDER BY id"
+    ).fetchall():
+        rid, _, co = str(r["entity_id"]).rpartition("@")
+        if not rid or not co:
+            continue
+        conn.execute(
+            "UPDATE rider_master SET recruited_by=? WHERE rider_id=? AND company=? "
+            "AND recruited_by IS NULL",
+            (r["email"], rid, co),
+        )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -462,6 +502,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
         _0016_pidge_delhivery_retire_bluedart_dealshare,
     ),
     ("0017_refresh_tokens", _0017_refresh_tokens),
+    ("0018_recruiter_app_fields", _0018_recruiter_app_fields),
 ]
 
 _TRACKING_DDL = (

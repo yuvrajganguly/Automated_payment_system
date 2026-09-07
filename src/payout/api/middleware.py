@@ -41,6 +41,20 @@ def _scrub(s: str) -> str:
     return _SENSITIVE_FORM.sub(r"\1=***", s)
 
 
+class ClientLocationMiddleware(BaseHTTPMiddleware):
+    """Parse the recruiter app's ``X-Client-Location`` header into the
+    activity log's context variable for the life of this request."""
+
+    async def dispatch(self, request: Request, call_next):
+        from payout.domain.activity import client_location, parse_client_location
+
+        token = client_location.set(parse_client_location(request.headers.get("x-client-location")))
+        try:
+            return await call_next(request)
+        finally:
+            client_location.reset(token)
+
+
 class AuditLogMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()

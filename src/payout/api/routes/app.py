@@ -7,11 +7,12 @@ the roster and fleet — in one round trip. Nothing here is money.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from payout.api.auth import get_current_user
+from payout.api.routes.hubs import ZONES
 from payout.db import get_connection
 
 router = APIRouter()
@@ -33,13 +34,14 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
                 "WHERE is_active=1 ORDER BY company_name"
             )
         ]
-        hubs = [
-            r["hub"]
-            for r in conn.execute(
-                "SELECT DISTINCT hub FROM rider_master WHERE hub IS NOT NULL AND hub <> '' "
-                "ORDER BY hub"
-            )
-        ]
+        hub_rows = conn.execute(
+            "SELECT h.hub, hz.zone FROM "
+            "(SELECT DISTINCT hub FROM rider_master WHERE hub IS NOT NULL AND hub <> '' "
+            " UNION SELECT hub FROM hub_zones) h "
+            "LEFT JOIN hub_zones hz ON hz.hub=h.hub ORDER BY h.hub"
+        ).fetchall()
+        hubs = [r["hub"] for r in hub_rows]
+        hub_zones = {r["hub"]: r["zone"] for r in hub_rows}
         riders_active = conn.execute(
             "SELECT COUNT(*) FROM rider_master WHERE is_active=1"
         ).fetchone()[0]
@@ -59,13 +61,277 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
     return {
         "api_version": APP_API_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "me": {"email": user["email"], "role": user["role"], "phone": user.get("phone")},
+        "me": {
+            "email": user["email"],
+            "role": user["role"],
+            "phone": user.get("phone"),
+            "zone": user.get("zone"),
+        },
         "companies": companies,
         "hubs": hubs,
+        "hub_zones": hub_zones,
+        "zones": ["North", "South"],
         "ev_models": providers,
         "counts": {
             "rider_ids_active": int(riders_active),
             "persons_active": int(persons),
             "evs": evs,
         },
+    }
+
+
+# ── Recruiting stats ─────────────────────────────────────────────────────────
+# "How many is a recruiter recruiting" — the app's Recruiting tab. A rider id
+# counts for the recruiter who created it (rider_master.recruited_by, stamped
+# on POST /riders and backfilled from the activity log). Riders are counted by
+# rider id (one person with two company ids counts twice, as two onboardings)
+# and by person, so both readings are on the screen.
+
+
+def _period_starts(today: date) -> dict[str, str]:
+    return {
+        "today": today.isoformat(),
+        "week": (today - timedelta(days=today.weekday())).isoformat(),  # Monday
+        "month": today.replace(day=1).isoformat(),
+    }
+
+
+def _recruiting_for(conn, email: str, today: date) -> dict:
+    starts = _period_starts(today)
+    row = conn.execute(
+        "SELECT COUNT(*) AS all_time, "
+        "  COUNT(DISTINCT person_id) AS persons, "
+        "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active, "
+        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
+        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
+        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
+        "FROM rider_master WHERE recruited_by=?",
+        (starts["today"], starts["week"], starts["month"], email),
+    ).fetchone()
+    by_company = [
+        {"company_name": r["company"], "riders": int(r["n"]), "active": int(r["a"] or 0)}
+        for r in conn.execute(
+            "SELECT company, COUNT(*) AS n, "
+            "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS a "
+            "FROM rider_master WHERE recruited_by=? GROUP BY company ORDER BY n DESC, company",
+            (email,),
+        )
+    ]
+    ev_holders = conn.execute(
+        "SELECT COUNT(DISTINCT ea.person_id) FROM ev_assignments ea "
+        "WHERE ea.returned_date IS NULL AND ea.person_id IN "
+        "  (SELECT person_id FROM rider_master WHERE recruited_by=?)",
+        (email,),
+    ).fetchone()[0]
+    recent = [
+        {
+            "rider_id": r["rider_id"],
+            "company_name": r["company"],
+            "name": r["name"],
+            "person_id": r["person_id"],
+            "hub": r["hub"],
+            "created_at": r["created_at"],
+            "is_active": bool(r["is_active"]),
+        }
+        for r in conn.execute(
+            "SELECT rider_id, company, name, person_id, hub, created_at, is_active "
+            "FROM rider_master WHERE recruited_by=? "
+            "ORDER BY created_at DESC, rider_id DESC LIMIT 20",
+            (email,),
+        )
+    ]
+    return {
+        "email": email,
+        "as_of": today.isoformat(),
+        "periods": starts,
+        "counts": {
+            "today": int(row["today"] or 0),
+            "week": int(row["week"] or 0),
+            "month": int(row["month"] or 0),
+            "all_time": int(row["all_time"] or 0),
+            "persons": int(row["persons"] or 0),
+            "active": int(row["active"] or 0),
+            "ev_holders": int(ev_holders or 0),
+        },
+        "by_company": by_company,
+        "recent": recent,
+    }
+
+
+@router.get("/my-recruiting")
+def my_recruiting(
+    email: str | None = Query(None, description="admin only: another recruiter"),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """The signed-in recruiter's onboarding numbers (today / this week / this
+    month / all time), split by company, with their latest onboardings."""
+    target = (user["email"] or "").lower()
+    if email and email.lower() != target:
+        if user["role"] not in ("admin", "creator"):
+            raise HTTPException(403, "Only admins can look at another recruiter's numbers")
+        target = email.lower()
+    with get_connection() as conn:
+        return _recruiting_for(conn, target, date.today())
+
+
+@router.get("/recruiting")
+def recruiting_board(user: dict = Depends(get_current_user)) -> dict:
+    """Every recruiter's numbers side by side (admins / creator). Recruiters
+    get only their own row, so the app can show the same screen to both."""
+    today = date.today()
+    starts = _period_starts(today)
+    with get_connection() as conn:
+        if user["role"] in ("admin", "creator"):
+            where, params = "recruited_by IS NOT NULL AND recruited_by<>''", ()
+        else:
+            where, params = "recruited_by=?", ((user["email"] or "").lower(),)
+        rows = [
+            {
+                "email": r["recruited_by"],
+                "today": int(r["today"] or 0),
+                "week": int(r["week"] or 0),
+                "month": int(r["month"] or 0),
+                "all_time": int(r["all_time"]),
+                "active": int(r["active"] or 0),
+            }
+            for r in conn.execute(
+                "SELECT recruited_by, COUNT(*) AS all_time, "
+                "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active, "
+                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
+                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
+                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
+                f"FROM rider_master WHERE {where} GROUP BY recruited_by "
+                "ORDER BY month DESC, all_time DESC, recruited_by",
+                (starts["today"], starts["week"], starts["month"], *params),
+            )
+        ]
+    return {"as_of": today.isoformat(), "periods": starts, "recruiters": rows}
+
+
+# ── Things to do ─────────────────────────────────────────────────────────────
+# The app's home screen. A recruiter's day is mostly legwork at the stores
+# (hubs) of their zone: collecting COD that riders still hold, chasing EV
+# holders with dues, and picking up EVs from riders who have gone inactive.
+# Each item is one visit; they are grouped by store so a recruiter can plan a
+# round. Zone defaults to the recruiter's own (users.zone); admins and
+# recruiters with no zone see every store, labelled.
+
+TODO_KINDS = ("cod", "ev_dues", "inactive_ev")
+
+
+def _todo_rows(conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT pr.person_id, pr.display_name, "
+        "       COALESCE(ea.cod_outstanding, 0) AS cod_outstanding, "
+        "       COALESCE(ea.outstanding, 0) AS outstanding, "
+        "       CASE WHEN COALESCE(b.current_balance, 0) < 0 "
+        "            THEN -b.current_balance ELSE 0 END AS dues_outstanding, "
+        "       a.ev_id, a.handover_date, m.model_name AS model, "
+        "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        "          AND rm.is_active=1) AS active_ids, "
+        "       (SELECT rm.hub FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        "          AND rm.hub IS NOT NULL AND rm.hub<>'' "
+        "          ORDER BY rm.is_active DESC, rm.created_at DESC LIMIT 1) AS hub, "
+        "       (SELECT GROUP_CONCAT(DISTINCT rm.company) FROM rider_master rm "
+        "          WHERE rm.person_id=pr.person_id AND rm.is_active=1) AS companies, "
+        "       (SELECT rm.mob_no FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        "          AND rm.mob_no IS NOT NULL AND rm.mob_no<>'' "
+        "          ORDER BY rm.is_active DESC LIMIT 1) AS mob_no "
+        "FROM person_registry pr "
+        "LEFT JOIN ev_arrears ea ON ea.person_id=pr.person_id "
+        "LEFT JOIN balances b ON b.person_id=pr.person_id "
+        "LEFT JOIN ev_assignments a ON a.person_id=pr.person_id AND a.returned_date IS NULL "
+        "LEFT JOIN ev_units u ON u.ev_id=a.ev_id "
+        "LEFT JOIN ev_models m ON m.model_id=u.model_id "
+        "WHERE COALESCE(ea.cod_outstanding, 0) > 0 "
+        "   OR (a.ev_id IS NOT NULL AND (COALESCE(ea.outstanding, 0) > 0 "
+        "                                OR COALESCE(b.current_balance, 0) < 0)) "
+        "   OR (a.ev_id IS NOT NULL AND NOT EXISTS "
+        "        (SELECT 1 FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        "           AND rm.is_active=1)) "
+        "ORDER BY pr.display_name"
+    ).fetchall()
+    items: list[dict] = []
+    for r in rows:
+        base = {
+            "person_id": r["person_id"],
+            "name": r["display_name"],
+            "hub": r["hub"] or "",
+            "companies": [c for c in (r["companies"] or "").split(",") if c],
+            "mob_no": r["mob_no"],
+            "ev_id": r["ev_id"],
+            "ev_model": r["model"],
+        }
+        if int(r["cod_outstanding"] or 0) > 0:
+            items.append(
+                {
+                    **base,
+                    "kind": "cod",
+                    "cod_outstanding": int(r["cod_outstanding"]),
+                    "title": f"Collect COD · {r['display_name']}",
+                }
+            )
+        total_dues = int(r["outstanding"] or 0) + int(r["dues_outstanding"] or 0)
+        if r["ev_id"] and total_dues > 0:
+            items.append(
+                {
+                    **base,
+                    "kind": "ev_dues",
+                    "outstanding": int(r["outstanding"] or 0),
+                    "dues_outstanding": int(r["dues_outstanding"] or 0),
+                    "total_dues": total_dues,
+                    "title": f"EV dues · {r['display_name']} · {r['ev_id']}",
+                }
+            )
+        if r["ev_id"] and int(r["active_ids"] or 0) == 0:
+            items.append(
+                {
+                    **base,
+                    "kind": "inactive_ev",
+                    "handover_date": r["handover_date"],
+                    "title": f"Collect {r['ev_id']} · {r['display_name']} is inactive",
+                }
+            )
+    return items
+
+
+@router.get("/todo")
+def todo(
+    zone: str | None = Query(None, description="North | South | all; default: my zone"),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """What needs a visit, grouped by store (hub), for one zone."""
+    want = (zone or "").strip().lower()
+    if not want:
+        want = (user.get("zone") or "all").lower()
+    if want not in ("all", "unassigned") and want.title() not in ZONES:
+        raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}, unassigned or all")
+    with get_connection() as conn:
+        zones = {r["hub"]: r["zone"] for r in conn.execute("SELECT hub, zone FROM hub_zones")}
+        items = _todo_rows(conn)
+    stores: dict[str, dict] = {}
+    for it in items:
+        hub_zone = zones.get(it["hub"])
+        if want == "unassigned" and hub_zone:
+            continue
+        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
+            continue
+        store = stores.setdefault(
+            it["hub"] or "No store on file",
+            {"hub": it["hub"] or "", "zone": hub_zone, "items": []},
+        )
+        store["items"].append(it)
+    # Counts are keyed "<kind>_items" so the money middleware never mistakes
+    # them for amounts (``cod`` is a money key).
+    counts = {f"{k}_items": 0 for k in TODO_KINDS}
+    for s in stores.values():
+        for it in s["items"]:
+            counts[f"{it['kind']}_items"] += 1
+    ordered = sorted(stores.values(), key=lambda s: (-len(s["items"]), s["hub"]))
+    return {
+        "zone": want.title() if want not in ("all", "unassigned") else want,
+        "my_zone": user.get("zone"),
+        "as_of": date.today().isoformat(),
+        "counts": {**counts, "total": sum(counts.values()), "stores": len(ordered)},
+        "stores": ordered,
     }

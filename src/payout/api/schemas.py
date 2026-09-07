@@ -165,6 +165,8 @@ class RiderOut(BaseModel):
     mob_no: str | None = None
     is_active: bool = True
     salary: int | None = None  # paise per cycle (salary companies); rupeeized out
+    recruited_by: str | None = None  # users.email of who onboarded this rider id
+    zone: str | None = None  # North | South from the hub, None when unassigned
     # Set on create-for-existing-person when blank fields were filled from
     # another of their rider rows: {"from": "JI10000@Jiffy", "fields": [...]}.
     copied_from: dict | None = None
@@ -184,6 +186,7 @@ class RiderPatch(BaseModel):
     mob_no: str | None = None
     is_active: bool | None = None
     salary: float | None = None  # rupees per cycle (salary companies)
+    recruited_by: str | None = None  # admin only: hand the rider to another recruiter
     new_rider_id: str | None = None
     new_company: str | None = None
 
@@ -298,6 +301,8 @@ class EvUnitOut(BaseModel):
     current_person_id: int | None = None
     current_rider_name: str | None = None
     hub: str | None = None
+    zone: str | None = None  # from the holder's hub; None when spare / unassigned
+    recruited_by: str | None = None  # who onboarded the holder (comma-joined if several)
     handover_date: str | None = None
     rent_charged_through: str | None = None
 

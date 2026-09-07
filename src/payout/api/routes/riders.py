@@ -8,6 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
+from payout.api.routes.hubs import zone_filter
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -102,7 +103,18 @@ def _conflict_message(conflict: dict, action: str = "save") -> str:
 
 
 def _insert_rider_into_db(
-    conn, *, rider_id, company, name, hub, vehicle, account_no, ifsc, person_id=None, mob_no=None
+    conn,
+    *,
+    rider_id,
+    company,
+    name,
+    hub,
+    vehicle,
+    account_no,
+    ifsc,
+    person_id=None,
+    mob_no=None,
+    recruited_by=None,
 ):
     """Shared write path used by both POST and bulk import.
     Returns (created: bool, rider_id: str, person_id: int).
@@ -157,7 +169,7 @@ def _insert_rider_into_db(
     veh = (vehicle or "").strip().upper() or "BIKE"
     conn.execute(
         "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, "
-        "account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",
+        "account_no, ifsc, mob_no, recruited_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             rider_id,
             company,
@@ -168,6 +180,7 @@ def _insert_rider_into_db(
             account_no,
             ifsc,
             (mob_no or "").strip() or None,
+            recruited_by,
         ),
     )
     # A real id tagged to a person who was carrying a system placeholder at
@@ -333,9 +346,12 @@ def list_riders(
     hub: str | None = None,
     active: bool | None = None,
     q: str | None = Query(None, description="matches name, rider id, phone or hub"),
+    zone: str | None = Query(None, description="North | South | unassigned (by the rider's hub)"),
+    mine: bool = Query(False, description="only riders the caller onboarded"),
+    recruited_by: str | None = Query(None, description="riders a given recruiter onboarded"),
     limit: int | None = Query(None, ge=1, le=2000),
     offset: int = Query(0, ge=0),
-    _: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ) -> list[RiderOut]:
     """List riders. The ``vehicle`` column is derived from whether the rider's
     person currently holds an open ev_assignment — ``EV`` when they do,
@@ -362,23 +378,39 @@ def list_riders(
             "LIKE ? OR LOWER(COALESCE(rm.hub,'')) LIKE ?)"
         )
         params += [needle, needle, needle, needle]
+    if mine:
+        where.append("rm.recruited_by=?")
+        params.append(user["email"])
+    elif recruited_by:
+        where.append("rm.recruited_by=?")
+        params.append(recruited_by.strip().lower())
+    z = zone_filter(zone)
+    if z:
+        if z == "unassigned":
+            where.append("hz.zone IS NULL")
+        else:
+            where.append("LOWER(hz.zone)=?")
+            params.append(z)
     page = ""
     page_params: list = []
     if limit is not None:
         page = " LIMIT ? OFFSET ?"
         page_params = [limit, offset]
+    base = (
+        "FROM rider_master rm "
+        "LEFT JOIN ev_assignments ea ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
+        "LEFT JOIN hub_zones hz ON hz.hub = rm.hub "
+    )
     with get_connection() as conn:
         total = conn.execute(
-            f"SELECT COUNT(*) FROM rider_master rm WHERE {' AND '.join(where)}", params
+            f"SELECT COUNT(*) {base} WHERE {' AND '.join(where)}", params
         ).fetchone()[0]
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
-            f"FROM rider_master rm "
-            f"LEFT JOIN ev_assignments ea "
-            f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
-            f"WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
+            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
+            f"       rm.recruited_by, hz.zone "
+            f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
             params + page_params,
         ).fetchall()
     response.headers["X-Total-Count"] = str(int(total))
@@ -413,6 +445,10 @@ def update_rider(
         fields["mob_no"] = body.mob_no.strip() or None
     if body.is_active is not None:
         fields["is_active"] = 1 if body.is_active else 0
+    if body.recruited_by is not None:
+        if user.get("role") == "recruiter":
+            raise HTTPException(403, "Only admins reassign a rider to a recruiter")
+        fields["recruited_by"] = body.recruited_by.strip().lower() or None
     if body.salary is not None:
         if user.get("role") == "recruiter":
             raise HTTPException(403, "Only admins set salaries")
@@ -494,13 +530,14 @@ def update_rider(
 
         row = conn.execute(
             "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, "
-            " mob_no, is_active, salary FROM rider_master WHERE rider_id=? AND company=?",
+            " mob_no, is_active, salary, recruited_by FROM rider_master "
+            "WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()
         changed = diff_fields(
             dict(existing),
             dict(row),
-            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active", "salary"),
+            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active", "salary", "recruited_by"),
         )
         if body.mob_no is not None:
             changed["mob_no"] = [existing["mob_no"], fields.get("mob_no")]
@@ -700,6 +737,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             ifsc=ifsc,
             mob_no=mob_no,
             person_id=body.person_id,
+            recruited_by=user.get("email"),
         )
         if aadhaar or pan:
             conn.execute(
@@ -738,6 +776,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         mob_no=mob_no,
         copied_from=copied_from,
         is_active=True,
+        recruited_by=user.get("email"),
     )
 
 

@@ -367,7 +367,8 @@ def test_activity_survives_bad_details():
 
     c = Conn()
     record_activity(c, {"email": "a@b"}, "x.y", entity_type="t", entity_id=1, details={"s": {1, 2}})
-    assert c.params[-1]  # serialised via default=str, never raised
+    assert c.params[7]  # details, serialised via default=str, never raised
+    assert c.params[8:] == (None, None, None)  # no location outside the app
 
 
 def test_profile_photo_latest_image_wins(db, client):

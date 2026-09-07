@@ -36,7 +36,7 @@ POST /auth/login          form: username=<email or phone>&password=<pw>&device=<
                           → {"access_token","token_type":"bearer","role","email","expires_in":43200,
                              "refresh_token":"qrt_…"}          (refresh_token only when device is sent)
 POST /auth/refresh        {"refresh_token"} → same shape, NEW refresh_token (the old one is retired)
-GET  /auth/me             → {"email","role","phone"}
+GET  /auth/me             → {"email","role","phone","zone"}
 POST /auth/logout         {"refresh_token"}   revokes this phone's session
 POST /auth/logout-everywhere                  revokes all of my sessions (needs a valid access token)
 ```
@@ -59,23 +59,65 @@ screen with the server's `detail` as the reason.
 ## Riders
 
 ```
-GET   /app/bootstrap                      one call for first paint: me, active companies, hubs, ev_models, counts, api_version
-GET   /riders?company=&hub=&active=&q=&limit=&offset=
-                                          roster (rider_id, company, person_id, name, hub, vehicle, bank, phone, is_active);
-                                          q matches name / rider id / phone / hub; X-Total-Count header = total before paging
+GET   /app/bootstrap                      one call for first paint: me (incl. zone), active companies, hubs, hub_zones {hub: zone|null},
+                                          zones ["North","South"], ev_models, counts, api_version
+GET   /riders?company=&hub=&active=&q=&limit=&offset=&zone=&mine=&recruited_by=
+                                          roster (rider_id, company, person_id, name, hub, vehicle, bank, phone, is_active,
+                                          recruited_by, zone); q matches name / rider id / phone / hub;
+                                          zone=North|South|unassigned (by the rider's hub); mine=1 → riders I onboarded;
+                                          recruited_by=<email> → theirs (anyone may ask); X-Total-Count header = total before paging
 GET   /persons/{person_id}/photo[?size=thumb]   the profile photo (thumb = 160 px JPEG for tiles); 404 = none
 GET   /riders/{rider_id}?company=
 POST  /riders                             {"company","name","rider_id"?,"hub"?,"vehicle"?,"account_no"?,"ifsc"?,"person_id"?}
                                           rider_id blank → placeholder QSPEND<NNNN>; person_id → attach to an existing person (2nd company)
 PATCH /riders/{rider_id}?company=         any of {"name","hub","vehicle","account_no","ifsc","mob_no","is_active","new_rider_id","new_company"}
+                                          ("recruited_by" and "salary" are admin-only)
 POST  /riders/rename-rider-id             {"person_id","company","new_rider_id","current_rider_id"?}  — tag the real id; the QSPEND placeholder is retired
 GET   /persons/{person_id}                person: display_name, riders[], ev (open), ev_history[]
 GET   /companies                          company list (for the company picker)
 ```
 
-A bank account already owned by another person is refused with `409` naming
-the owner. Deleting riders, merging/splitting people and onboarding unknown
+`POST /riders` stamps `recruited_by` with the caller's email — that is what
+"my riders" and the recruiting numbers are built on. A bank account already
+owned by another person is refused with `409` naming the owner. Deleting riders, merging/splitting people and onboarding unknown
 ids from payout files are admin-only.
+
+## Zones, stores and the to-do list
+
+```
+GET   /hubs                               [{hub, zone, riders, evs}] — every hub seen on a rider row (+ pre-classified ones)
+PUT   /hubs/{hub}                         admin: {"zone": "North"|"South"|null}   classify a store; null clears
+PATCH /users/{email}/zone                 admin: {"zone": "North"|"South"|null}   the zone a recruiter works
+GET   /app/todo?zone=                     what needs a visit, grouped by store, for one zone (default: my zone; "all";
+                                          "unassigned" = stores with no zone yet)
+                                          → {zone, my_zone, as_of, counts{cod_items, ev_dues_items, inactive_ev_items, total, stores},
+                                             stores:[{hub, zone, items:[…]}]}
+GET   /app/my-recruiting[?email=]         my onboarding numbers: counts{today, week, month, all_time, persons, active, ev_holders},
+                                          by_company[], recent[] (email= is admin-only: another recruiter's)
+GET   /app/recruiting                     every recruiter side by side (admins); a recruiter gets only their own row
+```
+
+To-do items are one visit each and carry `kind`:
+
+* `cod` — the rider still holds COD (`cod_outstanding`). Collect it.
+* `ev_dues` — an EV holder with rent arrears and/or general dues
+  (`outstanding`, `dues_outstanding`, `total_dues`). Chase or take the unit.
+* `inactive_ev` — a unit still with a rider who has no active rider id left
+  (`ev_id`, `handover_date`). Pick it up.
+
+Every item has `person_id`, `name`, `hub`, `companies`, `mob_no`, `ev_id`,
+`ev_model` and a ready `title`. Amounts are rupees, like everywhere else.
+Stores are ordered by how much is waiting at them. A recruiter with no
+zone on their account sees every store, labelled with its zone.
+
+### Where an action happened (Level 1 location)
+
+The app may send `X-Client-Location: <lat>,<lng>[,<accuracy_m>]` on any
+request. It is stamped onto the activity-log row of that action (rider
+created, EV handed over, …) and nowhere else — there is no background
+tracking and no location endpoint. Malformed or out-of-range values are
+ignored, never rejected. Send it only on writes, only while the app is in
+the foreground, and only after the user has granted location permission.
 
 ## Documents (KYC)
 
@@ -95,7 +137,8 @@ keys (local volume or an S3/R2 bucket — server config, invisible to the app).
 ## EVs
 
 ```
-GET   /evs                                    units with current rider/hub/handover
+GET   /evs?status=&zone=&mine=                units with current rider/hub/handover, zone (holder's hub) and recruited_by;
+                                              zone=North|South|unassigned; mine=1 → units held by riders I onboarded
 GET   /evs/{ev_id}/profile                    unit + assignment history + maintenance
 GET   /evs/models                             provider/model rate card
 POST  /evs                                    {"ev_id","provider","model","notes"?,"person_id"?,"handover_date"?}  — with person_id the unit is handed over in the same call

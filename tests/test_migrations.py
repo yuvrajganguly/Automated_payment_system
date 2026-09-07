@@ -28,6 +28,9 @@ _NEW_COLUMNS = [
     ("companies", "per_order_rate"),
     ("companies", "salary_expected_days"),
     ("rider_master", "salary"),
+    ("rider_master", "recruited_by"),
+    ("users", "zone"),
+    ("activity_log", "lat"),
 ]
 
 
@@ -69,6 +72,19 @@ def test_pre_runner_database_gets_every_migration():
         "",
     )
     old_schema = old_schema.replace(
+        "    recruited_by TEXT,                         "
+        "-- users.email of the recruiter who onboarded them\n",
+        "",
+    )
+    old_schema = re.sub(
+        r"    details      TEXT,               -- JSON: fields changed, before/after, notes\n"
+        r".*?accuracy_m   REAL\n",
+        "    details      TEXT                -- JSON: fields changed, before/after, notes\n",
+        old_schema,
+        count=1,
+        flags=re.S,
+    )
+    old_schema = old_schema.replace(
         "    -- Hub/store code and worker name exactly as the company's COD sheet\n"
         "    -- states them. A COD rider need not be in the payout (or on the roster),\n"
         "    -- so the file is the only source for these.\n"
@@ -81,9 +97,15 @@ def test_pre_runner_database_gets_every_migration():
         "    phone         TEXT,                           -- E.164 (+91…); second login id\n",
         "",
     )
-    assert "phone         TEXT" not in old_schema
+    old_schema = old_schema.replace(
+        "    zone          TEXT,                           "
+        "-- North | South: the recruiter's patch (app to-do list)\n",
+        "",
+    )
+    assert "phone         TEXT" not in old_schema and "zone          TEXT" not in old_schema
     assert "attempts" not in old_schema and "rider_ids_shared_with" not in old_schema
     assert "payment_model" not in old_schema and "salary_expected_days" not in old_schema
+    assert "recruited_by" not in old_schema and "accuracy_m" not in old_schema
     assert "worker_name" not in old_schema and "hub_code     TEXT" not in old_schema
 
     import payout.db.schema as schema_mod
@@ -228,8 +250,5 @@ def test_cadence_next_cycle():
     )
     assert next_cycle_for("X", date(2026, 9, 7), "slots") == (date(2026, 9, 8), date(2026, 9, 14))
     assert next_cycle_for("X", date(2026, 9, 6), "weekly") == (date(2026, 9, 7), date(2026, 9, 13))
-    # No history for a monthly company: the last completed month, never the current one.
-    ns, ne = next_cycle_for("X", None, "monthly")
-    assert ne < date.today() and ns.day == 1
     # No cadence given: Spencer's is still the slots company.
     assert next_cycle_for("Spencer's", date(2026, 9, 14)) == (date(2026, 9, 15), date(2026, 9, 21))

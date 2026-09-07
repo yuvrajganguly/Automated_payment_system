@@ -56,6 +56,9 @@ from payout.api.routes import (
     evs as evs_routes,
 )
 from payout.api.routes import (
+    hubs as hub_routes,
+)
+from payout.api.routes import (
     inactive as inactive_routes,
 )
 from payout.api.routes import (
@@ -164,10 +167,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from payout.api.middleware import AuditLogMiddleware, RupeeizeMiddleware  # noqa: E402
+from payout.api.middleware import (  # noqa: E402
+    AuditLogMiddleware,
+    ClientLocationMiddleware,
+    RupeeizeMiddleware,
+)
 
 app.add_middleware(AuditLogMiddleware)
 app.add_middleware(RupeeizeMiddleware)
+app.add_middleware(ClientLocationMiddleware)
 
 # Money-side routers carry the recruiter fence: a recruiter (field staff who
 # onboard riders and manage the fleet) never sees balances, payouts, arrears,
@@ -176,6 +184,7 @@ app.add_middleware(RupeeizeMiddleware)
 _NO_RECRUITER = [Depends(no_recruiter)]
 app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
 app.include_router(app_routes.router, prefix="/api/app", tags=["app"])
+app.include_router(hub_routes.router, prefix="/api/hubs", tags=["hubs"])
 app.include_router(company_routes.router, prefix="/api/companies", tags=["companies"])
 app.include_router(
     cycle_routes.router, prefix="/api/cycles", tags=["cycles"], dependencies=_NO_RECRUITER

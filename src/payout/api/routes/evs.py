@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
+from payout.api.routes.hubs import zone_filter
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -118,8 +119,14 @@ def export_ev_units(
 
 @router.get("", response_model=list[EvUnitOut])
 def list_ev_units(
-    status: str | None = None, _: dict = Depends(get_current_user)
+    status: str | None = None,
+    zone: str | None = None,
+    mine: bool = False,
+    user: dict = Depends(get_current_user),
 ) -> list[EvUnitOut]:
+    """Fleet list. ``zone`` (North | South | unassigned) goes by the holder's
+    hub; ``mine`` keeps units held by riders the caller onboarded. Both only
+    make sense for units in someone's hands — spare units have no hub."""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT u.ev_id, u.status, u.notes, m.provider, m.model_name, m.weekly_rate, "
@@ -127,16 +134,27 @@ def list_ev_units(
             "       p.display_name AS current_rider_name, "
             "       (SELECT rider_id FROM rider_master WHERE person_id=a.person_id LIMIT 1) AS rider_id, "  # noqa: E501
             "       (SELECT GROUP_CONCAT(DISTINCT rm.hub) FROM rider_master rm "
-            "          WHERE rm.person_id=a.person_id AND rm.hub IS NOT NULL AND rm.hub<>'') AS hub "  # noqa: E501
+            "          WHERE rm.person_id=a.person_id AND rm.hub IS NOT NULL AND rm.hub<>'') AS hub, "  # noqa: E501
+            "       (SELECT hz.zone FROM rider_master rm JOIN hub_zones hz ON hz.hub=rm.hub "
+            "          WHERE rm.person_id=a.person_id LIMIT 1) AS zone, "
+            "       (SELECT GROUP_CONCAT(DISTINCT rm.recruited_by) FROM rider_master rm "
+            "          WHERE rm.person_id=a.person_id AND rm.recruited_by IS NOT NULL) AS recruited_by "  # noqa: E501
             "FROM ev_units u "
             "JOIN ev_models m ON m.model_id = u.model_id "
             "LEFT JOIN ev_assignments a ON a.ev_id = u.ev_id AND a.returned_date IS NULL "
             "LEFT JOIN person_registry p ON p.person_id = a.person_id "
             "ORDER BY u.ev_id"
         ).fetchall()
+    z = zone_filter(zone) or ""
     out: list[EvUnitOut] = []
     for r in rows:
         if status and r["status"] != status:
+            continue
+        if z == "unassigned" and (r["person_id"] is None or r["zone"]):
+            continue
+        if z and z != "unassigned" and (r["zone"] or "").lower() != z:
+            continue
+        if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue
         out.append(
             EvUnitOut(
@@ -150,6 +168,8 @@ def list_ev_units(
                 current_person_id=r["person_id"],
                 current_rider_name=r["current_rider_name"],
                 hub=r["hub"],
+                zone=r["zone"],
+                recruited_by=r["recruited_by"],
                 handover_date=r["handover_date"],
                 rent_charged_through=r["rent_charged_through"],
             )

@@ -13,7 +13,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from payout.api.auth import VALID_ROLES, get_current_user, require_creator
+from payout.api.auth import VALID_ROLES, get_current_user, require_admin, require_creator
+from payout.api.routes.hubs import ZONES
 from payout.auth import hash_password
 from payout.auth.sessions import revoke_all
 from payout.db import get_connection
@@ -29,7 +30,12 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     phone: str | None = None
+    zone: str | None = None  # North | South — the recruiter's patch
     created_at: str | None = None
+
+
+class ZoneIn(BaseModel):
+    zone: str | None = None
 
 
 class UserCreateIn(BaseModel):
@@ -81,7 +87,7 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
     anyone who is not one."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT email, role, is_active, phone, created_at FROM users ORDER BY email"
+            "SELECT email, role, is_active, phone, zone, created_at FROM users ORDER BY email"
         ).fetchall()
     return [
         UserOut(
@@ -89,6 +95,7 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
             role=visible_role(r["role"], user),
             is_active=bool(r["is_active"]),
             phone=r["phone"],
+            zone=r["zone"],
             created_at=r["created_at"],
         )
         for r in rows
@@ -129,6 +136,22 @@ def set_phone(email: str, body: PhoneIn, _: dict = Depends(require_creator)) -> 
         conn.execute("UPDATE users SET phone=? WHERE email=?", (phone, target))
         conn.commit()
     return {"email": target, "phone": phone}
+
+
+@router.patch("/{email}/zone")
+def set_zone(email: str, body: ZoneIn, _: dict = Depends(require_admin)) -> dict:
+    """Admin sets (or clears) the zone a recruiter works — North or South.
+    The app opens its to-do list on the stores of that zone."""
+    target = email.strip().lower()
+    zone = (body.zone or "").strip().title() or None
+    if zone is not None and zone not in ZONES:
+        raise HTTPException(400, f"zone must be one of {', '.join(ZONES)} (or empty to clear)")
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+            raise HTTPException(404, "User not found")
+        conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
+        conn.commit()
+    return {"email": target, "zone": zone}
 
 
 @router.patch("/{email}/role")
