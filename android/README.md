@@ -155,8 +155,37 @@ maintenance: back in service. A rider's page has the same from the other side:
 "Give an EV" lists the free units — or, on its "New unit" tab, creates the
 vehicle and hands it over in the same call, for the one that arrived with the
 rider standing next to it. A held one can be taken back either way. The rules stay on the server (one open assignment per person, rent stops
-on the return date, the deposit close-out is an admin's job) — the app asks
+on the return date, settling the deposit is an admin's job) — the app asks
 and reports the answer in a sentence.
+
+Security deposit: every EV rider pays one, and the moment the vehicle comes
+back there is a question only the person holding it can answer — did the money
+go back to the rider in cash, and if it did not, what was wrong with the
+vehicle. So a **take back as spare** or a **return to the provider** does not
+drop the recruiter back to the list: the same sheet asks it there and then.
+**Later** is a real button, not a dismissal — a recruiter with a rider waiting
+taps it and the vehicle simply waits on the EVs tab. "No" opens a damage figure
+(whole rupees, number pad, and 0 is a real answer) and a one-line note; "Yes"
+hides them both, because a deposit that went back whole *and* damage owed
+against it is the one combination the server refuses. Nothing here moves a
+rupee: `POST /evs/closeouts/{assignment_id}/report` writes an observation and
+pre-fills the office's close-out, which is still the only thing that settles
+the money — the sheet says so in a line, above the button. A refusal (that
+combination, or a deposit the office has already settled) is shown word for
+word under the fields it is about.
+
+The EVs tab opens on **Deposits to report** — `GET /evs/closeouts/mine`, the
+vehicles this recruiter took back that nobody has answered for yet, each with
+the rider, the unit and the date it came back. It sits there rather than on
+Today because a return is made on this tab, so it is the tab somebody is
+looking at when they remember, and because Today's red band is a server-side
+count that this list is not part of — a second to-do list with its own
+arithmetic beside it would be a worse Today. A row that has been answered shows
+the answer and reopens the same sheet to correct it; re-posting replaces the
+last answer, until the office settles and the server says no. The card stays
+on screen when it is empty ("nothing waiting"), because a section that only
+appears when there is a problem is a section nobody trusts to have been
+checked.
 
 Location ("Option 1"): each time the app comes to the foreground it takes one
 fix, reverse-geocodes the area on the phone and posts it to `/app/location`;

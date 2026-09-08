@@ -204,7 +204,10 @@ data class EvUnitIn(
 )
 
 /** The server answers each action with a small object; the app only needs to
- *  know it worked and, for a return, that the office still owes a close-out. */
+ *  know it worked and, for a return, that the office still owes a close-out.
+ *  [closeout] is the assignment that just closed — present only when the
+ *  vehicle came back off a rider, which is the only case there is a deposit
+ *  to ask about. */
 @Serializable
 data class EvActionOut(
     @SerialName("ev_id") val evId: String? = null,
@@ -214,6 +217,54 @@ data class EvActionOut(
     val spare: Boolean = false,
     @SerialName("handover_date") val handoverDate: String? = null,
     @SerialName("returned_date") val returnedDate: String? = null,
+    val closeout: CloseoutRow? = null,
+)
+
+/* ── The security deposit, from the hub's side ──
+ * Every EV rider pays a deposit. When the vehicle comes back somebody has to
+ * say whether it went back to them in cash and, if it did not, what the
+ * damage was. The recruiter is the one standing there holding the vehicle, so
+ * they answer it; the office still settles the money afterwards, on a form
+ * this report pre-fills. Nothing here moves a rupee. Money is rupees. */
+
+@Serializable
+data class CloseoutReport(
+    @SerialName("assignment_id") val assignmentId: Long,
+    @SerialName("ev_id") val evId: String? = null,
+    @SerialName("person_id") val personId: Long? = null,
+    /** The deposit was handed back in cash. Then damage must be zero — the
+     *  server refuses the two together. */
+    @SerialName("sd_returned") val sdReturned: Boolean = false,
+    @SerialName("damage_charges") val damageCharges: Double = 0.0,
+    @SerialName("damage_note") val damageNote: String? = null,
+    @SerialName("has_photo") val hasPhoto: Boolean = false,
+    @SerialName("reported_by") val reportedBy: String? = null,
+    @SerialName("reported_at") val reportedAt: String? = null,
+)
+
+/** A row of GET /evs/closeouts/mine: an assignment this recruiter took back
+ *  that still needs the deposit answer, with whatever they have already said
+ *  about it. The same shape comes back on a return as [EvActionOut.closeout]. */
+@Serializable
+data class CloseoutRow(
+    @SerialName("assignment_id") val assignmentId: Long,
+    @SerialName("ev_id") val evId: String,
+    @SerialName("person_id") val personId: Long,
+    val name: String? = null,
+    val model: String? = null,
+    val provider: String? = null,
+    @SerialName("handover_date") val handoverDate: String? = null,
+    @SerialName("returned_date") val returnedDate: String? = null,
+    val report: CloseoutReport? = null,
+)
+
+/** POST /evs/closeouts/{assignment_id}/report. Re-posting corrects the last
+ *  answer; once the office has settled the deposit it is refused. */
+@Serializable
+data class CloseoutReportIn(
+    @SerialName("sd_returned") val sdReturned: Boolean,
+    @SerialName("damage_charges") val damageCharges: Double = 0.0,
+    @SerialName("damage_note") val damageNote: String? = null,
 )
 
 @Serializable

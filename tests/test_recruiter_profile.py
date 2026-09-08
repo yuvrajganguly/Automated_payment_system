@@ -245,3 +245,162 @@ def test_a_future_day_is_refused(client):
 def test_the_board_is_admin_only(client):
     assert client.get("/api/recruiters", headers=_login(client, _REC)).status_code == 403
     assert client.get("/api/recruiters", headers=_login(client, _ADMIN)).status_code == 200
+
+
+# ── the EV came back: the recruiter's field report ──────────────────────────
+
+
+def _closed_assignment(conn, *, returned_by: str) -> int:
+    """A person holding an EV that has just come back, awaiting the deposit
+    answer — the state the recruiter is standing in."""
+    pid = conn.execute("INSERT INTO person_registry (display_name) VALUES ('R')").lastrowid
+    conn.execute("INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES ('P','M',70000)")
+    mid = conn.execute("SELECT model_id FROM ev_models LIMIT 1").fetchone()[0]
+    conn.execute(
+        "INSERT INTO ev_units (ev_id, model_id, status) VALUES ('EV1',?,'returned')", (mid,)
+    )
+    conn.execute(
+        "INSERT INTO ev_assignments (person_id, ev_id, handover_date, returned_date, "
+        "  closeout_pending, returned_by) VALUES (?,'EV1','2026-08-01','2026-09-01',1,?)",
+        (pid, returned_by),
+    )
+    return conn.execute("SELECT assignment_id FROM ev_assignments LIMIT 1").fetchone()[0]
+
+
+def test_a_recruiter_reports_the_deposit_and_damage_without_moving_money(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    h = _login(client, _REC)
+    r = client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 850, "damage_note": "Cracked front panel"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["sd_returned"] is False
+    assert r.json()["damage_charges"] == 850  # rupeeized out
+
+    # A report is an observation. Nothing may have been posted to the ledger,
+    # and the deposit must still be waiting for the office.
+    with get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM ev_closeouts").fetchone()[0] == 0
+        assert (
+            conn.execute(
+                "SELECT closeout_pending FROM ev_assignments WHERE assignment_id=?", (aid,)
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_the_office_form_opens_on_what_the_recruiter_reported(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 850, "damage_note": "Cracked panel"},
+        headers=_login(client, _REC),
+    )
+    pending = client.get("/api/evs/closeouts", headers=_login(client, _ADMIN)).json()
+    row = next(p for p in pending if p["assignment_id"] == aid)
+    assert row["report"]["reported_by"] == _REC[0]
+    assert row["report"]["damage_note"] == "Cracked panel"
+    # The admin confirms an answer rather than inventing one about a vehicle
+    # they have not seen.
+    assert row["suggested"]["damage_charges"] == 850
+    assert row["suggested"]["sd_returned"] is False
+
+
+def test_reporting_the_deposit_returned_zeroes_the_deposit_the_office_holds(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": True},
+        headers=_login(client, _REC),
+    )
+    pending = client.get("/api/evs/closeouts", headers=_login(client, _ADMIN)).json()
+    row = next(p for p in pending if p["assignment_id"] == aid)
+    assert row["suggested"]["sd_returned"] is True
+    assert row["suggested"]["sd_amount"] == 0
+
+
+def test_the_deposit_cannot_go_back_and_damage_be_owed_at_the_same_time(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    r = client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": True, "damage_charges": 500},
+        headers=_login(client, _REC),
+    )
+    assert r.status_code == 400
+
+
+def test_a_correction_replaces_the_report_rather_than_adding_a_second(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    h = _login(client, _REC)
+    client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 500},
+        headers=h,
+    )
+    r = client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 900},
+        headers=h,
+    )
+    assert r.json()["damage_charges"] == 900
+    with get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM ev_closeout_reports").fetchone()[0] == 1
+
+
+def test_a_report_is_refused_once_the_office_has_settled(client):
+    """By then the number has already been charged; a later 'correction' would
+    describe a settlement that never happened."""
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    settled = client.post(
+        f"/api/evs/closeouts/{aid}",
+        json={"sd_returned": False, "damage_charges": 0, "rent_charges": 0},
+        headers=_login(client, _ADMIN),
+    )
+    assert settled.status_code == 200, settled.text
+    r = client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 900},
+        headers=_login(client, _REC),
+    )
+    assert r.status_code == 400
+    assert "already settled" in r.json()["detail"]
+
+
+def test_a_recruiter_still_cannot_settle_the_deposit(client):
+    """The field report is an observation; applying it to arrears and dues is
+    money, and the fence stays where it was."""
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    r = client.post(
+        f"/api/evs/closeouts/{aid}",
+        json={"sd_returned": False, "damage_charges": 900, "rent_charges": 0},
+        headers=_login(client, _REC),
+    )
+    assert r.status_code == 403
+
+
+def test_the_app_lists_the_vehicles_i_took_back_that_still_need_an_answer(client):
+    with get_connection() as conn:
+        _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    mine = client.get("/api/evs/closeouts/mine", headers=_login(client, _REC)).json()
+    assert [m["ev_id"] for m in mine] == ["EV1"]
+    assert mine[0]["report"] is None  # not answered yet
+    # A colleague who did not take it back is not prompted about it.
+    assert client.get("/api/evs/closeouts/mine", headers=_login(client, _REC2)).json() == []

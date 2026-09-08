@@ -43,6 +43,7 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.GhostAction
+import com.qwikserve.recruiter.ui.evs.CloseoutSheet
 import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
 import com.qwikserve.recruiter.ui.evs.GiveEvSheet
 import com.qwikserve.recruiter.ui.common.Hairline
@@ -185,6 +186,10 @@ fun PersonScreen(
     val evActions: EvActionsViewModel = hiltViewModel()
     var giving by remember { mutableStateOf(false) }
     var evNote by remember { mutableStateOf<String?>(null) }
+    // True from the moment this page asks for the vehicle back until the
+    // deposit question that follows is done with. On a tablet this page and
+    // the EVs tab share one EvActionsViewModel, so each only answers its own.
+    var takingBack by remember(personId) { mutableStateOf(false) }
     val cached by vm.cached.collectAsStateWithLifecycle()
     val p = vm.person
     val name = p?.displayName ?: cached.firstOrNull()?.name
@@ -264,12 +269,18 @@ fun PersonScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                             GhostAction(
                                 if (evActions.busy) "Working…" else "Take back — spare",
-                                onClick = { evActions.toSpare(ev.evId) { m -> evNote = m; vm.load() } },
+                                onClick = {
+                                    takingBack = true
+                                    evActions.toSpare(ev.evId) { m -> takingBack = false; evNote = m; vm.load() }
+                                },
                                 enabled = !evActions.busy,
                             )
                             GhostAction(
                                 "Return to provider",
-                                onClick = { evActions.returnUnit(ev.evId) { m -> evNote = m; vm.load() } },
+                                onClick = {
+                                    takingBack = true
+                                    evActions.returnUnit(ev.evId) { m -> takingBack = false; evNote = m; vm.load() }
+                                },
                                 enabled = !evActions.busy,
                             )
                         }
@@ -336,6 +347,24 @@ fun PersonScreen(
             onDone = { message -> evNote = message; giving = false; vm.load() },
             onDismiss = { giving = false },
             vm = evActions,
+        )
+    }
+
+    // A vehicle taken back from this page raises the same deposit question the
+    // EVs tab asks, and it is the same person standing there holding it. Left
+    // unanswered it waits on the EVs tab; either way the page reloads, because
+    // by now the rider has no EV.
+    evActions.prompt?.takeIf { takingBack && it.personId == personId }?.let { row ->
+        val done = { message: String ->
+            evNote = message
+            takingBack = false
+            evActions.dismissPrompt()
+            vm.load()
+        }
+        CloseoutSheet(
+            row = row,
+            onDone = { message -> done(evActions.promptNote + " · " + message) },
+            onDismiss = { done(evActions.promptNote) },
         )
     }
 }

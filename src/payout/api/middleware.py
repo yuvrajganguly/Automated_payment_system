@@ -49,9 +49,7 @@ _SENSITIVE_KEYS = re.compile(
     re.IGNORECASE,
 )
 # Same fields when the body is application/x-www-form-urlencoded (OAuth2 login).
-_SENSITIVE_FORM = re.compile(
-    r"\b(" + "|".join(_SENSITIVE_FIELDS) + r")=[^&]*", re.IGNORECASE
-)
+_SENSITIVE_FORM = re.compile(r"\b(" + "|".join(_SENSITIVE_FIELDS) + r")=[^&]*", re.IGNORECASE)
 _MAX_BODY = 500
 # Bodies on these routes are credentials by definition — never store them, even
 # scrubbed. (The form-encoded login body used to be logged verbatim.)

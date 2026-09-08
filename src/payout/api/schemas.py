@@ -338,6 +338,19 @@ class EvCloseoutIn(BaseModel):
     note: str | None = None
 
 
+class EvCloseoutReportIn(BaseModel):
+    """What the recruiter saw when the EV came back. Rupees in.
+
+    Deliberately smaller than ``EvCloseoutIn``: a field report answers the two
+    questions the person holding the vehicle can answer, and says nothing about
+    how the deposit is applied — that is the office's decision.
+    """
+
+    sd_returned: bool = False  # deposit handed back to the rider on the spot
+    damage_charges: float = 0  # only meaningful when the deposit was kept
+    damage_note: str | None = Field(None, max_length=400)
+
+
 class EvAssignIn(BaseModel):
     """Assign an EV to a person — either directly by ``person_id`` or via a
     (rider_id, company) pair. Person ID is the unambiguous handle (a person

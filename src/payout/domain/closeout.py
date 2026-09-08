@@ -30,6 +30,82 @@ class CloseoutError(ValueError):
     """The close-out cannot be applied; the message says why."""
 
 
+def save_report(
+    conn,
+    assignment_id: int,
+    *,
+    sd_returned: bool,
+    damage_charges: int,
+    damage_note: str | None,
+    reported_by: str,
+) -> dict:
+    """Record what the recruiter saw when the EV came back.
+
+    An observation, not a settlement: nothing here posts a transaction, touches
+    arrears or moves a rupee. The recruiter is the person standing in the hub
+    with the vehicle, so they are who knows whether the deposit went back in
+    cash and what the damage looks like; the admin still decides what that
+    costs, on a form this pre-fills.
+
+    Re-reporting overwrites — a recruiter who mistyped the damage should be
+    able to correct it, and a second row for the same assignment would leave
+    the admin guessing which one is true. Refused once the admin has settled,
+    because by then the number has already been charged.
+    """
+    a = conn.execute(
+        "SELECT assignment_id, ev_id, person_id, returned_date FROM ev_assignments "
+        "WHERE assignment_id=?",
+        (assignment_id,),
+    ).fetchone()
+    if not a:
+        raise CloseoutError("Assignment not found")
+    if a["returned_date"] is None:
+        raise CloseoutError("This EV is still with the rider — return it or mark it spare first")
+    if conn.execute(
+        "SELECT 1 FROM ev_closeouts WHERE assignment_id=?", (assignment_id,)
+    ).fetchone():
+        raise CloseoutError("The office has already settled this deposit")
+    if damage_charges < 0:
+        raise CloseoutError("Damage charges cannot be negative")
+    if sd_returned and damage_charges:
+        raise CloseoutError(
+            "The deposit cannot have gone back in full and damage be owed as well — "
+            "keep the deposit, or record no damage"
+        )
+
+    conn.execute("DELETE FROM ev_closeout_reports WHERE assignment_id=?", (assignment_id,))
+    conn.execute(
+        "INSERT INTO ev_closeout_reports (assignment_id, ev_id, person_id, sd_returned, "
+        "  damage_charges, damage_note, reported_by) VALUES (?,?,?,?,?,?,?)",
+        (
+            assignment_id,
+            a["ev_id"],
+            int(a["person_id"]),
+            1 if sd_returned else 0,
+            int(damage_charges),
+            (damage_note or "").strip() or None,
+            reported_by,
+        ),
+    )
+    return report_for(conn, assignment_id) or {}
+
+
+def report_for(conn, assignment_id: int) -> dict | None:
+    """The recruiter's field report for one assignment, or None."""
+    row = conn.execute(
+        "SELECT assignment_id, ev_id, person_id, sd_returned, damage_charges, damage_note, "
+        "       photo_key, reported_by, reported_at FROM ev_closeout_reports "
+        "WHERE assignment_id=?",
+        (assignment_id,),
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["sd_returned"] = bool(d["sd_returned"])
+    d["has_photo"] = bool(d.pop("photo_key", None))
+    return d
+
+
 def owed_now(conn, person_id: int) -> tuple[int, int]:
     """(EV back-rent arrears, carried dues) the person owes right now, paise."""
     row = conn.execute(
@@ -67,10 +143,17 @@ def pending_closeouts(conn) -> list[dict]:
     out = []
     for r in rows:
         d = dict(r)
+        # The recruiter who took the vehicle back may already have answered the
+        # deposit and damage questions in the field. Their report becomes the
+        # suggestion, so the admin confirms an answer rather than inventing one
+        # about a vehicle they have not seen.
+        report = report_for(conn, int(d["assignment_id"]))
+        d["report"] = report
         d["suggested"] = {
-            "sd_amount": EV_DEPOSIT_PAISE,
+            "sd_amount": 0 if (report and report["sd_returned"]) else EV_DEPOSIT_PAISE,
+            "sd_returned": bool(report["sd_returned"]) if report else False,
             "rent_charges": int(d["arrears_outstanding"]) + int(d["dues_outstanding"]),
-            "damage_charges": 0,
+            "damage_charges": int(report["damage_charges"]) if report else 0,
         }
         out.append(d)
     return out

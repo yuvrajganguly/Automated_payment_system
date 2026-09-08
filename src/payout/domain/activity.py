@@ -64,6 +64,7 @@ ACTIONS: dict[str, str] = {
     "profile.update": "Updated their profile",
     "shift.start": "Logged the opening odometer",
     "shift.end": "Logged the closing odometer",
+    "ev.closeout_report": "Reported the EV's condition on return",
 }
 
 

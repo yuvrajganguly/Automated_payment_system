@@ -125,7 +125,7 @@ class StatsViewModel @Inject constructor(private val api: PayoutApi) : ViewModel
         loadSeries()
     }
 
-    fun setGrain(g: String) {
+    fun chooseGrain(g: String) {
         if (g == grain) return
         grain = g
         series = null
@@ -162,7 +162,7 @@ class StatsViewModel @Inject constructor(private val api: PayoutApi) : ViewModel
 
     fun closeDrill() { drill = null; drillRows = emptyList(); drillError = null }
 
-    fun setDrillStatus(status: String) {
+    fun chooseDrillStatus(status: String) {
         if (status == drillStatus) return
         drillStatus = status
         loadDrill()
@@ -356,7 +356,7 @@ private fun PerformanceHeader(vm: StatsViewModel) {
         Segmented(
             listOf("Week by week", "Month by month"),
             selected = if (vm.grain == "week") 0 else 1,
-            onSelect = { vm.setGrain(if (it == 0) "week" else "month") },
+            onSelect = { vm.chooseGrain(if (it == 0) "week" else "month") },
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -417,7 +417,7 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
             Segmented(
                 listOf("All", "Working", "Idle"),
                 selected = when (vm.drillStatus) { "working" -> 1; "idle" -> 2; else -> 0 },
-                onSelect = { vm.setDrillStatus(listOf("all", "working", "idle")[it]) },
+                onSelect = { vm.chooseDrillStatus(listOf("all", "working", "idle")[it]) },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(12.dp))

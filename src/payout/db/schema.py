@@ -105,6 +105,26 @@ CREATE TABLE IF NOT EXISTS ev_closeouts (
     created_at      TEXT DEFAULT (datetime('now'))
 );
 
+-- ── ev_closeout_reports ─────────────────────────────────────────────────────
+-- What the recruiter saw when the EV came back: did the security deposit go
+-- back to the rider in cash, and if not, what damage did the vehicle have.
+--
+-- An observation, not a settlement. No money moves from this table — the
+-- admin's close-out (ev_closeouts, above) is still the only place the deposit
+-- is applied to arrears and dues — but it is written by the person who was
+-- actually there, and the admin's form opens pre-filled from it.
+CREATE TABLE IF NOT EXISTS ev_closeout_reports (
+    assignment_id  INTEGER PRIMARY KEY REFERENCES ev_assignments(assignment_id),
+    ev_id          TEXT NOT NULL,
+    person_id      INTEGER NOT NULL REFERENCES person_registry(person_id),
+    sd_returned    INTEGER NOT NULL DEFAULT 0,   -- 1 = handed back in cash on the spot
+    damage_charges INTEGER NOT NULL DEFAULT 0,   -- paise, as the recruiter assessed it
+    damage_note    TEXT,
+    photo_key      TEXT,                         -- the damage, in the document store
+    reported_by    TEXT NOT NULL,
+    reported_at    TEXT DEFAULT (datetime('now'))
+);
+
 -- At most one open assignment per person.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_assignment
     ON ev_assignments (person_id) WHERE returned_date IS NULL;

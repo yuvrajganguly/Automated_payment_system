@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.qwikserve.recruiter.data.api.CloseoutRow
 import com.qwikserve.recruiter.data.api.EvUnitOut
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.TokenStore
@@ -117,13 +118,19 @@ internal fun matches(u: EvUnitOut, state: String) = when (state) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) {
+fun EvsScreen(
+    onOpenPerson: (Long) -> Unit,
+    vm: EvsViewModel = hiltViewModel(),
+    closeouts: CloseoutsViewModel = hiltViewModel(),
+) {
     val scoped = vm.scoped()
     val shown = vm.shown()
     // Tapping a unit opens what can be done with it, in its current state.
     var picked by remember { mutableStateOf<EvUnitOut?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var addingUnit by remember { mutableStateOf(false) }
+    // A deposit answered from the card rather than at the moment of return.
+    var answering by remember { mutableStateOf<CloseoutRow?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 10.dp),
@@ -163,50 +170,62 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
         // weight, not fillMaxSize: the bar button below needs its 62 dp.
         PullToRefreshBox(
             isRefreshing = vm.refreshing,
-            onRefresh = vm::refresh,
+            onRefresh = { vm.refresh(); closeouts.load() },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-            if (shown.isEmpty()) {
-                Note(
-                    when {
-                        vm.refreshing && vm.all.isEmpty() -> "Loading the fleet…"
-                        vm.query.isNotBlank() -> "Nothing matches \"${vm.query}\"."
-                        vm.mine -> "No units in this state with your riders."
-                        else -> "Nothing in this state right now."
-                    },
-                )
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(shown, key = { it.evId }) { u ->
-                        val sub = if (u.currentRiderName != null) {
-                            listOfNotNull(
-                                u.currentRiderName,
-                                u.hub,
-                                u.handoverDate?.let { "since " + shortDate(it) },
-                                u.totalDues?.takeIf { it > 0 }?.let { "owes " + rupees(it) },
-                                if (u.holderActive == false) "rider inactive" else null,
-                            ).joinToString(" · ")
-                        } else {
-                            "${u.provider} ${u.model} · ${rupees(u.weeklyRate)}/wk" + (u.notes?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
-                        }
-                        ListRow(
-                            title = u.evId,
-                            sub = sub,
-                            onClick = { note = null; picked = u },
-                            trailing = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    u.zone?.let { Tag(it) }
-                                    when {
-                                        u.holderActive == false -> Tag("inactive", accent = true)
-                                        (u.totalDues ?: 0.0) > 0 -> Tag("dues", accent = true)
-                                        else -> Tag(u.status.replace('_', ' '), accent = u.status == "maintenance")
-                                    }
-                                }
+            // One list, always: the fleet's own empty state is a row in it, so
+            // the deposits card above stays reachable — and so pulling down
+            // still refreshes when there is nothing to show.
+            LazyColumn(Modifier.fillMaxSize()) {
+                // The deposits this recruiter owes an answer on. It sits above
+                // the fleet because it is the one thing here with a deadline
+                // somebody else is waiting on.
+                item(key = "closeouts") {
+                    CloseoutsCard(vm = closeouts, onAnswer = { row -> note = null; answering = row })
+                    Rule()
+                }
+
+                if (shown.isEmpty()) {
+                    item(key = "empty") {
+                        Note(
+                            when {
+                                vm.refreshing && vm.all.isEmpty() -> "Loading the fleet…"
+                                vm.query.isNotBlank() -> "Nothing matches \"${vm.query}\"."
+                                vm.mine -> "No units in this state with your riders."
+                                else -> "Nothing in this state right now."
                             },
                         )
                     }
-                    item { Spacer(Modifier.height(24.dp)) }
                 }
+                items(shown, key = { it.evId }) { u ->
+                    val sub = if (u.currentRiderName != null) {
+                        listOfNotNull(
+                            u.currentRiderName,
+                            u.hub,
+                            u.handoverDate?.let { "since " + shortDate(it) },
+                            u.totalDues?.takeIf { it > 0 }?.let { "owes " + rupees(it) },
+                            if (u.holderActive == false) "rider inactive" else null,
+                        ).joinToString(" · ")
+                    } else {
+                        "${u.provider} ${u.model} · ${rupees(u.weeklyRate)}/wk" + (u.notes?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                    }
+                    ListRow(
+                        title = u.evId,
+                        sub = sub,
+                        onClick = { note = null; picked = u },
+                        trailing = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                u.zone?.let { Tag(it) }
+                                when {
+                                    u.holderActive == false -> Tag("inactive", accent = true)
+                                    (u.totalDues ?: 0.0) > 0 -> Tag("dues", accent = true)
+                                    else -> Tag(u.status.replace('_', ' '), accent = u.status == "maintenance")
+                                }
+                            }
+                        },
+                    )
+                }
+                item(key = "tail") { Spacer(Modifier.height(24.dp)) }
             }
         }
         Rule()
@@ -229,8 +248,20 @@ fun EvsScreen(onOpenPerson: (Long) -> Unit, vm: EvsViewModel = hiltViewModel()) 
         EvUnitSheet(
             unit = unit,
             onOpenPerson = { id -> picked = null; onOpenPerson(id) },
-            onDone = { message -> note = message; picked = null; vm.refresh() },
+            // A return raises the deposit question, so whichever way the sheet
+            // closes the card above has to be told to look again.
+            onDone = { message -> note = message; picked = null; vm.refresh(); closeouts.load() },
             onDismiss = { picked = null },
+            closeouts = closeouts,
+        )
+    }
+
+    answering?.let { row ->
+        CloseoutSheet(
+            row = row,
+            onDone = { message -> note = message; answering = null },
+            onDismiss = { answering = null },
+            vm = closeouts,
         )
     }
 }

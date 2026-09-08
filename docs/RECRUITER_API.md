@@ -385,6 +385,35 @@ GET /recruiters/{email}/evs                every EV they handed over
 how many are working now. It is not "how many were working then" — the ledger
 cannot answer that retrospectively without replaying every cycle.
 
+## The deposit, when an EV comes back
+
+Every EV rider places a ₹2,700 security deposit. Two questions follow the
+vehicle back: did the deposit go to the rider in cash, and if not, what damage
+does it have. **The recruiter answers them; the office settles the money.**
+
+```
+GET  /evs/closeouts/mine?limit=50        recruiter — the vehicles I took back
+       → [{assignment_id, ev_id, person_id, handover_date, returned_date,
+           name, model, provider, report: null | {...}}]
+POST /evs/closeouts/{assignment_id}/report   recruiter
+       {sd_returned, damage_charges, damage_note?}
+       → {assignment_id, ev_id, person_id, sd_returned, damage_charges,
+          damage_note, has_photo, reported_by, reported_at}
+POST /evs/closeouts/{assignment_id}          admin — settles the deposit
+```
+
+The report writes no transaction, touches no arrears and moves no rupee: it is
+an observation by the person who was actually holding the vehicle. The admin's
+close-out is still the only route that applies the deposit against arrears and
+dues, and it now opens pre-filled from the report — `GET /evs/closeouts`
+carries `report` and a `suggested` block built from it, so the office confirms
+an answer rather than inventing one about a vehicle nobody there has seen.
+
+`sd_returned: true` with a non-zero `damage_charges` is a `400`: either the
+deposit went back whole, or it was kept and damage is owed against it.
+Re-reporting corrects the previous answer; once the office has settled, a
+report is refused.
+
 ## Working and idle riders
 
 A rider is **working** when a company that sends us a paysheet

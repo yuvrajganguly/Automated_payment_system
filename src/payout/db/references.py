@@ -18,6 +18,7 @@ PERSON_REFS: tuple[tuple[str, str], ...] = (
     ("referrals", "new_person_id"),
     ("referrals", "referrer_person_id"),
     ("ev_closeouts", "person_id"),  # -> ev_assignments(assignment_id) too: before it
+    ("ev_closeout_reports", "person_id"),  # -> ev_assignments(assignment_id) too: before it
     ("rider_documents", "person_id"),  # index rows only; objects stay in the store
     ("money_requests", "person_id"),
     ("ev_daily_ledger", "assigned_person_id"),
@@ -78,9 +79,12 @@ def rename_company(conn, old: str, new: str) -> bool:
     """
     if old == new:
         return False
-    have = {r[0] for r in conn.execute(
-        "SELECT company_name FROM companies WHERE company_name IN (?, ?)", (old, new)
-    ).fetchall()}
+    have = {
+        r[0]
+        for r in conn.execute(
+            "SELECT company_name FROM companies WHERE company_name IN (?, ?)", (old, new)
+        ).fetchall()
+    }
     if old not in have or new in have:
         return False
 

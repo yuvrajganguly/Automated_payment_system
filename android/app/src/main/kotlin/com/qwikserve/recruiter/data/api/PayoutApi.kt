@@ -109,6 +109,22 @@ interface PayoutApi {
     @POST("evs/to-spare")
     suspend fun evToSpare(@Body body: EvReturnIn): EvActionOut
 
+    /** Assignments this recruiter took back that still need the deposit
+     *  answer, each with the report already filed against it, if any. */
+    @GET("evs/closeouts/mine")
+    suspend fun myCloseouts(@Query("limit") limit: Int? = null): List<CloseoutRow>
+
+    /** What the vehicle came back like: did the deposit go back in cash, and
+     *  if not, the damage. An observation, not a settlement — the office's
+     *  close-out is still the only thing that moves the money. Re-posting
+     *  corrects the previous answer; `sd_returned` with damage owed, and
+     *  anything already settled, come back 400 with a sentence to show. */
+    @POST("evs/closeouts/{assignment_id}/report")
+    suspend fun reportCloseout(
+        @Path("assignment_id") assignmentId: Long,
+        @Body body: CloseoutReportIn,
+    ): CloseoutReport
+
     @GET("evs/maintenance")
     suspend fun maintenance(@Query("ev_id") evId: String? = null): List<MaintenanceOut>
 

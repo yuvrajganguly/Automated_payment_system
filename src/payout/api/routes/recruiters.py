@@ -182,9 +182,7 @@ def update_my_profile(body: ProfileIn, user: dict = Depends(get_current_user)) -
     sent = {k: (v.strip() or None if isinstance(v, str) else v) for k, v in sent.items()}
 
     with get_connection() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO recruiter_profiles (email) VALUES (?)", (email,)
-        )
+        conn.execute("INSERT OR IGNORE INTO recruiter_profiles (email) VALUES (?)", (email,))
         if sent:
             cols = ", ".join(f"{k}=?" for k in sent)
             conn.execute(
@@ -573,6 +571,7 @@ def shifts_monthly(
 
 
 # ─────────────────────────── analytics ──────────────────────────────────────
+
 
 def _bucket_of(day: str | None, grain: str) -> str | None:
     """Which bucket a ``YYYY-MM-DD`` string falls in.

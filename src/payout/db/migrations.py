@@ -766,7 +766,7 @@ def _0027_recruiter_shifts(conn: Any) -> None:
         "CREATE TABLE IF NOT EXISTS recruiter_shifts ("
         "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
         "  email           TEXT NOT NULL,"
-        "  day             TEXT NOT NULL,"          # YYYY-MM-DD, the recruiter's local day
+        "  day             TEXT NOT NULL,"  # YYYY-MM-DD, the recruiter's local day
         "  start_km        INTEGER,"
         "  start_photo_key TEXT,"
         "  start_at        TEXT,"
@@ -778,8 +778,7 @@ def _0027_recruiter_shifts(conn: Any) -> None:
         ")"
     )
     idx = (
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_recruiter_shift_day "
-        "ON recruiter_shifts (email, day)"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_recruiter_shift_day ON recruiter_shifts (email, day)"
     )
     if DB_URL:
         from payout.db.connection import translate_ddl
@@ -789,6 +788,41 @@ def _0027_recruiter_shifts(conn: Any) -> None:
     else:
         conn.execute(ddl)
         conn.execute(idx)
+
+
+def _0028_ev_closeout_reports(conn: Any) -> None:
+    """What the recruiter saw when the EV came back (2026-09-08).
+
+    The close-out itself is a money decision — the deposit is cleared against
+    arrears and dues, the leftover is credited or refunded, the excess becomes
+    debt — and that stays with an admin. But the person who actually knows
+    whether the deposit went back in cash, and whether the vehicle came back
+    damaged, is the recruiter standing in the hub with it.
+
+    So the two are separated. This table is the field report: an observation,
+    written by whoever took the EV back, that moves no money. The admin's
+    close-out form opens pre-filled from it, and ``ev_closeouts`` remains the
+    only place a rupee changes hands.
+    """
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS ev_closeout_reports ("
+        "  assignment_id  INTEGER PRIMARY KEY,"
+        "  ev_id          TEXT NOT NULL,"
+        "  person_id      INTEGER NOT NULL,"
+        "  sd_returned    INTEGER NOT NULL DEFAULT 0,"
+        "  damage_charges INTEGER NOT NULL DEFAULT 0,"  # paise, as observed
+        "  damage_note    TEXT,"
+        "  photo_key      TEXT,"
+        "  reported_by    TEXT NOT NULL,"
+        "  reported_at    TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
 
 
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
@@ -822,6 +856,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0025_recruiter_profiles", _0025_recruiter_profiles),
     ("0026_ev_assignment_actor", _0026_ev_assignment_actor),
     ("0027_recruiter_shifts", _0027_recruiter_shifts),
+    ("0028_ev_closeout_reports", _0028_ev_closeout_reports),
 ]
 
 _TRACKING_DDL = (

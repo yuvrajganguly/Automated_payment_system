@@ -13,6 +13,7 @@ from payout.api.schemas import (
     EvAmendReturnIn,
     EvAssignIn,
     EvCloseoutIn,
+    EvCloseoutReportIn,
     EvModelOut,
     EvReturnIn,
     EvUnitIn,
@@ -31,6 +32,8 @@ from payout.domain.closeout import (
     apply_closeout,
     mark_pending,
     pending_closeouts,
+    report_for,
+    save_report,
 )
 from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
@@ -390,8 +393,7 @@ def return_ev(body: EvReturnIn, user: dict = Depends(require_recruiter)) -> dict
         if a:
             ev_id, person_id = a["ev_id"], a["person_id"]
             conn.execute(
-                "UPDATE ev_assignments SET returned_date=?, returned_by=? "
-                "WHERE assignment_id=?",
+                "UPDATE ev_assignments SET returned_date=?, returned_by=? WHERE assignment_id=?",
                 (today, user["email"], a["assignment_id"]),
             )
             # Backdated? Reverse every rent charge for days the rider no
@@ -479,8 +481,7 @@ def mark_spare(body: EvReturnIn, user: dict = Depends(require_recruiter)) -> dic
                 "heal": None,
             }
         conn.execute(
-            "UPDATE ev_assignments SET returned_date=?, returned_by=? "
-            "WHERE assignment_id=?",
+            "UPDATE ev_assignments SET returned_date=?, returned_by=? WHERE assignment_id=?",
             (today, user["email"], a["assignment_id"]),
         )
         heal = heal_backdated_return(
@@ -577,6 +578,73 @@ def close_out(assignment_id: int, body: EvCloseoutIn, user: dict = Depends(requi
             entity_id=out["ev_id"],
             person_id=out["person_id"],
             details={k: v for k, v in out.items() if k not in ("ev_id", "person_id")},
+        )
+        conn.commit()
+    return out
+
+
+@router.get("/closeouts/mine")
+def my_closeout_reports(
+    limit: int = 50,
+    user: dict = Depends(require_recruiter),
+) -> list[dict]:
+    """Assignments I closed that still need the deposit question answered, plus
+    what I have already reported. This is the recruiter's side of the
+    close-out: the office settles it, but the prompt belongs to whoever took
+    the vehicle back."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT a.assignment_id, a.ev_id, a.person_id, a.handover_date, a.returned_date, "
+            "       pr.display_name AS name, m.model_name AS model, m.provider "
+            "FROM ev_assignments a "
+            "JOIN person_registry pr ON pr.person_id = a.person_id "
+            "LEFT JOIN ev_units u ON u.ev_id = a.ev_id "
+            "LEFT JOIN ev_models m ON m.model_id = u.model_id "
+            "WHERE a.closeout_pending = 1 AND a.returned_by = ? "
+            "ORDER BY a.returned_date DESC, a.assignment_id DESC LIMIT ?",
+            (user["email"], min(max(limit, 1), 200)),
+        ).fetchall()
+        return [{**dict(r), "report": report_for(conn, int(r["assignment_id"]))} for r in rows]
+
+
+@router.post("/closeouts/{assignment_id}/report")
+def report_closeout(
+    assignment_id: int,
+    body: EvCloseoutReportIn,
+    user: dict = Depends(require_recruiter),
+) -> dict:
+    """Record what the vehicle came back like: whether the security deposit
+    went back to the rider in cash, and if it did not, the damage.
+
+    No money moves here — this writes an observation, and the office's
+    close-out (``POST /evs/closeouts/{id}``) remains the only route that
+    settles the deposit against arrears and dues. Re-reporting corrects the
+    previous answer; once the office has settled, it is refused.
+    """
+    with get_connection() as conn:
+        try:
+            out = save_report(
+                conn,
+                assignment_id,
+                sd_returned=body.sd_returned,
+                damage_charges=to_paise(body.damage_charges or 0),
+                damage_note=body.damage_note,
+                reported_by=user["email"],
+            )
+        except CloseoutError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        record_activity(
+            conn,
+            user,
+            "ev.closeout_report",
+            entity_type="ev",
+            entity_id=out["ev_id"],
+            person_id=out["person_id"],
+            details={
+                "sd_returned": out["sd_returned"],
+                "damage_charges": out["damage_charges"],
+                "note": out["damage_note"],
+            },
         )
         conn.commit()
     return out

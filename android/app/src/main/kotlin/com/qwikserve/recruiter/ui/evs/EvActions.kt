@@ -33,6 +33,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwikserve.recruiter.data.api.ApiError
+import com.qwikserve.recruiter.data.api.CloseoutRow
+import com.qwikserve.recruiter.data.api.EvActionOut
 import com.qwikserve.recruiter.data.api.EvAssignIn
 import com.qwikserve.recruiter.data.api.EvModelLite
 import com.qwikserve.recruiter.data.api.EvReturnIn
@@ -110,7 +112,25 @@ class EvActionsViewModel @Inject constructor(
 
     val unitQuery = MutableStateFlow("")
 
-    fun clear() { error = null }
+    /**
+     * The assignment a return just closed, when there is one. Taking a vehicle
+     * back raises the deposit question, and the only moment the answer is
+     * cheap is while the recruiter is still holding the vehicle — so the
+     * action's own sheet asks it instead of dropping them back to the list. A
+     * spare that was never with a rider closes no assignment, so there is
+     * nothing to ask and this stays null.
+     */
+    var prompt by mutableStateOf<CloseoutRow?>(null)
+        private set
+
+    /** What the action itself did, held back until the question is past. */
+    var promptNote by mutableStateOf("")
+        private set
+
+    fun clear() { error = null; prompt = null }
+
+    /** Leave the question unanswered — the vehicle stays on the pending list. */
+    fun dismissPrompt() { prompt = null }
 
     fun loadIdleUnits() {
         if (loadingIdle) return
@@ -155,12 +175,12 @@ class EvActionsViewModel @Inject constructor(
         act("$evId handed over", onDone) { api.assignEv(EvAssignIn(evId = evId, personId = personId)) }
 
     fun returnUnit(evId: String, onDone: (String) -> Unit) =
-        act("$evId returned — the office settles the deposit", onDone) {
+        takeBack("$evId returned to the provider", onDone) {
             api.returnEv(EvReturnIn(evId = evId))
         }
 
     fun toSpare(evId: String, onDone: (String) -> Unit) =
-        act("$evId is now a spare", onDone) { api.evToSpare(EvReturnIn(evId = evId)) }
+        takeBack("$evId is now a spare", onDone) { api.evToSpare(EvReturnIn(evId = evId)) }
 
     fun sendToMaintenance(evId: String, reason: String, onDone: (String) -> Unit) =
         act("$evId sent for repair", onDone) {
@@ -179,6 +199,39 @@ class EvActionsViewModel @Inject constructor(
                 ?: throw IllegalStateException("That unit has no open repair to close.")
             api.closeMaintenance(open.id, MaintenanceClose())
         }
+
+    /**
+     * The two ways a vehicle comes back. Same shape as [act], except that the
+     * server hands back the assignment it just closed — and that assignment
+     * carries an unanswered question about ₹2,700 of somebody's money. So the
+     * sheet stays open on the deposit prompt rather than reporting a success
+     * and closing; [promptNote] holds what to say once the question is past,
+     * whether it was answered or skipped.
+     */
+    private fun takeBack(success: String, onDone: (String) -> Unit, call: suspend () -> EvActionOut) {
+        if (busy) return
+        busy = true; error = null
+        viewModelScope.launch {
+            try {
+                val out = call()
+                val closing = out.closeout
+                if (closing != null) {
+                    promptNote = success
+                    prompt = closing
+                } else {
+                    onDone(success)
+                }
+            } catch (e: HttpException) {
+                error = e.readable("The server answered ${e.code()}")
+            } catch (e: IOException) {
+                error = "No signal — this one needs the server."
+            } catch (e: Exception) {
+                error = e.message ?: "That did not work"
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     /** Every action is the same shape: busy, ask, say what happened. */
     private fun act(success: String, onDone: (String) -> Unit, call: suspend () -> Unit) {
@@ -218,16 +271,51 @@ fun EvUnitSheet(
     onDone: (String) -> Unit,
     onDismiss: () -> Unit,
     vm: EvActionsViewModel = hiltViewModel(),
+    closeouts: CloseoutsViewModel = hiltViewModel(),
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var mode by remember { mutableStateOf("") } // "" | give | repair
     var reason by remember { mutableStateOf("") }
+    // Set the moment this sheet asks for the vehicle back, so that on a tablet
+    // — where this list and a rider's page share one EvActionsViewModel — the
+    // deposit question is answered where it was raised and nowhere else.
+    var takingBack by remember(unit.evId) { mutableStateOf(false) }
     val hits by vm.riderHits.collectAsStateWithLifecycle()
     val q by vm.riderQuery.collectAsStateWithLifecycle()
-    LaunchedEffect(unit.evId) { vm.clear() }
+    LaunchedEffect(unit.evId) { vm.clear(); closeouts.clearSaveError() }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Qwik.Bg) {
+    // The deposit question the return just raised. Skipping it — by "Later" or
+    // by swiping the sheet away — is not a failure: the vehicle stays on the
+    // pending list on the EVs tab and the action itself is still reported.
+    val pending = vm.prompt?.takeIf { takingBack && it.evId == unit.evId }
+    val leavePrompt = {
+        val said = vm.promptNote
+        vm.dismissPrompt()
+        onDone(said)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (pending != null) leavePrompt() else onDismiss() },
+        sheetState = sheet,
+        containerColor = Qwik.Bg,
+    ) {
         Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            if (pending != null) {
+                CloseoutForm(
+                    row = pending,
+                    busy = closeouts.saving,
+                    error = closeouts.saveError,
+                    skipLabel = "Later",
+                    onSkip = leavePrompt,
+                    onSubmit = { sdReturned, charges, damageNote ->
+                        closeouts.save(pending.assignmentId, sdReturned, charges, damageNote) { said ->
+                            vm.dismissPrompt()
+                            onDone(vm.promptNote + " · " + said)
+                        }
+                    },
+                )
+                return@Column
+            }
             Text(unit.evId, style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
             Spacer(Modifier.height(6.dp))
             Kicker(
@@ -292,13 +380,13 @@ fun EvUnitSheet(
                         "in_use" -> {
                             BarButton(
                                 "Take it back — keep as spare",
-                                onClick = { vm.toSpare(unit.evId, onDone) },
+                                onClick = { takingBack = true; vm.toSpare(unit.evId, onDone) },
                                 enabled = !vm.busy,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             BarButton(
                                 "Take it back — return to the provider",
-                                onClick = { vm.returnUnit(unit.evId, onDone) },
+                                onClick = { takingBack = true; vm.returnUnit(unit.evId, onDone) },
                                 primary = false,
                                 enabled = !vm.busy,
                                 modifier = Modifier.fillMaxWidth(),
@@ -323,7 +411,10 @@ fun EvUnitSheet(
                             GhostAction("Send for repair", onClick = { mode = "repair" })
                             if (unit.status != "returned") {
                                 Spacer(Modifier.height(2.dp))
-                                GhostAction("Return to the provider", onClick = { vm.returnUnit(unit.evId, onDone) })
+                                GhostAction(
+                                    "Return to the provider",
+                                    onClick = { takingBack = true; vm.returnUnit(unit.evId, onDone) },
+                                )
                             }
                         }
                     }
