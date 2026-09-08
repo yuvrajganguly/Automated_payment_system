@@ -13,6 +13,22 @@ interface UserRow {
   created_at: string | null
 }
 
+/**
+ * Who may act on whom.
+ *
+ * An admin administers the accounts they hand out — recruiters and plain
+ * users. Acting on another admin (or a creator, which an admin sees as an
+ * admin) is refused by `require_admin_over` with a 403, so the button is
+ * disabled rather than offered and then failing. A creator is not fenced.
+ */
+function blockedReason(viewerIsCreator: boolean, targetRole: UserRow['role']): string | null {
+  if (viewerIsCreator) return null
+  if (targetRole === 'admin' || targetRole === 'creator') {
+    return 'Only the creator can act on another admin’s account.'
+  }
+  return null
+}
+
 export function UsersPage() {
   const { user } = useAuth()
   const isCreator = user?.role === 'creator'
@@ -36,10 +52,12 @@ export function UsersPage() {
       <p className="text-slate-500 text-sm mb-6">
         {isCreator
           ? "You can change roles, deactivate accounts, and add new users. The creator role is locked to you until you promote someone else first."
+          : isAdmin
+          ? 'Add recruiters and plain users, and manage their accounts. Changing anyone’s role, and anything to do with another admin’s account, stays with the creator.'
           : 'Everyone with access to the system.'}
       </p>
 
-      {isCreator && <AddUserCard onAdded={reload} />}
+      {isAdmin && <AddUserCard isCreator={isCreator} onAdded={reload} />}
 
       {busy && <Spinner />}
       {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
@@ -49,7 +67,7 @@ export function UsersPage() {
           <thead className="bg-slate-100 text-left">
             <tr>
               <Th>Email</Th><Th>Phone</Th><Th>Role</Th><Th>Zone</Th><Th>Active</Th><Th>Created</Th>
-              {isCreator && <Th>Actions</Th>}
+              {isAdmin && <Th>Actions</Th>}
             </tr>
           </thead>
           <tbody>
@@ -68,7 +86,7 @@ export function UsersPage() {
 
 function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
   { row: UserRow; isCreator: boolean; isAdmin: boolean; selfEmail: string; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | 'zone' | null>(null)
+  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | 'zone' | 'sessions' | null>(null)
   // The zone a recruiter works (North / South): their app opens on those stores,
   // and riders they onboard without a hub take this zone.
   async function setZone(zone: string) {
@@ -120,12 +138,39 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }
   }
+  // Two-step rather than a native confirm(): the dialog blocks the tab and
+  // cannot show whose account this is, which is the one thing that matters.
+  const [sessionsArmed, setSessionsArmed] = useState(false)
+  const [sessionsMsg, setSessionsMsg] = useState<string | null>(null)
+  async function signOutEverywhere() {
+    // The lost-phone button: it kills the app sessions, not the console
+    // cookie, so say what actually happened rather than "signed out".
+    setSessionsArmed(false)
+    setBusy('sessions'); setError(null); setSessionsMsg(null)
+    try {
+      const res = await api.post<{ sessions_revoked: number }>(
+        '/users/' + encodeURIComponent(row.email) + '/sign-out-everywhere',
+      )
+      setSessionsMsg(
+        res.sessions_revoked === 0
+          ? 'No app sessions were open.'
+          : `${res.sessions_revoked} app session${res.sessions_revoked === 1 ? '' : 's'} ended.`,
+      )
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(null) }
+  }
+
+  // One reason string, reused as every disabled button's title, so an admin is
+  // told why rather than left clicking a dead control.
+  const blocked = blockedReason(isCreator, row.role)
 
   return (
     <tr className="border-t">
       <Td>{row.email}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</Td>
       <Td>
-        {isCreator ? (
+        {/* `PATCH /users/{email}/phone` is plain `require_admin` — no rank
+            check — so the editor is open on every row, unlike the actions. */}
+        {isAdmin ? (
           phoneOpen ? (
             <form onSubmit={savePhone} className="flex items-center gap-1">
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210"
@@ -183,17 +228,35 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
         </span>
       </Td>
       <Td className="text-xs">{row.created_at ?? ''}</Td>
-      {isCreator && (
+      {isAdmin && (
         <Td>
-          <button onClick={toggleActive} disabled={busy === 'active' || isSelf}
+          <button onClick={toggleActive} disabled={busy === 'active' || isSelf || !!blocked}
+                  title={blocked ?? (isSelf ? 'You can’t deactivate yourself.' : undefined)}
                   className="text-xs underline text-brand disabled:opacity-30">
             {row.is_active ? 'Deactivate' : 'Reactivate'}
           </button>
-          <button onClick={() => setPwOpen((o) => !o)}
-                  className="text-xs underline text-brand ml-3">
+          <button onClick={() => setPwOpen((o) => !o)} disabled={!!blocked} title={blocked ?? undefined}
+                  className="text-xs underline text-brand ml-3 disabled:opacity-30">
             Set password
           </button>
-          {pwOpen && (
+          {sessionsArmed ? (
+            <span className="ml-3 inline-flex items-center gap-2">
+              <button onClick={signOutEverywhere} disabled={busy === 'sessions'}
+                      className="text-xs underline text-red-400 disabled:opacity-30">
+                {busy === 'sessions' ? '…' : `End every app session for ${row.email}?`}
+              </button>
+              <button onClick={() => setSessionsArmed(false)}
+                      className="text-xs underline text-slate-400">Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setSessionsArmed(true)} disabled={!!blocked}
+                    title={blocked ?? 'End every app session on their phone (lost handset).'}
+                    className="text-xs underline text-brand ml-3 disabled:opacity-30">
+              Sign out everywhere
+            </button>
+          )}
+          {sessionsMsg && <div className="text-xs text-emerald-400 mt-1">{sessionsMsg}</div>}
+          {pwOpen && !blocked && (
             <form onSubmit={setPassword} className="flex items-center gap-2 mt-2">
               <PasswordInput value={newPw} onChange={(e) => setNewPw(e.target.value)}
                              className="border rounded px-2 py-1 text-xs w-44" minLength={8}
@@ -212,7 +275,7 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
   )
 }
 
-function AddUserCard({ onAdded }: { onAdded: () => void }) {
+function AddUserCard({ isCreator, onAdded }: { isCreator: boolean; onAdded: () => void }) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ email: '', password: '', role: 'user', phone: '' })
   const [busy, setBusy] = useState(false)
@@ -261,13 +324,16 @@ function AddUserCard({ onAdded }: { onAdded: () => void }) {
           </label>
           <label className="block">
             <span className="block text-xs text-slate-600">Role</span>
+            {/* An admin who could mint an admin could escalate their own
+                privilege by proxy, so the two senior roles are simply not in
+                the list for them — the server refuses them anyway. */}
             <select value={form.role}
                     onChange={(e) => setForm({ ...form, role: e.target.value })}
                     className="w-full border rounded px-2 py-1">
               <option value="user">user</option>
               <option value="recruiter">recruiter</option>
-              <option value="admin">admin</option>
-              <option value="creator">creator</option>
+              {isCreator && <option value="admin">admin</option>}
+              {isCreator && <option value="creator">creator</option>}
             </select>
           </label>
           <div className="col-span-4 flex gap-2 items-center mt-1">

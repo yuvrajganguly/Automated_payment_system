@@ -2,7 +2,6 @@ package com.qwikserve.recruiter.ui.onboard
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +22,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import android.net.Uri
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,7 +43,7 @@ import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.Avatar
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.formWidth
-import com.qwikserve.recruiter.ui.common.Chips
+import com.qwikserve.recruiter.ui.common.Dropdown
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
@@ -110,6 +108,16 @@ class NewRiderViewModel @Inject constructor(
         private set
 
     val companies get() = app.bootstrap.value?.companies?.map { it.companyName }.orEmpty()
+
+    // Nothing is pre-picked any more, so an empty company list is a dead end
+    // rather than a wrong default: fetch it if this screen is the first thing
+    // opened after a cold start.
+    init {
+        if (app.bootstrap.value == null) {
+            viewModelScope.launch { runCatching { app.refreshBootstrap() } }
+        }
+    }
+
     /** Stores of the chosen company (Admin → Hubs), falling back to every hub known. */
     val hubs: List<String>
         get() {
@@ -198,7 +206,6 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
     val rq by vm.referrerQuery.collectAsStateWithLifecycle()
     val err = vm.fieldErrors
     val companies = vm.companies
-    LaunchedEffect(companies.size) { if (vm.company.isBlank()) vm.company = companies.firstOrNull() ?: "" }
 
     // The form keeps a readable width in the middle of a tablet; on a phone
     // formWidth() is the whole screen, so nothing changes there.
@@ -213,9 +220,18 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
             }
             Rule()
             Column(Modifier.formWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 24.dp)) {
+                // A dropdown, not a chip row: nothing is pre-picked, so the
+                // company a rider is signed to is always somebody's decision.
                 Kicker("Company")
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) { Chips(companies, vm.company, onSelect = { vm.company = it }) }
+                Dropdown(
+                    options = companies,
+                    selected = vm.company,
+                    onSelect = { vm.company = it },
+                    placeholder = if (companies.isEmpty()) "Loading companies…" else "Pick a company",
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = companies.isNotEmpty(),
+                )
                 ErrorLine(err["company"])
                 Spacer(Modifier.height(14.dp))
 

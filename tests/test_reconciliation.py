@@ -14,7 +14,7 @@ def _seed(conn):
     tid = conn.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after) VALUES (?,?,?,?,?,'RENT',?,0)",
-        (pid, "J1", "Jiffy", "2026-03-02", "2026-03-08", -540),
+        (pid, "J1", "Curato", "2026-03-02", "2026-03-08", -540),
     ).lastrowid
     daily = 1260 / 7.0
     # 3 days billed (collected via Jiffy), 2 days missed
@@ -44,7 +44,7 @@ def test_reconciliation_basic(db):
     assert row["expected"] == round(5 * daily, 2)
     assert row["collected"] == round(3 * daily, 2)
     assert row["missed"] == round(2 * daily, 2)
-    assert row["settled_via"] == "Jiffy"  # collected elsewhere, surfaced
+    assert row["settled_via"] == "Curato"  # collected elsewhere, surfaced
     assert row["collection_pct"] == round(100 * 3 / 5, 1)
 
 

@@ -46,14 +46,19 @@ import com.qwikserve.recruiter.ui.common.VDivider
 import com.qwikserve.recruiter.ui.common.rememberLayout
 import com.qwikserve.recruiter.ui.evs.EvsScreen
 import com.qwikserve.recruiter.ui.person.PersonScreen
+import com.qwikserve.recruiter.ui.profile.ProfileScreen
 import com.qwikserve.recruiter.ui.requests.RequestsScreen
 import com.qwikserve.recruiter.ui.riders.RidersScreen
 import com.qwikserve.recruiter.ui.stats.StatsScreen
 import com.qwikserve.recruiter.ui.theme.Qwik
 import com.qwikserve.recruiter.ui.today.TodayScreen
 
-/** The five tabs. Order is the order of a recruiter's day. */
-enum class Tab(val label: String) { TODAY("Today"), RIDERS("Riders"), EVS("EVs"), REQUESTS("Requests"), STATS("My numbers") }
+/** The six tabs. Order is the order of a recruiter's day, with their own
+ *  record — photo, details, password, odometer history — at the end. */
+enum class Tab(val label: String) {
+    TODAY("Today"), RIDERS("Riders"), EVS("EVs"), REQUESTS("Requests"),
+    STATS("My numbers"), PROFILE("Profile"),
+}
 
 /**
  * The signed-in shell. On a phone: a slim brand line with Sign out, the tab
@@ -95,8 +100,13 @@ fun HomeScreen(
             Tab.EVS -> EvsScreen(onOpenPerson = open)
             Tab.REQUESTS -> RequestsScreen(onOpenPerson = open)
             Tab.STATS -> StatsScreen(onOpenPerson = open)
+            Tab.PROFILE -> ProfileScreen()
         }
     }
+
+    // The second pane is for tabs that are lists of riders. Profile is nobody
+    // else's page, so on a wide screen it simply takes the whole width.
+    val splitPane = layout.twoPane && Tab.entries[tab] != Tab.PROFILE
 
     Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
         if (layout.rail) {
@@ -104,10 +114,10 @@ fun HomeScreen(
                 Rail(who = who, selected = tab, onSelect = { tab = it }, onNewRider = onNewRider, onSignOut = onSignOut)
                 VDivider()
                 Box(
-                    if (layout.twoPane) Modifier.width(layout.listPane).fillMaxHeight()
+                    if (splitPane) Modifier.width(layout.listPane).fillMaxHeight()
                     else Modifier.weight(1f).fillMaxHeight(),
-                ) { body() }
-                if (layout.twoPane) {
+                ) { if (splitPane) body() else PageBox(layout.contentMax) { body() } }
+                if (splitPane) {
                     VDivider()
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         DetailPane(picked, onClose = { picked = null }, onNewRider = onNewRider)

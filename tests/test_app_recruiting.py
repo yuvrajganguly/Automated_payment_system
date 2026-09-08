@@ -222,7 +222,7 @@ def test_recruiting_numbers(db, client):
     boss = _hdr(client, "boss@t.test", "Creator-pass-1")
     a = _onboard(client, rec, "Arjun Das", rider_id="SF-1")
     # Same person given a second company id: two onboardings, one person.
-    _onboard(client, rec, "Arjun Das", company="Blitz", rider_id="31111", person_id=a["person_id"])
+    _onboard(client, rec, "Arjun Das", company="Kaptan", rider_id="31111", person_id=a["person_id"])
     _onboard(client, rec, "Bikash Roy", rider_id="SF-2")
     _onboard(client, rec2, "Chandan Sen", rider_id="SF-3")
     # One of rec's riders was onboarded long ago and has since left.
@@ -240,7 +240,7 @@ def test_recruiting_numbers(db, client):
     assert c["today"] == 2 and c["week"] == 2 and c["month"] == 2
     assert [(x["company_name"], x["riders"]) for x in s["by_company"]] == [
         ("Shadowfax", 2),
-        ("Blitz", 1),
+        ("Kaptan", 1),
     ]
     assert s["recent"][0]["rider_id"] in ("SF-1", "31111") and s["recent"][-1]["rider_id"] == "SF-2"
     assert "amount" not in str(s) and "balance" not in str(s)
@@ -265,7 +265,7 @@ def test_migration_backfills_recruited_by_from_activity(db):
 
     p = make_person(db, "Arjun Das")
     make_rider(db, p, "SF-1", "Shadowfax", "Arjun Das")
-    make_rider(db, p, "31111", "Blitz", "Arjun Das")
+    make_rider(db, p, "31111", "Kaptan", "Arjun Das")
     db.execute(
         "INSERT INTO activity_log (email, role, action, entity_type, entity_id) "
         "VALUES ('rec@t.test','recruiter','rider.create','rider','SF-1@Shadowfax')"

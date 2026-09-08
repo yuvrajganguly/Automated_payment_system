@@ -36,6 +36,24 @@ class SeedReport:
     errors: list = field(default_factory=list)
 
 
+def _rider_id_is_phone(conn, company: str) -> bool:
+    """True when this company's rider id IS the rider's phone number.
+
+    Read off the companies row (``rider_id_column`` naming a phone field)
+    rather than a hard-coded company name, so the fact survives a rename.
+    Cached per import run — the roster loop asks once per row.
+    """
+    cache = _rider_id_is_phone.__dict__.setdefault("_cache", {})
+    key = (id(conn), company)
+    if key not in cache:
+        row = conn.execute(
+            "SELECT rider_id_column FROM companies WHERE company_name=?", (company,)
+        ).fetchone()
+        col = (row[0] if row else "") or ""
+        cache[key] = "phone" in col.lower() or "mobile" in col.lower()
+    return cache[key]
+
+
 def _cell(row, col):
     if not col:
         return None
@@ -169,10 +187,12 @@ def _import_roster(conn, xl, report):
         # Default any blank vehicle to BIKE so the inactive sheet and any
         # downstream raw exports have a consistent fallback.
         veh = (_cell(row, c["veh"]) or "BIKE").upper()
-        # Phone: from the file if present; for Spencer's the rider_id IS the
-        # phone number, so fall back to that.
+        # Phone: from the file if present. At a company whose rider id IS the
+        # phone number, fall back to the id. That fact lives on the companies
+        # row (``rider_id_column`` naming a phone field), not in a hard-coded
+        # company name — a rename used to silently stop the backfill.
         mob = _cell(row, c["mob"]) if c["mob"] else None
-        if not mob and co and co.strip().lower().startswith("spencer"):
+        if not mob and co and _rider_id_is_phone(conn, co):
             mob = rid
         conn.execute(
             "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no) VALUES (?,?,?,?,?,?,?,?,?)",  # noqa: E501

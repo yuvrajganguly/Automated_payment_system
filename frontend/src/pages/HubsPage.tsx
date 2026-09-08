@@ -7,7 +7,7 @@
  * shows up here as soon as a rider has it; an admin can also add one ahead
  * of its first rider. A store with no zone is "unassigned" — its riders take
  * the zone of the recruiter who onboarded them until it is classified, and
- * hub-less riders (Blitz and co.) sit under "Misc" in the recruiter app.
+ * hub-less riders (Kaptan and co.) sit under "Misc" in the recruiter app.
  */
 import { useLiveReload } from '../hooks/useLive'
 import { FormEvent, useEffect, useMemo, useState } from 'react'

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -35,7 +36,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.api.PersonOut
+import com.qwikserve.recruiter.data.api.TimelineEvent
 import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
@@ -50,6 +53,7 @@ import com.qwikserve.recruiter.ui.common.Skeleton
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
+import com.qwikserve.recruiter.ui.common.shortStamp
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -67,6 +71,7 @@ class PersonViewModel @Inject constructor(
     saved: SavedStateHandle,
     private val repo: RiderRepository,
     private val photos: PhotoRepository,
+    private val api: PayoutApi,
 ) : ViewModel() {
     /** Which rider this screen is showing. It arrives as a navigation argument
      *  on a phone, and as a selection in the second pane on a tablet — where
@@ -82,6 +87,16 @@ class PersonViewModel @Inject constructor(
     var person by mutableStateOf<PersonOut?>(null)
         private set
     var error by mutableStateOf<String?>(null)
+        private set
+
+    /** What has happened to this rider, newest first — added, EV handed over,
+     *  returned, sent for repair, closed out. Every hand that touched them,
+     *  not only this recruiter's own rows. */
+    var timeline by mutableStateOf<List<TimelineEvent>>(emptyList())
+        private set
+    var timelineError by mutableStateOf<String?>(null)
+        private set
+    var loadingTimeline by mutableStateOf(false)
         private set
 
     /** Bumped after a new photo lands, so the cached thumbnail is re-fetched. */
@@ -111,6 +126,8 @@ class PersonViewModel @Inject constructor(
         _personId.value = id
         person = null
         error = null
+        timeline = emptyList()
+        timelineError = null
         load()
     }
 
@@ -124,6 +141,29 @@ class PersonViewModel @Inject constructor(
                 if (_personId.value == id) error = "Offline — showing what was last synced."
             } catch (e: Exception) {
                 if (_personId.value == id) error = e.message ?: "Could not load this rider"
+            }
+        }
+        loadTimeline()
+    }
+
+    /** The timeline is a separate call and a separate failure: a rider's page
+     *  still works when the history does not come back. */
+    fun loadTimeline() {
+        val id = _personId.value
+        if (id == 0L || loadingTimeline) return
+        loadingTimeline = true
+        viewModelScope.launch {
+            try {
+                val rows = api.personTimeline(id, limit = 100)
+                if (_personId.value == id) { timeline = rows; timelineError = null }
+            } catch (e: IOException) {
+                if (_personId.value == id && timeline.isEmpty()) {
+                    timelineError = "Offline — the history needs the server."
+                }
+            } catch (e: Exception) {
+                if (_personId.value == id) timelineError = e.message ?: "Could not load the history"
+            } finally {
+                loadingTimeline = false
             }
         }
     }
@@ -277,6 +317,13 @@ fun PersonScreen(
                         })
                     }
                 }
+
+                Timeline(
+                    events = vm.timeline,
+                    loading = vm.loadingTimeline,
+                    error = vm.timelineError,
+                    onRetry = vm::loadTimeline,
+                )
                 Spacer(Modifier.height(32.dp))
             }
         }
@@ -290,6 +337,79 @@ fun PersonScreen(
             onDismiss = { giving = false },
             vm = evActions,
         )
+    }
+}
+
+/**
+ * What has happened to this rider, newest first. One row per event: when, what
+ * (the server's own phrase), who did it, and the thing it was done to when
+ * that adds anything. The 2 px ink rail down the left is the design's;
+ * the square dot is where an event sits on it.
+ */
+@Composable
+private fun Timeline(
+    events: List<TimelineEvent>,
+    loading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
+) {
+    Kicker("Timeline", Modifier.padding(start = 20.dp, top = 24.dp, bottom = 8.dp))
+    when {
+        error != null -> Column(Modifier.padding(horizontal = 20.dp)) {
+            Text(error, style = MaterialTheme.typography.bodyMedium, color = Qwik.Accent700)
+            Spacer(Modifier.height(4.dp))
+            GhostAction("Try again", onClick = onRetry)
+        }
+        events.isEmpty() && loading -> Column(Modifier.padding(horizontal = 20.dp)) {
+            repeat(3) {
+                Skeleton(220.dp)
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+        events.isEmpty() -> Text(
+            "Nothing logged for this rider yet. Everything done from the app — EVs, documents, edits — lands here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Qwik.N700,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        else -> Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp)) {
+            events.forEachIndexed { i, e ->
+                Row(Modifier.fillMaxWidth()) {
+                    // The rail: a dot on a hairline that runs on to the next
+                    // event, and stops at the last one.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(14.dp)) {
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.size(8.dp).background(if (i == 0) Qwik.Accent else Qwik.N500))
+                        if (i < events.lastIndex) {
+                            Box(Modifier.width(2.dp).height(36.dp).background(Qwik.N300))
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f).padding(bottom = 14.dp)) {
+                        Text(
+                            shortStamp(e.at).ifBlank { "—" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Qwik.N600,
+                        )
+                        Text(
+                            e.actionLabel ?: e.action,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Qwik.Ink,
+                        )
+                        val who = e.email?.substringBefore('@')
+                        // The entity only earns a mention when it names
+                        // something — an EV id, a document — rather than
+                        // repeating the person this page is already about.
+                        val what = (e.entityLabel ?: e.entityId)
+                            ?.takeIf { it.isNotBlank() && e.entityType != "person" }
+                        val line = listOfNotNull(what, who?.let { "by $it" }).joinToString(" · ")
+                        if (line.isNotBlank()) {
+                            Text(line, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

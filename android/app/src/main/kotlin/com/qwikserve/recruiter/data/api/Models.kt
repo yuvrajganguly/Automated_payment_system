@@ -2,6 +2,7 @@ package com.qwikserve.recruiter.data.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /* Wire models — the shapes in docs/RECRUITER_API.md. Money is rupees. */
 
@@ -76,6 +77,10 @@ data class RiderOut(
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("recruited_by") val recruitedBy: String? = null,
     val zone: String? = null,
+    /** A paysheet company paid them for a cycle ending in the last 12 days. */
+    val working: Boolean? = null,
+    /** End date of the last cycle a company paid them for; null if never. */
+    @SerialName("last_worked_on") val lastWorkedOn: String? = null,
     @SerialName("referred_by") val referredBy: String? = null, // only on the create response
     @SerialName("copied_from") val copiedFrom: CopiedFrom? = null,
 )
@@ -384,3 +389,169 @@ data class LocationAck(
 
 @Serializable
 data class ApiError(val detail: String? = null)
+
+/* ── One rider's timeline (GET /app/person/{id}/timeline) ──
+ * The same activity log the console reads, scoped to a person rather than to
+ * an operator, so it shows every hand that touched them — not only this
+ * recruiter's own rows. [actionLabel] arrives as a finished English phrase
+ * ("Assigned EV"); [details] is free-form JSON the app only ever displays. */
+
+@Serializable
+data class TimelineEvent(
+    val id: Long,
+    val at: String? = null,
+    val email: String? = null,
+    val role: String? = null,
+    val action: String,
+    @SerialName("entity_type") val entityType: String? = null,
+    @SerialName("entity_id") val entityId: String? = null,
+    @SerialName("entity_label") val entityLabel: String? = null,
+    val details: JsonElement? = null,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @SerialName("action_label") val actionLabel: String? = null,
+)
+
+/* ── Week-by-week and month-by-month (GET /recruiters/me/series) ──
+ * [stillWorking] is a cohort figure: of the riders signed up in that bucket,
+ * how many are working now — not how many were working then. */
+
+@Serializable
+data class SeriesBucket(
+    val bucket: String,
+    val onboarded: Int = 0,
+    @SerialName("still_working") val stillWorking: Int = 0,
+    @SerialName("evs_deployed") val evsDeployed: Int = 0,
+    val km: Int = 0,
+)
+
+@Serializable
+data class SeriesTotals(
+    val onboarded: Int = 0,
+    @SerialName("still_working") val stillWorking: Int = 0,
+    @SerialName("evs_deployed") val evsDeployed: Int = 0,
+    val km: Int = 0,
+)
+
+@Serializable
+data class RecruiterSeries(
+    val email: String = "",
+    val grain: String = "week",
+    @SerialName("active_within_days") val activeWithinDays: Int = 12,
+    val series: List<SeriesBucket> = emptyList(),
+    val totals: SeriesTotals = SeriesTotals(),
+)
+
+/** A row of GET /recruiters/me/riders — the drilldown behind a count tile. */
+@Serializable
+data class RecruiterRider(
+    @SerialName("rider_id") val riderId: String,
+    @SerialName("company_name") val companyName: String,
+    val name: String? = null,
+    @SerialName("person_id") val personId: Long,
+    val hub: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("on_roster") val onRoster: Boolean = true,
+    val working: Boolean = false,
+    @SerialName("last_worked_on") val lastWorkedOn: String? = null,
+)
+
+/* ── The odometer at the start and end of a shift ──
+ * The number is the claim and the photo is the evidence, so the reading is
+ * saved first and the picture hangs off it. Whole kilometres throughout. */
+
+@Serializable
+data class ShiftOut(
+    val id: Long? = null,
+    val email: String = "",
+    val day: String = "",
+    @SerialName("start_km") val startKm: Int? = null,
+    @SerialName("end_km") val endKm: Int? = null,
+    @SerialName("distance_km") val distanceKm: Int? = null,
+    @SerialName("start_at") val startAt: String? = null,
+    @SerialName("end_at") val endAt: String? = null,
+    @SerialName("has_start_photo") val hasStartPhoto: Boolean = false,
+    @SerialName("has_end_photo") val hasEndPhoto: Boolean = false,
+    val note: String? = null,
+    val complete: Boolean = false,
+    /** Only on the save response — the server's soft doubts, never blocking. */
+    val warnings: List<String> = emptyList(),
+)
+
+@Serializable
+data class ShiftIn(
+    val kind: String, // start | end
+    val km: Int,
+    val day: String? = null, // null = today
+    val note: String? = null,
+)
+
+@Serializable
+data class ShiftDays(
+    val email: String = "",
+    val since: String? = null,
+    val days: List<ShiftOut> = emptyList(),
+    @SerialName("total_km") val totalKm: Int = 0,
+    @SerialName("days_recorded") val daysRecorded: Int = 0,
+    @SerialName("average_km") val averageKm: Double? = null,
+    val incomplete: List<String> = emptyList(),
+)
+
+/** A month of the fuel claim. [daysOpen] is days somebody never closed — they
+ *  contribute nothing to [km], so the total is never quietly short. */
+@Serializable
+data class ShiftMonth(
+    val month: String,
+    val km: Int = 0,
+    @SerialName("days_recorded") val daysRecorded: Int = 0,
+    @SerialName("days_open") val daysOpen: Int = 0,
+)
+
+@Serializable
+data class ShiftMonths(val email: String = "", val months: List<ShiftMonth> = emptyList())
+
+/* ── The recruiter's own record (GET/PATCH /recruiters/me/profile) ── */
+
+@Serializable
+data class RecruiterProfile(
+    val email: String = "",
+    @SerialName("full_name") val fullName: String? = null,
+    @SerialName("display_name") val displayName: String? = null,
+    val phone: String? = null,
+    val address: String? = null,
+    @SerialName("account_name") val accountName: String? = null,
+    @SerialName("account_no") val accountNo: String? = null,
+    val ifsc: String? = null,
+    @SerialName("bank_name") val bankName: String? = null,
+    @SerialName("aadhaar_no") val aadhaarNo: String? = null,
+    @SerialName("pan_no") val panNo: String? = null,
+    val role: String? = null,
+    val zone: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("has_photo") val hasPhoto: Boolean = false,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    /** True when the numbers came back masked — never on one's own profile. */
+    val masked: Boolean = false,
+)
+
+/** Only the fields sent are written, so the app saves one section at a time:
+ *  a weak signal costs a recruiter one section, not the whole form. Nulls are
+ *  dropped by the Json config; an empty string clears the field server-side. */
+@Serializable
+data class ProfilePatch(
+    @SerialName("full_name") val fullName: String? = null,
+    val phone: String? = null,
+    val address: String? = null,
+    @SerialName("account_name") val accountName: String? = null,
+    @SerialName("account_no") val accountNo: String? = null,
+    val ifsc: String? = null,
+    @SerialName("bank_name") val bankName: String? = null,
+    @SerialName("aadhaar_no") val aadhaarNo: String? = null,
+    @SerialName("pan_no") val panNo: String? = null,
+)
+
+@Serializable
+data class ChangePasswordIn(
+    @SerialName("current_password") val currentPassword: String,
+    @SerialName("new_password") val newPassword: String,
+)

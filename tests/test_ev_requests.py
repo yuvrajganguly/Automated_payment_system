@@ -32,11 +32,11 @@ def client(db):
         )
     db.execute(
         "INSERT OR IGNORE INTO companies (company_name, parser_type, rider_id_column, "
-        "payout_column) VALUES ('Blitz', 'generic', 'rider_id', 'net_pay')"
+        "payout_column) VALUES ('Kaptan', 'generic', 'rider_id', 'net_pay')"
     )
     db.execute(
         "INSERT INTO company_hubs (company, hub, zone, updated_by) VALUES (?,?,?,?)",
-        ("Blitz", "Belur", "North", "test"),
+        ("Kaptan", "Belur", "North", "test"),
     )
     db.commit()
     ratelimit.reset()
@@ -56,7 +56,7 @@ def test_recruiter_asks_admin_fulfils(db, client):
     adm = _login(client, _ADMIN)
     r = client.post(
         "/api/ev-requests",
-        json={"quantity": 3, "hub": "Belur", "company": "Blitz", "note": "two joiners waiting"},
+        json={"quantity": 3, "hub": "Belur", "company": "Kaptan", "note": "two joiners waiting"},
         headers=rec,
     )
     assert r.status_code == 201, r.text

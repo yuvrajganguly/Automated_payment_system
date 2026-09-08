@@ -303,8 +303,116 @@ Actions: `rider.create rider.update rider.rename rider.link rider.delete
 person.merge ev.create ev.assign ev.return ev.spare ev.maintenance_open
 ev.maintenance_close document.upload document.delete request.create
 request.approve request.reject ev_request.create ev_request.fulfil
-ev_request.reject ev_request.cancel`. `details` is a small JSON object — for
-`rider.update` it is `{"changed": {"hub": ["old", "new"], …}}`.
+ev_request.reject ev_request.cancel ev.amend_return ev.closeout
+ev.suspected_return.dismiss ev.suspected_return.undismiss person.identity
+company.create company.update profile.update shift.start shift.end`.
+`details` is a small JSON object — for `rider.update` it is
+`{"changed": {"hub": ["old", "new"], …}}`. Bank and identity fields appear
+there as the fact that they changed, never as values.
+
+## The recruiter as a subject
+
+Profile, odometer and per-recruiter numbers, all under `/recruiters`. `me` is
+an alias for the signed-in caller everywhere an `{email}` appears, so the app
+uses one URL shape and an admin uses the same one with a name in it.
+
+```
+GET   /recruiters/me/profile
+        → {email, full_name, display_name, phone, address, account_name,
+           account_no, ifsc, bank_name, aadhaar_no, pan_no, role, zone,
+           is_active, has_photo, updated_at, masked}
+PATCH /recruiters/me/profile      {full_name?, phone?, address?, account_name?,
+                                   account_no?, ifsc?, bank_name?, aadhaar_no?, pan_no?}
+GET   /recruiters/{email}/profile  full for the recruiter and for an admin;
+                                   masked (••••1234) for anyone else
+POST  /recruiters/me/photo         multipart `file` (jpeg/png/webp, ≤8 MB)
+GET   /recruiters/{email}/photo    the picture; any signed-in member of staff
+```
+
+Only the fields you send are written, so the app saves one section at a time
+and a failed save on a weak signal costs one section rather than the form.
+Aadhaar, PAN, IFSC and account number are normalised and validated server-side;
+a bad one comes back as `400` with a sentence to put against the field. The
+values never appear in the activity feed or the audit log — the feed records
+*which* fields changed, and the audit middleware scrubs the request body.
+
+### Odometer
+
+```
+GET  /recruiters/me/shift/today
+       → {id, email, day, start_km, end_km, distance_km, start_at, end_at,
+          has_start_photo, has_end_photo, note, complete}
+POST /recruiters/me/shift          {kind: "start"|"end", km, day?, note?}
+       → the same shape, plus {warnings: [str]}
+POST /recruiters/me/shift/photo?kind=start|end&day=YYYY-MM-DD   multipart `file`
+GET  /recruiters/{email}/shift/photo?kind=&day=
+GET  /recruiters/{email}/shifts?days=30
+       → {email, since, days: [...], total_km, days_recorded, average_km, incomplete: [day]}
+GET  /recruiters/{email}/shifts/monthly?months=12
+       → {email, months: [{month, km, days_recorded, days_open}]}
+```
+
+Whole kilometres — that is what a dash reads. One row per (email, day):
+re-sending a reading corrects it rather than adding a second. Save the reading
+first and upload the photo after; the number is the claim and the photo is the
+evidence, and a failed upload on a hub's signal must not lose the number.
+
+A closing reading below the opening one is refused, and the comparison is
+repeated inside the UPDATE so two saves racing cannot leave a negative
+distance behind. A *opening* reading below yesterday's close only warns —
+vehicles get swapped and serviced, and blocking the shift would leave a
+recruiter unable to record their day. A day with only one reading counts as
+zero and is reported in `days_open`, so a month's total is never quietly short
+by a day somebody forgot to close.
+
+### Numbers
+
+```
+GET /recruiters?days=30                    admin only — every recruiter, best first
+      → {since, window_days, active_within_days,
+         recruiters: [{email, name, zone, is_active, has_photo,
+                       onboarded_all_time, onboarded_recent, onboarded_month,
+                       still_working, retention_pct, evs_deployed,
+                       evs_deployed_recent, km_this_month}]}
+GET /recruiters/{email}/series?grain=day|week|month&buckets=12
+      → {email, grain, active_within_days,
+         series: [{bucket, onboarded, still_working, evs_deployed, km}], totals}
+GET /recruiters/{email}/riders?status=all|working|idle
+GET /recruiters/{email}/evs                every EV they handed over
+```
+
+`still_working` is a **cohort** number: of the riders signed up in that bucket,
+how many are working now. It is not "how many were working then" — the ledger
+cannot answer that retrospectively without replaying every cycle.
+
+## Working and idle riders
+
+A rider is **working** when a company that sends us a paysheet
+(`payment_model='payout_file'`) paid them for a cycle that ended within the
+last 12 days (`payout/domain/worked.py`). `GET /riders` takes
+`activity=all|working|idle` and every rider row carries `working` and
+`last_worked_on`.
+
+Two things worth knowing before quoting the number. It measures the end of the
+last paid cycle, not a payment date, so a company whose cycle has not been run
+for a fortnight makes all of its riders read idle — we know when we last paid
+someone, not when they last rode. And riders at `direct` or `per_order`
+companies (Elastic, Zomato, Shadowfax, Pidge, Delhivery) are structurally never
+"working", because we never see whether they worked.
+
+## A rider's timeline
+
+```
+GET /app/person/{person_id}/timeline?limit=100
+      → [{id, at, email, role, action, action_label, entity_type, entity_id,
+          entity_label, details, lat, lng}]
+```
+
+Everything that has happened to one rider, newest first: added, edited, EV
+handed over, returned, sent for repair, brought back, closed out, documents,
+referrals. Unlike `/activity`, which confines a recruiter to rows they wrote
+themselves, this shows every hand that touched the rider — a timeline that hid
+a colleague's handover would lie by omission.
 
 ## Errors
 

@@ -33,49 +33,69 @@ interface AuditRow {
 
 type Tab = 'stats' | 'audit' | 'evmodels' | 'merge' | 'delete'
 
+/** The two halves of this page, and who may see each.
+ *
+ * An admin who cannot see what happened cannot do their job, so the read-only
+ * half — stats, the audit log, the EV model catalogue — now opens to admins,
+ * matching `require_admin` on those routes. The half that rewrites or erases
+ * history stays with the creator: force merge, hard delete, and the raw
+ * database download, all of which the server still guards with
+ * `require_creator`. The gate here only spares an admin a 403 they can do
+ * nothing about; it is not the security boundary.
+ */
+const CREATOR_TABS = new Set<Tab>(['merge', 'delete'])
+
 export function SystemPage() {
   const { user } = useAuth()
   const [tab, setTab] = useUrlString('tab', 'stats') as [Tab, (v: Tab) => void]
+  const isCreator = user?.role === 'creator'
+  const isAdmin = isCreator || user?.role === 'admin'
 
-  if (user?.role !== 'creator') {
-    // Nobody below creator is told this page (or the role) exists.
+  if (!isAdmin) {
+    // Nobody below admin is told this page (or the creator role) exists.
     return <Navigate to="/" replace />
   }
+
+  const tabs = ([
+    ['stats',    'Stats & Backup'],
+    ['audit',    'Audit Log'],
+    ['evmodels', 'EV Models'],
+    ['merge',    'Force Merge'],
+    ['delete',   'Hard Delete'],
+  ] as [Tab, string][]).filter(([k]) => isCreator || !CREATOR_TABS.has(k))
+
+  // A bookmarked ?tab=delete must not leave an admin on a blank page.
+  const active: Tab = tabs.some(([k]) => k === tab) ? tab : 'stats'
 
   return (
     <div className="max-w-7xl mx-auto">
       <h1 className="text-2xl font-bold mb-1">System Control</h1>
       <p className="text-slate-500 text-sm mb-6">
-        Creator-only super-powers — every action you take here is recorded in
-        the audit log automatically.
+        {isCreator
+          ? 'Creator-only super-powers — every action you take here is recorded in the audit log automatically.'
+          : 'The system’s own numbers, and a record of every write anyone has made. Everything you do here is itself recorded.'}
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        {([
-          ['stats',    'Stats & Backup'],
-          ['audit',    'Audit Log'],
-          ['evmodels', 'EV Models'],
-          ['merge',    'Force Merge'],
-          ['delete',   'Hard Delete'],
-        ] as [Tab, string][]).map(([k, label]) => (
+        {tabs.map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
                   className={'text-sm px-3 py-1.5 rounded ' +
-                    (tab === k ? 'bg-purple-600 text-white' : 'bg-slate-200 hover:bg-slate-300')}>
+                    (active === k ? 'bg-purple-600 text-white' : 'bg-slate-200 hover:bg-slate-300')}>
             {label}
           </button>
         ))}
       </div>
 
-      {tab === 'stats'    && <StatsTab />}
-      {tab === 'audit'    && <AuditTab />}
-      {tab === 'evmodels' && <EvModelsTab />}
-      {tab === 'merge'    && <ForceMergeTab />}
-      {tab === 'delete'   && <HardDeleteTab />}
+      {active === 'stats'    && <StatsTab canDownloadBackup={isCreator} />}
+      {active === 'audit'    && <AuditTab />}
+      {active === 'evmodels' && <EvModelsTab />}
+      {active === 'merge'    && <ForceMergeTab />}
+      {active === 'delete'   && <HardDeleteTab />}
     </div>
   )
 }
 
-function StatsTab() {
+function StatsTab({ canDownloadBackup }: { canDownloadBackup: boolean }) {
   const { data: stats, loading: busy, error } = useApi<Stats>('/creator/system/stats')
   if (busy && !stats) return <Spinner />
   if (!stats) return <p className="text-red-400">Couldn't load stats{error ? `: ${error}` : '.'}</p>
@@ -90,10 +110,15 @@ function StatsTab() {
           <dt className="text-slate-500">Last cycle</dt><dd>{stats.last_cycle_end ?? '-'}</dd>
           <dt className="text-slate-500">Last audit</dt><dd>{stats.last_audit_at ?? '-'}</dd>
         </dl>
-        <a href="/api/creator/system/backup" download
-           className="mt-4 inline-block bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-sm">
-          ⬇ Download backup
-        </a>
+        {/* The raw database is every rider's identity and bank details in one
+            file — the download stays with the creator even though the stats
+            beside it do not. */}
+        {canDownloadBackup && (
+          <a href="/api/creator/system/backup" download
+             className="mt-4 inline-block bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-sm">
+            ⬇ Download backup
+          </a>
+        )}
       </div>
       <div className="panel p-4 overflow-x-auto">
         <h2 className="font-semibold mb-3">Table sizes</h2>

@@ -28,11 +28,13 @@ app/src/main/kotlin/com/qwikserve/recruiter/
   di/AppModule.kt       Json, OkHttp (auth interceptor + refresh authenticator), Retrofit, Room
   data/api/             wire models (kotlinx.serialization) + Retrofit interface
   data/auth/            TokenStore (EncryptedSharedPreferences), AuthInterceptor, TokenAuthenticator
-  data/db/              Room: riders cache (with recruited_by and zone for the filters)
+  data/db/              Room: riders cache (recruited_by, zone, working and last_worked_on —
+                        every Riders-tab filter reads the cache, so all of them work offline)
   data/location/        AppOpenLocation (one fix per foreground, ≥30 min apart), header interceptor
-  data/repo/            RiderRepository — read cached, write online; AppRepository — bootstrap
+  data/repo/            RiderRepository — read cached, write online; AppRepository — bootstrap;
+                        PhotoRepository — shrink once, upload anywhere (rider, recruiter, dash)
   ui/                   AppRoot (nav), SessionViewModel, home/ (tab shell), today/, riders/, evs/,
-                        requests/, stats/, person/, login/, common/ (the kit), theme/
+                        requests/, stats/, person/, profile/, login/, common/ (the kit), theme/
 ```
 
 Look: "Modernist" from the saved Claude Design canvas (`Qwikserve Recruiter.html`
@@ -40,13 +42,38 @@ in this folder) — off-white ground, ink, one red accent, square corners, 2 px
 rules, Archivo (bundled as static 400/600/800 TTFs in `res/font`). One theme,
 no dark mode, by design.
 
-Navigation: no drawer. Five tabs across the top — **Today** (things that need a
-visit, grouped by store, for the recruiter's zone: COD to collect, EV holders
-with dues, EVs to pick up from inactive riders), **Riders** (All riders with a
-North/South zone filter, or My riders), **EVs** (All fleet by zone and state,
+Navigation: no drawer. Six tabs across the top — **Today** (today's odometer,
+then the things that need a visit, grouped by store, for the recruiter's zone:
+COD to collect, EV holders with dues, EVs to pick up from inactive riders),
+**Riders** (All riders with a North/South zone filter, or My riders, and an
+All / Working / Idle filter over both), **EVs** (All fleet by zone and state,
 or My fleet with In use / Maintenance / Dues / Inactive), **Requests** (mine —
 Money, and EVs asked for from the fleet desk), **My numbers** (today / week /
-month / all-time onboardings, by company).
+month / all-time onboardings, by company, week by week and month by month),
+**Profile** (the recruiter's own record).
+
+Working or idle: the server calls a rider **working** when a paysheet company
+has paid them for a cycle that ended within the last twelve days, and sends
+`working` and `last_worked_on` on every rider row. Both are cached with the
+rest of the roster, so the filter and the "last worked 4 Sep" line on each row
+work with no signal, exactly like the zone and Mine/All ones. A rider nobody
+has ever paid reads "never worked" rather than showing an empty space.
+
+A rider's page ends with their **timeline** — `GET /app/person/{id}/timeline`,
+newest first: added, EV handed over, taken back, sent for repair, brought back,
+deposit closed out, return date amended, document uploaded. It is the console's
+activity log scoped to one person rather than to one operator, so it shows
+every hand that touched them and not only this recruiter's own rows. It loads
+and fails separately from the rest of the page: no history is a missing
+section, not a missing rider.
+
+My numbers: the count tiles are doors. Tapping one lists the riders behind it,
+each flagged working or idle with the date a company last paid them, filtered
+All / Working / Idle from `GET /recruiters/me/riders`. Under them,
+`GET /recruiters/me/series` draws twelve weeks or twelve months with
+`still_working` alongside `onboarded` on every bar — retention is the point of
+the screen, and a cohort figure ("of the riders you signed up that week, how
+many are working now") is the only one the ledger can answer honestly.
 
 Start-up and diagnostics: the app reports its own start-up failures to
 `POST /app/crash` — from the uncaught-exception handler, and at the next start
@@ -68,15 +95,50 @@ centred in a 720 dp column so lines stay readable, forms in 520 dp. From
 with New rider and Sign out at its foot, the list keeps a phone-ish 400–440 dp,
 and tapping a rider opens their profile in a **second pane** beside it instead
 of covering the list — `PersonScreen(embedded = true)`, the same screen the
-phone pushes as a route.
+phone pushes as a route. Profile is the exception: it is nobody else's page, so
+on a wide screen it takes the whole width instead of standing beside an empty
+second pane.
 
 Requests → EVs: "Ask for EVs" files `POST /ev-requests` with a count (chips,
 1–10), the store and a one-line why. The zone is filled in server-side from
 the store, else from the recruiter. An open request can be withdrawn; the
 office fulfils or rejects it from the web Requests page.
 
-Photos: the onboarding form opens with a photo tile, and a rider's page has
-the same tile — tap for Camera or Gallery. Neither needs a runtime permission
+Onboarding: the company is a **dropdown**, and it starts empty. It used to be a
+chip row that pre-selected whichever company happened to be first, which is a
+default masquerading as a decision — a rider signed to the wrong company is an
+office correction later. Nothing is picked until somebody picks it, and the
+form refuses to save without one.
+
+Odometer: the top of Today is the shift card — "Start your shift" with a number
+field and a tile for the dash photo, then the opening reading once it is saved,
+then "End your shift", then the day's distance. **The reading is saved first
+and the photo goes up after**, the same order the onboarding form uses: the
+number is the claim and the picture is only the evidence for it, and a failed
+upload on one bar of signal must never cost somebody the number. When an upload
+does fail the card says so and offers a retry — the reading is already on the
+server, so nobody types it twice. Readings are whole kilometres (number pad,
+non-digits dropped as you type). The server's soft doubts come back in
+`warnings` — an opening below yesterday's close, because vehicles get swapped —
+and they are shown as a notice beside a red rule, never as a refusal.
+
+Profile: the recruiter as a subject rather than as an operator — their photo
+(`/recruiters/me/photo`, the same shrink-then-upload path as a rider's), their
+details, their password, and their odometer history. The details save **section
+by section** (Personal / Bank / Identity), because the profile PATCH writes only
+the fields it is sent: a bad signal should cost one card, not nine
+fields. The server validates Aadhaar, PAN, IFSC and the account number
+and answers 400 with a plain sentence; the app reads which field the sentence
+is about and shows it there instead of at the top of the screen where nobody
+looks. Changing the password needs eight characters and signs out every other
+session — the screen says so before the button, not after. The history is the
+last 30 days day by day and the last 12 months in total, with the days nobody
+closed flagged: the month is what the fuel claim is paid on, and it should
+never be quietly short by a day somebody forgot to end.
+
+Photos: the onboarding form opens with a photo tile, a rider's page has the
+same tile, and so do the shift card and the Profile tab — tap for Camera or
+Gallery. Neither needs a runtime permission
 (the app never declares CAMERA, so `ACTION_IMAGE_CAPTURE` just works; the
 picture picker hands back one image). `PhotoRepository` turns the camera's
 4–6 MB into ~200 kB (1 280 px, JPEG 80, EXIF rotation applied) before

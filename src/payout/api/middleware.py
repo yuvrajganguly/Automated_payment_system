@@ -22,13 +22,35 @@ from payout.api.auth import decode_token
 from payout.api.config import AUTH_COOKIE_NAME
 from payout.db import get_connection
 
+# Two families, both redacted from the stored request body.
+#
+# Credentials, which were never meant to be here at all. And identity and bank
+# numbers, which arrive on rider onboarding and on a recruiter saving their own
+# profile: the routes that write them go to real trouble to keep the values out
+# of the activity feed, and it would be undone one layer up if the audit log
+# kept a verbatim copy of the request. That matters more since 2026-09, when
+# the audit log opened from creator-only to every admin.
+_SENSITIVE_FIELDS = (
+    "password",
+    "otp",
+    "new_password",
+    "current_password",
+    "access_token",
+    "aadhaar_no",
+    "aadhaar",
+    "pan_no",
+    "pan",
+    "account_no",
+    "bene_account_no",
+    "ifsc",
+)
 _SENSITIVE_KEYS = re.compile(
-    r'("(?:password|otp|new_password|current_password|access_token)"\s*:\s*)"[^"]*"',
+    r'("(?:' + "|".join(_SENSITIVE_FIELDS) + r')"\s*:\s*)"[^"]*"',
     re.IGNORECASE,
 )
 # Same fields when the body is application/x-www-form-urlencoded (OAuth2 login).
 _SENSITIVE_FORM = re.compile(
-    r"\b(password|otp|new_password|current_password|access_token)=[^&]*", re.IGNORECASE
+    r"\b(" + "|".join(_SENSITIVE_FIELDS) + r")=[^&]*", re.IGNORECASE
 )
 _MAX_BODY = 500
 # Bodies on these routes are credentials by definition — never store them, even

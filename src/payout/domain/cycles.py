@@ -12,18 +12,14 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
 
-# Companies with a vanilla 7-day cycle: next_start = last_end + 1 day,
-# next_end = next_start + 6 days. Membership covers what's currently active.
-WEEKLY_COMPANIES = {"Dealshare", "Myntra", "Blitz"}
-
 
 def next_weekly_cycle(last_end: date) -> tuple[date, date]:
     start = last_end + timedelta(days=1)
     return start, start + timedelta(days=6)
 
 
-def next_spencers_cycle(last_end: date) -> tuple[date, date]:
-    """Spencer's fixed slots: 1-7, 8-14, 15-21, 22-end-of-month."""
+def next_slot_cycle(last_end: date) -> tuple[date, date]:
+    """Fixed monthly slots: 1-7, 8-14, 15-21, 22-end-of-month (cadence 'slots')."""
     y, m, d = last_end.year, last_end.month, last_end.day
     last_day = monthrange(y, m)[1]
     if d == 7:
@@ -53,14 +49,17 @@ def next_cycle_for(
 ) -> tuple[date, date]:
     """Return (next_start, next_end). If no history, anchor on most recent
     Monday for weekly companies, the previous month for monthly ones, or the
-    current slot for Spencer's-style ``slots``. ``cadence`` comes from the
-    companies row; when omitted, Spencer's is the one slots company."""
+    current slot for ``slots`` companies (1-7 / 8-14 / 15-21 / 22-end).
+
+    ``cadence`` is a column on the companies row and every real caller passes
+    it. It used to fall back to a hard-coded ``company == "Spencer's"`` check,
+    which meant renaming that company silently moved it to weekly cycles; the
+    fallback is now plain ``weekly`` and cadence is data, not a name.
+    ``company`` is kept for the error message and for callers that log it."""
     if cadence is None:
-        cadence = "slots" if company == "Spencer's" else "weekly"
+        cadence = "weekly"
     if cadence == "monthly":
         if last_end is None:
-            # No history: offer the most recent *completed* month (the current
-            # one would fail the not-in-the-future guard on Process Payout).
             today = date.today()
             prev_month_end = date(today.year, today.month, 1) - timedelta(days=1)
             last_end = prev_month_end.replace(day=1) - timedelta(days=1)
@@ -79,12 +78,12 @@ def next_cycle_for(
                 anchor = date(today.year, today.month, 21)
             else:
                 anchor = date(today.year, today.month, last_day)
-            return next_spencers_cycle(anchor)
+            return next_slot_cycle(anchor)
         # Weekly: anchor on last Sunday (so next cycle is Mon-Sun)
         days_back = (today.weekday() + 1) % 7  # 0 if today is Sunday
         last_sunday = today - timedelta(days=days_back if days_back else 7)
         return next_weekly_cycle(last_sunday)
 
     if cadence == "slots":
-        return next_spencers_cycle(last_end)
+        return next_slot_cycle(last_end)
     return next_weekly_cycle(last_end)

@@ -72,7 +72,7 @@ def test_plain_user_cannot_run_a_cycle(client):
         "/api/cycles/run",
         headers={"Authorization": f"Bearer {tok}"},
         data={
-            "company": "Blitz",
+            "company": "Kaptan",
             "cycle_start": "2026-06-01",
             "cycle_end": "2026-06-07",
             "commit": "true",
@@ -96,7 +96,7 @@ def test_admin_can_preview_a_cycle(client):
         "/api/cycles/run",
         headers={"Authorization": f"Bearer {tok}"},
         data={
-            "company": "Blitz",
+            "company": "Kaptan",
             "cycle_start": "2026-06-01",
             "cycle_end": "2026-06-07",
             "commit": "false",
@@ -133,7 +133,7 @@ def test_every_mutating_route_requires_auth(client):
             if method not in methods or path in anon_ok:
                 continue
             url = path.replace("{person_id}", "1").replace("{ev_id}", "X")
-            url = url.replace("{rider_id}", "R").replace("{company_name}", "Blitz")
+            url = url.replace("{rider_id}", "R").replace("{company_name}", "Kaptan")
             url = url.replace("{provider}", "Raft").replace("{bill_id}", "1")
             url = url.replace("{upload_id}", "1").replace("{email}", "x@y.z")
             url = url.replace("{model_id}", "1").replace("{txn_id}", "1").replace("{id}", "1")

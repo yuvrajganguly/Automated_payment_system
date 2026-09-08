@@ -63,16 +63,16 @@ def seeded(db, client):
     wk = date.today() - timedelta(days=date.today().weekday(), weeks=1)  # last Monday
     for rid, ev in (("P1", "EV-P"), ("G1", "EV-G")):
         pid = make_person(db, f"N-{rid}", balance=0, arrears=0)
-        make_rider(db, pid, rid, "Blitz", f"N-{rid}")
+        make_rider(db, pid, rid, "Kaptan", f"N-{rid}")
         make_ev(db, ev, provider="Raft", model="Regular")
         assign(db, pid, ev, charged_through=(wk - timedelta(days=1)).isoformat())
         db.execute(
-            "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id=? "
+            "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id=? "
             "WHERE person_id=?",
             (rid, pid),
         )
     db.commit()
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("P1", 5000)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("P1", 5000)]), commit=True)
     r = client.post("/api/evs/return", json={"ev_id": "EV-G", "returned_date": wk.isoformat()})
     assert r.status_code == 200 and r.json()["heal"]["arrears_written_off"] == WEEK_R
     return wk
@@ -110,7 +110,7 @@ def test_story_dormant_position(db, client):
 
 def test_story_by_company(seeded, client):
     rows = client.get("/api/dashboard/story/by?dim=company").json()["rows"]
-    blitz = next(r for r in rows if r["company"] == "Blitz")
+    blitz = next(r for r in rows if r["company"] == "Kaptan")
     assert blitz["rent_charged"] == WEEK_R
     assert blitz["rent_missed"] == WEEK_R
     assert blitz["written_off"] == WEEK_R
@@ -147,16 +147,16 @@ def test_window_is_by_cycle_not_processing_date(db, client):
     """A cycle for a week in June processed today belongs to June. Any overlap
     with the window counts; a window that only covers today sees nothing."""
     pid = make_person(db, "June Rider", balance=0, arrears=0)
-    make_rider(db, pid, "J1", "Blitz", "June Rider")
+    make_rider(db, pid, "J1", "Kaptan", "June Rider")
     make_ev(db, "EV-J", provider="Raft", model="Regular")
     assign(db, pid, "EV-J", charged_through="2026-05-31")
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='J1' "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id='J1' "
         "WHERE person_id=?",
         (pid,),
     )
     db.commit()
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("J1", 4000)]), commit=True)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), _file([("J1", 4000)]), commit=True)
 
     def flow(qs):
         return client.get("/api/dashboard/story" + qs).json()["flow"]
@@ -173,7 +173,7 @@ def test_window_is_by_cycle_not_processing_date(db, client):
     rows = client.get(
         "/api/dashboard/story/by?dim=company&date_from=2026-06-01&date_to=2026-06-07"
     ).json()["rows"]
-    assert [r["company"] for r in rows] == ["Blitz"] and rows[0]["gross_payout"] == 4000.0
+    assert [r["company"] for r in rows] == ["Kaptan"] and rows[0]["gross_payout"] == 4000.0
 
 
 def test_story_weeks_tally_with_prior_dues_and_carry_forward(db, client):
@@ -181,25 +181,25 @@ def test_story_weeks_tally_with_prior_dues_and_carry_forward(db, client):
     carried forward; the debt recovered from week 2's payout shows as prior
     dues collected in week 2's row."""
     pid = make_person(db, "Carry Rider", balance=0, arrears=0)
-    make_rider(db, pid, "C1", "Blitz", "Carry Rider")
+    make_rider(db, pid, "C1", "Kaptan", "Carry Rider")
     make_ev(db, "EV-C", provider="Raft", model="Regular")
     assign(db, pid, "EV-C", charged_through="2026-05-31")
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='C1' "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id='C1' "
         "WHERE person_id=?",
         (pid,),
     )
     db.commit()
     # Week 1: payout smaller than the rent -> dues carried forward.
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("C1", 500)]), commit=True)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), _file([("C1", 500)]), commit=True)
     # Week 2: a normal payout clears last week's dues.
-    process_cycle("Blitz", date(2026, 6, 8), date(2026, 6, 14), _file([("C1", 5000)]), commit=True)
+    process_cycle("Kaptan", date(2026, 6, 8), date(2026, 6, 14), _file([("C1", 5000)]), commit=True)
 
     body = client.get("/api/dashboard/story/weeks?date_from=2026-06-01&date_to=2026-06-14").json()
     rows = body["rows"]
     assert [(r["company"], r["cycle_start"]) for r in rows] == [
-        ("Blitz", "2026-06-08"),
-        ("Blitz", "2026-06-01"),
+        ("Kaptan", "2026-06-08"),
+        ("Kaptan", "2026-06-01"),
     ]
     w1 = rows[1]
     w2 = rows[0]
@@ -220,28 +220,28 @@ def test_story_weeks_tally_with_prior_dues_and_carry_forward(db, client):
 def test_company_page_history_and_header(db, client):
     """The company page asks for every cycle (all_time) and a lifetime header."""
     pid = make_person(db, "Hist Rider", balance=0, arrears=0)
-    make_rider(db, pid, "H1", "Blitz", "Hist Rider")
+    make_rider(db, pid, "H1", "Kaptan", "Hist Rider")
     make_ev(db, "EV-H", provider="Raft", model="Regular")
     assign(db, pid, "EV-H", charged_through="2026-05-31")
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='H1' "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id='H1' "
         "WHERE person_id=?",
         (pid,),
     )
     db.commit()
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("H1", 5000)]), commit=True)
-    process_cycle("Blitz", date(2026, 7, 6), date(2026, 7, 12), _file([("H1", 4000)]), commit=True)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), _file([("H1", 5000)]), commit=True)
+    process_cycle("Kaptan", date(2026, 7, 6), date(2026, 7, 12), _file([("H1", 4000)]), commit=True)
 
     # A narrow window sees one cycle; all_time sees both, none marked partial.
     narrow = client.get("/api/dashboard/story/weeks?date_from=2026-07-01&date_to=2026-07-14")
     assert [r["cycle_start"] for r in narrow.json()["rows"]] == ["2026-07-06"]
-    body = client.get("/api/dashboard/story/weeks?all_time=1&companies=Blitz").json()
+    body = client.get("/api/dashboard/story/weeks?all_time=1&companies=Kaptan").json()
     assert [r["cycle_start"] for r in body["rows"]] == ["2026-07-06", "2026-06-01"]
     assert all(r["partial"] is False for r in body["rows"])
     assert body["window"]["all_time"] is True and body["window"]["from"] == "2026-06-01"
 
-    head = client.get("/api/dashboard/story/company/Blitz").json()
-    assert head["company_name"] == "Blitz"
+    head = client.get("/api/dashboard/story/company/Kaptan").json()
+    assert head["company_name"] == "Kaptan"
     assert head["cycles"] == 2 and head["riders"] == 1
     assert head["first_cycle"] == "2026-06-01" and head["last_cycle"] == "2026-07-12"
     assert head["gross_payout"] == 9000.0

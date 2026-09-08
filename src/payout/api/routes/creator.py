@@ -26,7 +26,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from payout.api.auth import require_creator
+from payout.api.auth import require_admin, require_creator
+from payout.api.routes.users import visible_role
 from payout.config import DB_PATH as _DB_PATH
 from payout.config import DB_URL
 from payout.db import get_connection
@@ -42,8 +43,16 @@ def audit_log(
     limit: int = Query(200, ge=1, le=1000),
     email: str | None = None,
     method: str | None = None,
-    _: dict = Depends(require_creator),
+    user: dict = Depends(require_admin),
 ) -> list[dict]:
+    """Who called what, when. Opened to admins in 2026-09 — an admin who
+    cannot see what happened cannot do their job.
+
+    Two consequences of that widening are handled here: the acting role is
+    rendered through ``visible_role`` so the creator tier stays invisible below
+    itself, and the stored request bodies are already scrubbed of credentials
+    and of identity and bank numbers by ``_scrub`` in the audit middleware.
+    """
     sql = (
         "SELECT id, at, email, role, method, path, status_code, "
         "       duration_ms, body_excerpt, ip "
@@ -60,12 +69,17 @@ def audit_log(
     params.append(limit)
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["role"] = visible_role(d.get("role") or "user", user)
+        out.append(d)
+    return out
 
 
 # ── 2. System stats ───────────────────────────────────────────────────────
 @router.get("/system/stats")
-def system_stats(_: dict = Depends(require_creator)) -> dict:
+def system_stats(_: dict = Depends(require_admin)) -> dict:
     """Table counts + size for whichever backend is live. (Used to query
     sqlite_master unconditionally and 500 on Postgres.)"""
     with get_connection() as conn:
@@ -367,7 +381,7 @@ class EvModelIn(BaseModel):
 
 
 @router.post("/ev-models")
-def create_ev_model(body: EvModelIn, _: dict = Depends(require_creator)) -> dict:
+def create_ev_model(body: EvModelIn, _: dict = Depends(require_admin)) -> dict:
     with get_connection() as conn:
         cur = conn.execute(
             "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES (?,?,?)",
@@ -379,7 +393,7 @@ def create_ev_model(body: EvModelIn, _: dict = Depends(require_creator)) -> dict
 
 
 @router.patch("/ev-models/{model_id}")
-def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_creator)) -> dict:
+def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_admin)) -> dict:
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_models WHERE model_id=?", (model_id,)).fetchone():
             raise HTTPException(404, "Model not found")
@@ -392,7 +406,7 @@ def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_crea
 
 
 @router.delete("/ev-models/{model_id}")
-def delete_ev_model(model_id: int, _: dict = Depends(require_creator)) -> dict:
+def delete_ev_model(model_id: int, _: dict = Depends(require_admin)) -> dict:
     with get_connection() as conn:
         ref = conn.execute(
             "SELECT COUNT(*) AS n FROM ev_units WHERE model_id=?", (model_id,)

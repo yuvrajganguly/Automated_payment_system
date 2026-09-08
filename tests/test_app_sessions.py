@@ -159,7 +159,7 @@ def test_bootstrap_riders_search_paging_and_thumb(db, client):
     )
     p2 = make_person(db, "Bikash Roy")
     make_rider(db, p2, "SF-2", "Shadowfax", "Bikash Roy")
-    make_rider(db, p2, "31111", "Blitz", "Bikash Roy")
+    make_rider(db, p2, "31111", "Kaptan", "Bikash Roy")
     db.commit()
     hdr = {"Authorization": "Bearer " + _app_login(client)["access_token"]}
 

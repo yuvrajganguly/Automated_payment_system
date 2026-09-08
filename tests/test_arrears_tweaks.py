@@ -138,7 +138,7 @@ def test_cod_clearance_credit_is_used_for_arrears(db):
 def _dormant_rider(db, rid="D1", arrears=125000):
     """Returned their EV, still owes back-rent."""
     pid = make_person(db, "Dormant", balance=0, arrears=arrears)
-    make_rider(db, pid, rid, "Blitz", "Dormant")
+    make_rider(db, pid, rid, "Kaptan", "Dormant")
     make_ev(db, "EV-D", provider="Raft", model="Regular")
     assign(db, pid, "EV-D", returned="2026-05-20", charged_through="2026-05-19")
     db.commit()
@@ -148,7 +148,7 @@ def _dormant_rider(db, rid="D1", arrears=125000):
 def test_future_payout_for_dormant_arrears_is_held_untouched(db):
     pid = _dormant_rider(db)
     r = process_cycle(
-        "Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("D1", 3000)]), commit=True
+        "Kaptan", date(2026, 6, 1), date(2026, 6, 7), _file([("D1", 3000)]), commit=True
     )
     rows = r.pay_rows + r.dues_rows
     assert len(rows) == 1
@@ -175,7 +175,7 @@ def test_force_release_overrides_the_dormant_hold(db):
     pid = _dormant_rider(db)
     ov = CycleOverrides(per_rider={"D1": RiderOverride(force_release=True)})
     r = process_cycle(
-        "Blitz",
+        "Kaptan",
         date(2026, 6, 1),
         date(2026, 6, 7),
         _file([("D1", 3000)]),
@@ -192,12 +192,12 @@ def test_force_release_overrides_the_dormant_hold(db):
 def test_active_ev_holder_is_not_dormant(db):
     """Same arrears, but the EV is still held — normal recovery, no hold."""
     pid = make_person(db, "Active", balance=0, arrears=50000)
-    make_rider(db, pid, "A1", "Blitz", "Active")
+    make_rider(db, pid, "A1", "Kaptan", "Active")
     make_ev(db, "EV-A", provider="Raft", model="Regular")
     assign(db, pid, "EV-A", charged_through="2026-05-31")
     db.commit()
     r = process_cycle(
-        "Blitz", date(2026, 6, 1), date(2026, 6, 7), _file([("A1", 5000)]), commit=True
+        "Kaptan", date(2026, 6, 1), date(2026, 6, 7), _file([("A1", 5000)]), commit=True
     )
     row = (r.pay_rows + r.dues_rows)[0]
     assert row.is_hold is False
@@ -243,7 +243,7 @@ def _dues_only_ex_ev_rider(db, rid="G1", dues=45000):
     """Returned their EV; zero EV arrears — the debt rolled into general
     carry-forward dues instead (the Dipanjan/Sayan shape)."""
     pid = make_person(db, "DuesDormant", balance=-dues)
-    make_rider(db, pid, rid, "Blitz", "DuesDormant")
+    make_rider(db, pid, rid, "Kaptan", "DuesDormant")
     make_ev(db, "EV-G", provider="Raft", model="Regular")
     assign(db, pid, "EV-G", returned="2026-07-10", charged_through="2026-07-09")
     db.commit()
@@ -280,7 +280,7 @@ def test_dues_only_ex_ev_rider_is_dormant_in_arrears_view(db):
 def test_future_payout_for_dues_only_ex_ev_rider_is_held(db):
     _dues_only_ex_ev_rider(db)
     r = process_cycle(
-        "Blitz", date(2026, 8, 1), date(2026, 8, 7), _file([("G1", 2000)]), commit=True
+        "Kaptan", date(2026, 8, 1), date(2026, 8, 7), _file([("G1", 2000)]), commit=True
     )
     row = (r.pay_rows + r.dues_rows)[0]
     assert row.is_hold is True
@@ -291,10 +291,10 @@ def test_future_payout_for_dues_only_ex_ev_rider_is_held(db):
 def test_bike_rider_with_dues_is_not_held(db):
     """Never held an EV — dues clear normally from the payout, no hold."""
     pid = make_person(db, "PureBike", balance=-20000)
-    make_rider(db, pid, "B9", "Blitz", "PureBike")
+    make_rider(db, pid, "B9", "Kaptan", "PureBike")
     db.commit()
     r = process_cycle(
-        "Blitz", date(2026, 8, 1), date(2026, 8, 7), _file([("B9", 1000)]), commit=True
+        "Kaptan", date(2026, 8, 1), date(2026, 8, 7), _file([("B9", 1000)]), commit=True
     )
     row = (r.pay_rows + r.dues_rows)[0]
     assert row.is_hold is False
@@ -340,7 +340,7 @@ def test_story_by_rider_flags_dormant_rows(db):
     dormant = _dormant_rider(db, rid="D3", arrears=125000)  # EV-arrears bucket
     dues_dormant = _dues_only_ex_ev_rider(db, rid="G3", dues=45000)  # dues bucket
     active = make_person(db, "Holder3", balance=0, arrears=30000)
-    make_rider(db, active, "A3", "Blitz", "Holder3")
+    make_rider(db, active, "A3", "Kaptan", "Holder3")
     make_ev(db, "EV-H3", provider="Raft", model="Regular")
     assign(db, active, "EV-H3", charged_through="2026-05-31")
     # put all three inside the window via a PAYOUT txn
@@ -348,7 +348,7 @@ def test_story_by_rider_flags_dormant_rows(db):
         db.execute(
             "INSERT INTO transactions (person_id, company, cycle_start, cycle_end, "
             "event_type, amount, balance_after, created_at) "
-            "VALUES (?, 'Blitz', '2026-08-01', '2026-08-07', 'PAYOUT', 100000, 0, "
+            "VALUES (?, 'Kaptan', '2026-08-01', '2026-08-07', 'PAYOUT', 100000, 0, "
             "'2026-08-03 10:00:00')",
             (pid,),
         )
@@ -385,7 +385,7 @@ def test_breakdown_drawer_excludes_silent_riders_entirely(db):
     dormant = _dormant_rider(db, rid="D4", arrears=480000)  # ₹4,800 — biggest debt
     dues_dormant = _dues_only_ex_ev_rider(db, rid="G4", dues=293300)
     active = make_person(db, "Holder4", balance=0, arrears=10000)  # ₹100 — smallest
-    make_rider(db, active, "A4", "Blitz", "Holder4")
+    make_rider(db, active, "A4", "Kaptan", "Holder4")
     make_ev(db, "EV-H4", provider="Raft", model="Regular")
     assign(db, active, "EV-H4", charged_through="2026-05-31")
     db.execute(

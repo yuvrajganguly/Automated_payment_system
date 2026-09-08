@@ -12,13 +12,16 @@ Two backends behind one tiny interface (``put`` / ``get`` / ``delete``):
   (``pip install .[docs]``). R2's free tier (10 GB) is more than this fleet
   will ever upload, so the switch costs nothing but the bucket.
 
-Keys are ``persons/<person_id>/<uuid>.<ext>`` — opaque, never the uploaded
-filename, so a name like ``../../etc/passwd`` can't do anything.
+Keys are opaque and never the uploaded filename, so a name like
+``../../etc/passwd`` can't do anything: rider documents live under
+``persons/<person_id>/<uuid>.<ext>`` and staff files (a recruiter's profile
+photo, their odometer photos) under ``staff/<hash of email>/<kind>/<uuid>.<ext>``.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
 import uuid
@@ -46,12 +49,32 @@ DOC_TYPES: tuple[str, ...] = (
     "other",
 )
 
-_SAFE_KEY = re.compile(r"^persons/\d+/[0-9a-f]{32}\.[a-z0-9]{1,5}$")
+# Two key shapes live in the store: rider documents under a person id, and
+# staff files (a recruiter's profile photo, their odometer photos) under an
+# opaque slug. The slug is a hash of the email rather than the email itself —
+# object keys end up in logs, backups and bucket listings, and a staff
+# directory should not be readable from a file path.
+_SAFE_KEY = re.compile(
+    r"^(persons/\d+|staff/[0-9a-f]{16}/[a-z_]{1,24})/[0-9a-f]{32}\.[a-z0-9]{1,5}$"
+)
 
 
 def make_key(person_id: int, content_type: str) -> str:
     ext = ALLOWED_CONTENT_TYPES[content_type]
     return f"persons/{int(person_id)}/{uuid.uuid4().hex}.{ext}"
+
+
+def staff_slug(email: str) -> str:
+    """The opaque directory a member of staff's files live under."""
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+
+
+def make_staff_key(email: str, kind: str, content_type: str) -> str:
+    """A key for a staff file. ``kind`` groups them — ``profile``,
+    ``shift_start``, ``shift_end``."""
+    ext = ALLOWED_CONTENT_TYPES[content_type]
+    safe_kind = re.sub(r"[^a-z_]", "", kind.lower())[:24] or "other"
+    return f"staff/{staff_slug(email)}/{safe_kind}/{uuid.uuid4().hex}.{ext}"
 
 
 class LocalStorage:
@@ -150,5 +173,7 @@ __all__ = [
     "S3Storage",
     "get_storage",
     "make_key",
+    "make_staff_key",
     "reset_storage",
+    "staff_slug",
 ]

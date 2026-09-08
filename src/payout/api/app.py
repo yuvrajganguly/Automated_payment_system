@@ -77,6 +77,9 @@ from payout.api.routes import (
     providers as providers_routes,
 )
 from payout.api.routes import (
+    recruiters as recruiter_routes,
+)
+from payout.api.routes import (
     referrals as referral_routes,
 )
 from payout.api.routes import (
@@ -244,6 +247,10 @@ app.include_router(
 app.include_router(requests_routes.router, prefix="/api/requests", tags=["requests"])
 app.include_router(ev_request_routes.router, prefix="/api/ev-requests", tags=["requests"])
 app.include_router(activity_routes.router, prefix="/api/activity", tags=["activity"])
+# Recruiter profiles, odometer shifts and per-recruiter analytics. Mounted
+# without the money fence: a recruiter reaches their own profile and shift
+# here, and every route guards its own scope (own record, or admin).
+app.include_router(recruiter_routes.router, prefix="/api/recruiters", tags=["recruiters"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
 

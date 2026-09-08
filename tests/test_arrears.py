@@ -65,12 +65,13 @@ def test_missed_then_recovered(db):
     )
     db.commit()
     record_missed_rent(
-        db, pid, 360, date(2026, 3, 2), date(2026, 3, 8), rider_id="J1", company="Jiffy", days=2
+        db, pid, 360, date(2026, 3, 2), date(2026, 3, 8), rider_id="J1", company="Curato", days=2
     )
     db.commit()
     assert get_arrears(db, pid) == (360.0, 0.0, 360.0)
     assert (
-        record_recovery(db, pid, 200, date(2026, 3, 9), date(2026, 3, 15), company="Jiffy") == 200.0
+        record_recovery(db, pid, 200, date(2026, 3, 9), date(2026, 3, 15), company="Curato")
+        == 200.0
     )
     db.commit()
     assert get_arrears(db, pid) == (360.0, 200.0, 160.0)

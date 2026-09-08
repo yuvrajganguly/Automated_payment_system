@@ -26,6 +26,11 @@ data class RiderEntity(
     val recruitedBy: String?,
     /** North | South from the hub's zone; null when the hub is unclassified */
     val zone: String?,
+    /** A paysheet company paid them for a cycle ending in the last 12 days.
+     *  Null only for a row cached by an older server that never sent it. */
+    val working: Boolean?,
+    /** End date of the last cycle a company paid them for; null if never. */
+    val lastWorkedOn: String?,
     /** lower-cased "name id phone hub" for local search without a FTS table */
     val haystack: String,
 )
@@ -35,15 +40,19 @@ interface RiderDao {
     /**
      * The Riders tab: local search over the cache, optionally only the rows
      * the signed-in recruiter onboarded ([mine] = their email, or null for
-     * everyone) and/or one zone ([zone] = "North" / "South", or null).
+     * everyone), one zone ([zone] = "North" / "South", or null) and one
+     * activity state ([working] = true / false, or null for both). A row that
+     * predates the server sending the flag counts as idle rather than
+     * vanishing from both halves of the filter.
      */
     @Query(
         "SELECT * FROM riders WHERE isActive = 1 AND (:q = '' OR haystack LIKE '%' || :q || '%') " +
             "AND (:mine IS NULL OR recruitedBy = :mine) " +
             "AND (:zone IS NULL OR zone = :zone) " +
+            "AND (:working IS NULL OR COALESCE(working, 0) = :working) " +
             "ORDER BY name COLLATE NOCASE, company",
     )
-    fun search(q: String, mine: String?, zone: String?): Flow<List<RiderEntity>>
+    fun search(q: String, mine: String?, zone: String?, working: Boolean?): Flow<List<RiderEntity>>
 
     @Query("SELECT * FROM riders WHERE personId = :personId ORDER BY company")
     fun forPerson(personId: Long): Flow<List<RiderEntity>>
@@ -58,7 +67,10 @@ interface RiderDao {
     suspend fun clear()
 }
 
-@Database(entities = [RiderEntity::class], version = 2, exportSchema = true)
+// v3 added working / lastWorkedOn. The database is a cache and the builder
+// uses fallbackToDestructiveMigration(), so a bump simply rebuilds it from the
+// next sync — there is nothing here the server is not the truth for.
+@Database(entities = [RiderEntity::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun riderDao(): RiderDao
 }

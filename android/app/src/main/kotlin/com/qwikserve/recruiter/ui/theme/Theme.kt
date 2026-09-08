@@ -65,6 +65,13 @@ private val Scheme = lightColorScheme(
     onSurface = Qwik.Ink,
     surfaceVariant = Qwik.Surface,
     onSurfaceVariant = Qwik.N700,
+    // Menus and sheets take their ground from these, so a dropdown stays
+    // off-white instead of falling back to Material's own neutral.
+    surfaceContainer = Qwik.Bg,
+    surfaceContainerHigh = Qwik.Bg,
+    surfaceContainerHighest = Qwik.Surface,
+    surfaceContainerLow = Qwik.Bg,
+    surfaceContainerLowest = Qwik.Bg,
     error = Qwik.Accent700,
     outline = Qwik.Divider,
     outlineVariant = Qwik.N300,

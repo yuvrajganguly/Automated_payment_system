@@ -1,13 +1,13 @@
 """Regression for the 2026-09-04 rent-gap incident (Jeet Ghosh, person 581).
 
-A rider works Spencer's 15-21, then Myntra 24-30, then Spencer's 22-31.
+A rider works Jiffy 15-21, then Myntra 24-30, then Jiffy 22-31.
 Before the fix each cycle billed only its own days: Myntra took 24-30 and
-pushed the meter to the 30th, so the later Spencer's cycle (22-31) found the
+pushed the meter to the 30th, so the later Jiffy cycle (22-31) found the
 meter past its start and billed the 31st alone.  The 22nd and 23rd were never
 charged and nothing would ever charge them.
 
 Now a cycle reaches back over unaccounted days behind the meter, so Myntra
-bills 22-30 (two catch-up days + its own seven) and Spencer's bills the 31st.
+bills 22-30 (two catch-up days + its own seven) and Jiffy bills the 31st.
 Every held day 16..31 (the handover day is free) is billed exactly once and the day-ledger says so.
 """
 
@@ -39,7 +39,7 @@ def _myntra(rows):
 
 def _setup(db):
     pid = make_person(db, "Jeet", balance=0, arrears=0)
-    make_rider(db, pid, "S1", "Blitz", "Jeet")
+    make_rider(db, pid, "S1", "Kaptan", "Jeet")
     make_rider(db, pid, "M1", "Myntra", "Jeet")
     make_ev(db, "EV1", status="in_use")
     assign(db, pid, "EV1", handover="2026-08-15")
@@ -58,24 +58,24 @@ def _rent_rows(db, pid):
 def test_days_between_two_companies_cycles_are_not_written_off(db):
     pid = _setup(db)
 
-    # Spencer's 15-21 (stand-in company: Blitz, same generic parser).
+    # Jiffy 15-21 (stand-in company: Kaptan, same generic parser).
     r1 = process_cycle(
-        "Blitz", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True
+        "Kaptan", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True
     )
     # Myntra 24-30 processed next: the meter sits at the 21st, 22-23 are owed.
     r2 = process_cycle(
         "Myntra", date(2026, 8, 24), date(2026, 8, 30), _myntra([("M1", 5000, 0)]), commit=True
     )
-    # Spencer's 22-31 arrives last; only the 31st is still unbilled.
+    # Jiffy 22-31 arrives last; only the 31st is still unbilled.
     r3 = process_cycle(
-        "Blitz", date(2026, 8, 22), date(2026, 8, 31), _file([("S1", 5000)]), commit=True
+        "Kaptan", date(2026, 8, 22), date(2026, 8, 31), _file([("S1", 5000)]), commit=True
     )
 
     rows = _rent_rows(db, pid)
     assert [(r["company"], r["days"], r["debit"]) for r in rows] == [
-        ("Blitz", 6, 6 * DAY),  # 16-21 (handover day itself is free)
+        ("Kaptan", 6, 6 * DAY),  # 16-21 (handover day itself is free)
         ("Myntra", 9, 9 * DAY),  # 22-23 caught up + 24-30
-        ("Blitz", 1, 1 * DAY),  # 31 only
+        ("Kaptan", 1, 1 * DAY),  # 31 only
     ]
     assert sum(r["days"] for r in rows) == 16  # 16..31, once each
 
@@ -106,11 +106,13 @@ def test_gap_already_missed_to_arrears_is_not_billed_twice(db):
     """Same shape, but the 22-23 gap was already put in arrears by the
     back-rent flow (RENT_MISSED window): Myntra must bill only its own week."""
     pid = _setup(db)
-    process_cycle("Blitz", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True)
+    process_cycle(
+        "Kaptan", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True
+    )
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, days) "
-        "VALUES (?, 'S1', 'Blitz', '2026-08-22', '2026-08-23', 'RENT_MISSED', ?, 0, 2)",
+        "VALUES (?, 'S1', 'Kaptan', '2026-08-22', '2026-08-23', 'RENT_MISSED', ?, 0, 2)",
         (pid, -2 * DAY),
     )
     db.commit()
@@ -118,7 +120,7 @@ def test_gap_already_missed_to_arrears_is_not_billed_twice(db):
         "Myntra", date(2026, 8, 24), date(2026, 8, 30), _myntra([("M1", 5000, 0)]), commit=True
     )
     rows = _rent_rows(db, pid)
-    assert [(r["company"], r["days"]) for r in rows] == [("Blitz", 6), ("Myntra", 7)]
+    assert [(r["company"], r["days"]) for r in rows] == [("Kaptan", 6), ("Myntra", 7)]
     assert not any("catch-up" in w.lower() for w in r2.warnings)
 
 
@@ -129,7 +131,9 @@ def test_scan_and_apply_unbilled_days_for_pre_fix_data(db):
     from payout.domain.unbilled import apply_unbilled, scan_unbilled
 
     pid = _setup(db)
-    process_cycle("Blitz", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True)
+    process_cycle(
+        "Kaptan", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True
+    )
     # Simulate the old engine: Myntra billed only its own week, meter -> 30.
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
@@ -174,7 +178,9 @@ def test_scan_and_apply_unbilled_days_for_pre_fix_data(db):
         == 0
     )
     # The next payout claws the arrears back the normal way.
-    process_cycle("Blitz", date(2026, 8, 22), date(2026, 8, 31), _file([("S1", 5000)]), commit=True)
+    process_cycle(
+        "Kaptan", date(2026, 8, 22), date(2026, 8, 31), _file([("S1", 5000)]), commit=True
+    )
     assert (
         db.execute("SELECT outstanding FROM ev_arrears WHERE person_id=?", (pid,)).fetchone()[
             "outstanding"
@@ -198,7 +204,9 @@ def test_set_last_billed_day_marks_gap_accounted_and_blocks_catchup(db):
     from tests.test_deposit import _client
 
     pid = _setup(db)
-    process_cycle("Blitz", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True)
+    process_cycle(
+        "Kaptan", date(2026, 8, 15), date(2026, 8, 21), _file([("S1", 5000)]), commit=True
+    )
     c = _client(db)
     r = c.post(
         f"/api/persons/{pid}/rent-meter",

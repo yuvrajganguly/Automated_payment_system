@@ -49,7 +49,7 @@ def _meter(db, aid):
     ).fetchone()[0]
 
 
-def _raft_rider(db, rid="P1", company="Blitz"):
+def _raft_rider(db, rid="P1", company="Kaptan"):
     pid = make_person(db, "P", balance=0, arrears=0)
     make_rider(db, pid, rid, company, "P")
     db.execute(
@@ -120,7 +120,7 @@ def test_engine_advances_only_the_legs_it_billed(db):
     assign(db, pid, "EV-A", returned="2026-06-10", charged_through="2026-06-07")
     b = assign(db, pid, "EV-B", handover="2026-06-20")
     db.commit()
-    process_cycle("Blitz", date(2026, 6, 8), date(2026, 6, 14), _file([("P1", 5000)]), commit=True)
+    process_cycle("Kaptan", date(2026, 6, 8), date(2026, 6, 14), _file([("P1", 5000)]), commit=True)
     assert _meter(db, b) is None
     rent = db.execute(
         "SELECT -SUM(amount) FROM transactions WHERE person_id=? AND event_type='RENT'", (pid,)
@@ -135,7 +135,7 @@ def test_duplicate_rider_rows_are_rejected(db):
     _raft_rider(db)
     with pytest.raises(ValueError, match="more than once"):
         process_cycle(
-            "Blitz",
+            "Kaptan",
             date(2026, 6, 1),
             date(2026, 6, 7),
             _file([("P1", 3000), ("P1", 3000)]),
@@ -151,13 +151,13 @@ def test_unreadable_payout_keeps_rider_present_and_blocks_commit(db):
     db.commit()
     f = _file([("P1", "N/A"), ("OTHER", 100)])
 
-    preview = process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=False)
+    preview = process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=False)
     assert preview.unreadable_riders == [{"rider_id": "P1", "name": "P", "cell": "N/A"}]
     assert not preview.inactive_rows, "an unreadable row is not an absence"
     assert any("unreadable payout" in w for w in preview.warnings)
 
     with pytest.raises(UnreadablePayouts):
-        process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
+        process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
     assert (
         db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='RENT_MISSED'").fetchone()[0]
         == 0
@@ -170,7 +170,7 @@ def test_unreadable_payout_keeps_rider_present_and_blocks_commit(db):
 
 def test_numeric_rider_ids_lose_the_excel_float_suffix(db):
     pid = make_person(db, "N", balance=0)
-    make_rider(db, pid, "8906377190", "Blitz", "N")
+    make_rider(db, pid, "8906377190", "Kaptan", "N")
     db.commit()
     wb = Workbook()
     ws = wb.active
@@ -178,7 +178,7 @@ def test_numeric_rider_ids_lose_the_excel_float_suffix(db):
     ws.append([8906377190, 500])  # numeric cell
     buf = io.BytesIO()
     wb.save(buf)
-    r = process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), buf.getvalue(), commit=False)
+    r = process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), buf.getvalue(), commit=False)
     assert r.unknown_ids == [] and len(r.pay_rows) == 1
 
 
@@ -205,16 +205,16 @@ def test_adjustment_creates_the_balance_row(db):
 def test_second_commit_of_same_cycle_is_refused_unless_forced(db):
     _raft_rider(db)
     f = _file([("P1", 3000)])
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
     with pytest.raises(CycleAlreadyCommitted):
-        process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
+        process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=True)
     assert (
         db.execute("SELECT COUNT(*) FROM transactions WHERE event_type='PAYOUT'").fetchone()[0] == 1
     )
     # A dry run of an already-committed cycle is still allowed.
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=False)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=False)
     # force re-runs (documented: appends ledger rows again)
-    process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), f, commit=True, force=True)
+    process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), f, commit=True, force=True)
     assert db.execute("SELECT COUNT(*) FROM company_cycles").fetchone()[0] == 1
 
 
@@ -231,18 +231,18 @@ def test_forced_rerun_replaces_cod_holds_instead_of_doubling(db):
     assert total == 75000, "HOLD sheet total doubled on re-run"
 
 
-# ── Nykaa: Blitz rider ids are reused ────────────────────────────────────────
+# ── Nykaa: Kaptan rider ids are reused ────────────────────────────────────────
 
 
 def test_nykaa_file_links_blitz_rider_ids_automatically(db):
-    pid = _raft_rider(db, rid="B77", company="Blitz")
+    pid = _raft_rider(db, rid="B77", company="Kaptan")
     db.commit()
     r = process_cycle(
         "Nykaa", date(2026, 6, 1), date(2026, 6, 7), _file([("B77", 1500)]), commit=True
     )
     assert r.unknown_ids == []
     assert r.auto_linked == [
-        {"rider_id": "B77", "person_id": pid, "name": "P", "linked_from": "Blitz"}
+        {"rider_id": "B77", "person_id": pid, "name": "P", "linked_from": "Kaptan"}
     ]
     assert len(r.pay_rows) == 1 and r.pay_rows[0].person_id == pid
     row = db.execute(

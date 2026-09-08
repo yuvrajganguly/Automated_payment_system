@@ -35,7 +35,7 @@ def client(db):
 
 def test_history_present_while_open(client, db):
     pid = make_person(db, "Holder", balance=0)
-    make_rider(db, pid, "H1", "Blitz", "Holder")
+    make_rider(db, pid, "H1", "Kaptan", "Holder")
     make_ev(db, "EV-A", provider="Raft", model="Regular")
     assign(db, pid, "EV-A", handover="2026-08-01")
     db.commit()
@@ -49,7 +49,7 @@ def test_history_present_while_open(client, db):
 
 def test_history_survives_after_return(client, db):
     pid = make_person(db, "Returner", balance=0)
-    make_rider(db, pid, "R1", "Blitz", "Returner")
+    make_rider(db, pid, "R1", "Kaptan", "Returner")
     make_ev(db, "EV-B", provider="Raft", model="Regular")
     assign(db, pid, "EV-B", handover="2026-08-01")
     db.commit()
@@ -63,7 +63,7 @@ def test_history_survives_after_return(client, db):
 
 def test_two_evs_history_newest_first(client, db):
     pid = make_person(db, "Serial", balance=0)
-    make_rider(db, pid, "S1", "Blitz", "Serial")
+    make_rider(db, pid, "S1", "Kaptan", "Serial")
     make_ev(db, "EV-OLD", provider="Raft", model="Regular")
     make_ev(db, "EV-NEW", provider="Raft", model="Regular")
     assign(db, pid, "EV-OLD", handover="2026-06-01", returned="2026-07-01")

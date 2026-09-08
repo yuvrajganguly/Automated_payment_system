@@ -42,6 +42,11 @@ interface PayoutApi {
     @POST("auth/reset-password")
     suspend fun resetPassword(@Body body: ResetPasswordIn): OkOut
 
+    /** Minimum eight characters. On success the server revokes every other
+     *  session, so the recruiter has to sign in again on their other phone. */
+    @POST("auth/change-password")
+    suspend fun changePassword(@Body body: ChangePasswordIn): OkOut
+
     @GET("app/bootstrap")
     suspend fun bootstrap(): Bootstrap
 
@@ -59,6 +64,9 @@ interface PayoutApi {
         @Query("q") q: String? = null,
         @Query("company") company: String? = null,
         @Query("active") active: Boolean? = null,
+        /** all | working | idle — the 12-day rule. The sync pulls "all" and
+         *  filters in Room, so the Riders tab works with no signal. */
+        @Query("activity") activity: String? = null,
         @Query("limit") limit: Int? = null,
         @Query("offset") offset: Int? = null,
     ): Response<List<RiderOut>>
@@ -124,4 +132,61 @@ interface PayoutApi {
 
     @GET("activity")
     suspend fun activity(@Query("since") since: String? = null, @Query("limit") limit: Int? = null): List<ActivityRow>
+
+    /** Everything that has happened to one rider, newest first — added, EV
+     *  handed over, returned, sent for repair, closed out, documents. */
+    @GET("app/person/{id}/timeline")
+    suspend fun personTimeline(
+        @Path("id") personId: Long,
+        @Query("limit") limit: Int? = null,
+    ): List<TimelineEvent>
+
+    /* ── The recruiter as a subject: numbers, odometer, profile ── */
+
+    @GET("recruiters/me/series")
+    suspend fun mySeries(
+        @Query("grain") grain: String, // week | month
+        @Query("buckets") buckets: Int? = null,
+    ): RecruiterSeries
+
+    @GET("recruiters/me/riders")
+    suspend fun myRiders(
+        @Query("status") status: String? = null, // all | working | idle
+        @Query("limit") limit: Int? = null,
+    ): List<RecruiterRider>
+
+    @GET("recruiters/me/shift/today")
+    suspend fun shiftToday(): ShiftOut
+
+    /** Save a reading. Comes back with the day's row plus any warnings —
+     *  an opening below yesterday's close is a note, not a refusal. */
+    @POST("recruiters/me/shift")
+    suspend fun saveShift(@Body body: ShiftIn): ShiftOut
+
+    /** The dash photo for one half of a day. The reading must be saved first. */
+    @Multipart
+    @POST("recruiters/me/shift/photo")
+    suspend fun uploadShiftPhoto(
+        @Query("kind") kind: String, // start | end
+        @Query("day") day: String,
+        @Part file: MultipartBody.Part,
+    ): OkOut
+
+    @GET("recruiters/me/shifts")
+    suspend fun myShifts(@Query("days") days: Int? = null): ShiftDays
+
+    /** The monthly totals the fuel claim is paid on. */
+    @GET("recruiters/me/shifts/monthly")
+    suspend fun myShiftMonths(@Query("months") months: Int? = null): ShiftMonths
+
+    @GET("recruiters/me/profile")
+    suspend fun myProfile(): RecruiterProfile
+
+    /** Only the fields sent are written — save section by section. */
+    @PATCH("recruiters/me/profile")
+    suspend fun updateMyProfile(@Body body: ProfilePatch): RecruiterProfile
+
+    @Multipart
+    @POST("recruiters/me/photo")
+    suspend fun uploadMyPhoto(@Part file: MultipartBody.Part): OkOut
 }

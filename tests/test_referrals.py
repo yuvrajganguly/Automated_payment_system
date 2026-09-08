@@ -58,15 +58,15 @@ def _balance(db, pid):
 
 
 def _setup(db, client):
-    """Arjun (referrer, Blitz) brings Bikash in on 1 June via the app."""
+    """Arjun (referrer, Kaptan) brings Bikash in on 1 June via the app."""
     rec = _hdr(client)
     arjun = make_person(db, "Arjun Das", balance=0)
-    make_rider(db, arjun, "A1", "Blitz", "Arjun Das")
+    make_rider(db, arjun, "A1", "Kaptan", "Arjun Das")
     db.commit()
     r = client.post(
         "/api/riders",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "name": "Bikash Roy",
             "rider_id": "B1",
             "referred_by_person_id": arjun,
@@ -106,23 +106,23 @@ def test_bonus_paid_in_two_installments_after_four_weeks(db, client):
     both = lambda pay: _file([("A1", pay), ("B1", pay)])  # noqa: E731
 
     # Week 1 (1–7 June): Bikash's first payout. Too early — no bonus.
-    r = process_cycle("Blitz", date(2026, 6, 1), date(2026, 6, 7), both(1000), commit=True)
+    r = process_cycle("Kaptan", date(2026, 6, 1), date(2026, 6, 7), both(1000), commit=True)
     assert r.referral_bonuses == []
     a = next(x for x in r.pay_rows if x.person_id == arjun)
     assert a.referral_bonus == 0 and a.released == 100000
 
     # Cycle ending 28 June: 4 weeks not yet complete (needs 29 June). Still nothing.
-    r = process_cycle("Blitz", date(2026, 6, 22), date(2026, 6, 28), both(1000), commit=True)
+    r = process_cycle("Kaptan", date(2026, 6, 22), date(2026, 6, 28), both(1000), commit=True)
     assert r.referral_bonuses == []
 
     # Cycle ending 5 July: the month is reached → instalment 1 of 2 for Arjun.
     # A dry run shows it and writes nothing.
-    r = process_cycle("Blitz", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=False)
+    r = process_cycle("Kaptan", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=False)
     assert [(b["name"], b["installment"], b["amount"]) for b in r.referral_bonuses] == [
         ("Arjun Das", 1, 50000)
     ]
     assert db.execute("SELECT installments_paid FROM referrals").fetchone()[0] == 0
-    r = process_cycle("Blitz", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=True)
+    r = process_cycle("Kaptan", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=True)
     a = next(x for x in r.pay_rows if x.person_id == arjun)
     assert a.referral_bonus == 50000 and a.released == 150000
     ref = client.get(f"/api/referrals?person_id={bikash}", headers=rec).json()[0]
@@ -130,17 +130,17 @@ def test_bonus_paid_in_two_installments_after_four_weeks(db, client):
     assert ref["qualified_on"] == "2026-06-29" and ref["last_paid_cycle_end"] == "2026-07-05"
     # Re-running the same cycle (force) never pays the instalment twice.
     r = process_cycle(
-        "Blitz", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=True, force=True
+        "Kaptan", date(2026, 6, 29), date(2026, 7, 5), both(1000), commit=True, force=True
     )
     assert r.referral_bonuses == []
 
     # Next payout: instalment 2 of 2, then done.
-    r = process_cycle("Blitz", date(2026, 7, 6), date(2026, 7, 12), both(1000), commit=True)
+    r = process_cycle("Kaptan", date(2026, 7, 6), date(2026, 7, 12), both(1000), commit=True)
     a = next(x for x in r.pay_rows if x.person_id == arjun)
     assert a.referral_bonus == 50000 and a.released == 150000
     ref = client.get(f"/api/referrals?person_id={bikash}", headers=rec).json()[0]
     assert ref["installments_paid"] == 2 and ref["status"] == "paid"
-    r = process_cycle("Blitz", date(2026, 7, 13), date(2026, 7, 19), both(1000), commit=True)
+    r = process_cycle("Kaptan", date(2026, 7, 13), date(2026, 7, 19), both(1000), commit=True)
     assert r.referral_bonuses == []
     assert _balance(db, arjun) == 0
     adj = db.execute(
@@ -158,11 +158,11 @@ def test_no_bonus_when_the_new_rider_left_or_never_got_paid(db, client):
     rec, arjun, bikash = _setup(db, client)
     only_arjun = _file([("A1", 1000)])
     # Bikash never appears in a payout → no qualification, however long it has been.
-    r = process_cycle("Blitz", date(2026, 7, 6), date(2026, 7, 12), only_arjun, commit=True)
+    r = process_cycle("Kaptan", date(2026, 7, 6), date(2026, 7, 12), only_arjun, commit=True)
     assert r.referral_bonuses == []
     # He gets paid once, then leaves before four weeks are up → nothing.
     process_cycle(
-        "Blitz",
+        "Kaptan",
         date(2026, 7, 13),
         date(2026, 7, 19),
         _file([("A1", 1000), ("B1", 500)]),
@@ -170,7 +170,7 @@ def test_no_bonus_when_the_new_rider_left_or_never_got_paid(db, client):
     )
     db.execute("UPDATE rider_master SET is_active=0 WHERE rider_id='B1'")
     db.commit()
-    r = process_cycle("Blitz", date(2026, 7, 20), date(2026, 7, 26), only_arjun, commit=True)
+    r = process_cycle("Kaptan", date(2026, 7, 20), date(2026, 7, 26), only_arjun, commit=True)
     assert r.referral_bonuses == []
     # Admin voids it: stays void even if he comes back.
     boss = _hdr(client, "boss@t.test", "Creator-pass-1")
@@ -179,5 +179,5 @@ def test_no_bonus_when_the_new_rider_left_or_never_got_paid(db, client):
     assert client.post(f"/api/referrals/{ref['id']}/void", headers=boss).json()["status"] == "void"
     db.execute("UPDATE rider_master SET is_active=1 WHERE rider_id='B1'")
     db.commit()
-    r = process_cycle("Blitz", date(2026, 7, 27), date(2026, 8, 2), only_arjun, commit=True)
+    r = process_cycle("Kaptan", date(2026, 7, 27), date(2026, 8, 2), only_arjun, commit=True)
     assert r.referral_bonuses == []

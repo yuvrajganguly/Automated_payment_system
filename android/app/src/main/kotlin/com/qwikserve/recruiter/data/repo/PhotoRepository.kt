@@ -31,13 +31,32 @@ class PhotoRepository @Inject constructor(
     private val api: PayoutApi,
 ) {
     suspend fun uploadPhoto(personId: Long, uri: Uri) = withContext(Dispatchers.IO) {
+        api.uploadDocument(
+            personId,
+            part(uri, "rider-$personId.jpg"),
+            "photo".toRequestBody("text/plain".toMediaType()),
+        )
+    }
+
+    /** The recruiter's own face, for the Profile tab. Same shrink, same field. */
+    suspend fun uploadMyPhoto(uri: Uri) = withContext(Dispatchers.IO) {
+        api.uploadMyPhoto(part(uri, "recruiter.jpg"))
+    }
+
+    /** The dash photo behind one half of a day's odometer reading. The reading
+     *  is saved first — this is the evidence for a number that already exists. */
+    suspend fun uploadShiftPhoto(kind: String, day: String, uri: Uri) = withContext(Dispatchers.IO) {
+        api.uploadShiftPhoto(kind, day, part(uri, "odo-$kind-$day.jpg"))
+    }
+
+    /** One picture off the phone, shrunk, as a `file` part. */
+    private fun part(uri: Uri, filename: String): MultipartBody.Part {
         val jpeg = readAndShrink(uri) ?: error("That picture could not be read.")
-        val part = MultipartBody.Part.createFormData(
+        return MultipartBody.Part.createFormData(
             "file",
-            "rider-$personId.jpg",
+            filename,
             jpeg.toRequestBody("image/jpeg".toMediaType()),
         )
-        api.uploadDocument(personId, part, "photo".toRequestBody("text/plain".toMediaType()))
     }
 
     private fun readAndShrink(uri: Uri): ByteArray? {

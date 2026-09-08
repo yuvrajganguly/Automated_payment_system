@@ -15,7 +15,10 @@ export function SubNav() {
 
   const visible = workspacesFor(user?.role).find((w) => w.key === ws.key)
   const pages = [...(visible ?? ws).pages]
-  if (ws.key === 'admin' && user?.role === 'creator') {
+  // System used to be creator-only. An admin now reaches its read-only half
+  // (stats, audit log, EV models); the destructive tabs stay behind the page's
+  // own creator checks, so the rail entry is safe to show them.
+  if (ws.key === 'admin' && (user?.role === 'admin' || user?.role === 'creator')) {
     pages.push({ to: '/system', label: 'System' })
   }
 

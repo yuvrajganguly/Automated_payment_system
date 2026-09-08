@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS ev_assignments (
     returned_date TEXT,           -- NULL => currently held
     rent_charged_through TEXT,    -- last date EV rent billed through
     closeout_pending INTEGER NOT NULL DEFAULT 0, -- 1 = closed, deposit not yet settled (ev_closeouts)
+    assigned_by   TEXT,           -- users.email of whoever handed it over
+    returned_by   TEXT,           -- users.email of whoever took it back
     created_at    TEXT DEFAULT (datetime('now'))
 );
 -- What happened to the security deposit when an EV assignment closed. One
@@ -390,8 +392,55 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     INTEGER NOT NULL DEFAULT 1,
     phone         TEXT,                           -- E.164 (+91…); second login id
     zone          TEXT,                           -- North | South: the recruiter's patch (app to-do list)
+    display_name  TEXT,                           -- what the console shows instead of the email
     created_at    TEXT DEFAULT (datetime('now'))
 );
+
+-- ── recruiter_profiles ──────────────────────────────────────────────────────
+-- A recruiter's own details, kept off `users` so a row of login credentials
+-- never sits beside bank and identity numbers. One row per recruiter, written
+-- by the recruiter from the app's Profile tab.
+--
+-- account_no / aadhaar_no / pan_no are masked on every response except the
+-- recruiter reading their own profile and an admin opening that recruiter's
+-- profile page; no list or table ever carries them in full. photo_key points
+-- into the same document store rider photos use.
+CREATE TABLE IF NOT EXISTS recruiter_profiles (
+    email        TEXT PRIMARY KEY REFERENCES users(email),
+    full_name    TEXT,
+    phone        TEXT,
+    address      TEXT,
+    account_name TEXT,
+    account_no   TEXT,
+    ifsc         TEXT,
+    bank_name    TEXT,
+    aadhaar_no   TEXT,                            -- 12 digits, no spaces
+    pan_no       TEXT,                            -- AAAAA9999A
+    photo_key    TEXT,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
+
+-- ── recruiter_shifts ────────────────────────────────────────────────────────
+-- The vehicle odometer at the start and end of a recruiter's day, typed in by
+-- the recruiter with a photo of the dash each time. distance = end_km -
+-- start_km; the month's sum is what the fuel compensation is paid on, so the
+-- photos are the evidence behind the claim. Whole kilometres — that is what a
+-- dash reads. One row per (email, day): re-saving corrects rather than repeats.
+CREATE TABLE IF NOT EXISTS recruiter_shifts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    email           TEXT NOT NULL,
+    day             TEXT NOT NULL,                 -- YYYY-MM-DD
+    start_km        INTEGER,
+    start_photo_key TEXT,
+    start_at        TEXT,
+    end_km          INTEGER,
+    end_photo_key   TEXT,
+    end_at          TEXT,
+    note            TEXT,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recruiter_shift_day
+    ON recruiter_shifts (email, day);
 -- idx_users_phone (unique, partial) is created by migration 0010, which runs
 -- AFTER this script: on a database that predates the column, creating the
 -- index here would fail before the migration could add the column
@@ -503,8 +552,15 @@ CREATE INDEX IF NOT EXISTS idx_bill_lines_ev   ON provider_bill_lines (ev_id);
 
 -- ── audit_log ───────────────────────────────────────────────────────────────
 -- Every state-changing HTTP request (POST / PATCH / DELETE / PUT) made by an
--- authenticated user is written here. Read by the Creator only — even admins
--- shouldn't see what other admins did to keep peer pressure off the log.
+-- authenticated user is written here. Read by admins and the creator — it was
+-- creator-only until 2026-09, on the theory that peer pressure would distort
+-- the log, but an admin who cannot see what happened cannot do their job.
+-- Two things follow from that widening: the acting role is masked through
+-- visible_role on the way out, so the creator tier stays invisible below
+-- itself, and body_excerpt is scrubbed of credentials AND of identity and bank
+-- numbers before it is stored (api/middleware.py) — the routes that write
+-- those keep them out of the activity feed, and a verbatim copy of the request
+-- sitting here would undo that one layer up.
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT DEFAULT (datetime('now')),

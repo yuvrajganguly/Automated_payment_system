@@ -55,6 +55,7 @@ _QUERY = {
     "/api/providers/{provider}/period": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/providers/{provider}/reconciliation": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/providers/{provider}/reconciliation/export": "date_from=2026-08-10&date_to=2026-08-30",
+    "/api/recruiters/{email}/shift/photo": "kind=start&day=2026-09-01",
 }
 
 # GETs that legitimately answer something other than 200 with these params.
@@ -63,6 +64,8 @@ _EXPECTED_STATUS = {
     "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
     "/api/documents/{doc_id}/download": 404,  # no documents in the demo seed
     "/api/persons/{person_id}/photo": 404,  # no photo uploaded in the demo seed
+    "/api/recruiters/{email}/photo": 404,  # no recruiter has uploaded one
+    "/api/recruiters/{email}/shift/photo": 404,  # no odometer photo in the demo seed
 }
 if DB_URL:
     # No single file to stream on Postgres; the route says to use pg_dump.

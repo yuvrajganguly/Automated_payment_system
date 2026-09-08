@@ -7,6 +7,7 @@ the roster and fleet — in one round trip. Nothing here is money.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from payout.api.auth import get_current_user
 from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import ZONES
 from payout.db import get_connection
+from payout.domain.activity import ACTIONS
 
 router = APIRouter()
 
@@ -502,3 +504,39 @@ def list_crashes(
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/person/{person_id}/timeline")
+def person_timeline(
+    person_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+) -> list[dict]:
+    """Everything that has happened to one rider, newest first: added, edited,
+    EV handed over, returned, sent for repair, closed out, documents, referrals.
+
+    This is the same activity feed the console reads, but scoped to a person
+    rather than to an operator. ``/api/activity`` deliberately confines a
+    recruiter to rows they wrote themselves — that keeps one recruiter out of
+    another's day — but a rider's own history has to show every hand that
+    touched them, or the timeline lies by omission the moment a colleague
+    hands over the EV.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, at, email, role, action, entity_type, entity_id, entity_label, "
+            "       details, lat, lng "
+            "FROM activity_log WHERE person_id=? ORDER BY id DESC LIMIT ?",
+            (person_id, limit),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["action_label"] = ACTIONS.get(d["action"], d["action"])
+        if d.get("details"):
+            try:
+                d["details"] = json.loads(d["details"])
+            except (TypeError, ValueError):
+                d["details"] = None
+        out.append(d)
+    return out

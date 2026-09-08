@@ -191,10 +191,40 @@ def no_recruiter(user: dict = Depends(get_current_user)) -> dict:
 
 
 def require_creator(user: dict = Depends(get_current_user)) -> dict:
-    """Only the creator (super-admin) can change roles or remove other users.
+    """Only the creator (super-admin).
 
-    The refusal is deliberately generic: nobody below creator is told the
-    role exists."""
+    Since 2026-09 this guard covers a much smaller set than it used to. An
+    admin now reaches the audit log, system stats, the EV model catalogue and
+    most user administration, because an admin who cannot see what happened
+    cannot do their job. What stays behind this guard is the two things an
+    admin must not be able to do:
+
+    * **Rewrite or erase history** — hard-deleting a person, an EV or a
+      company, editing or voiding a posted ledger row, force-merging two
+      people past the open-EV safety check.
+    * **Escalate privilege** — changing anyone's role, or creating an account
+      (which could mint another creator).
+
+    The refusal is deliberately generic: nobody below creator is told the role
+    exists."""
     if user.get("role") != "creator":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
     return user
+
+
+def require_admin_over(user: dict, target_role: str | None) -> None:
+    """Refuse an admin acting on an account at or above their own rank.
+
+    Setting someone's password is impersonation — whoever sets it can sign in
+    as them. That is acceptable for an admin managing recruiters and plain
+    users; it is not acceptable as a route by which an admin reaches a
+    colleague's account or a creator's. A creator is not fenced: they are the
+    top of the ladder and already hold every destructive route.
+    """
+    if user.get("role") == "creator":
+        return
+    if ROLE_RANK.get(target_role or "user", 0) >= ROLE_RANK["admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins can only act on recruiter and user accounts",
+        )

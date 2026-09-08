@@ -43,7 +43,7 @@ def test_add_styled_sheet_converts_money_columns():
         wb,
         sheet_name="Money Flow",
         headers=["Company", "Gross", "Riders"],
-        rows=[["Blitz", 2290000, 12]],
+        rows=[["Kaptan", 2290000, 12]],
         numeric_cols=[2, 3],
         money_cols=[2],
     )

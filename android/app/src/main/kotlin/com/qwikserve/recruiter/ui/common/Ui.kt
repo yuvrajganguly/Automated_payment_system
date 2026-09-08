@@ -17,9 +17,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -27,6 +32,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,13 +66,31 @@ fun initials(name: String?): String =
         .take(2).joinToString("") { it.first().uppercaseChar().toString() }
         .ifBlank { "?" }
 
+private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
 /** "2026-09-04" / "2026-09-04 11:20:00" → "4 Sep" */
 fun shortDate(iso: String?): String {
     val s = iso ?: return ""
     val m = Regex("""(\d{4})-(\d{2})-(\d{2})""").find(s) ?: return s
-    val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-    return m.groupValues[3].trimStart('0') + " " + months[m.groupValues[2].toInt() - 1]
+    return m.groupValues[3].trimStart('0') + " " + MONTHS[m.groupValues[2].toInt() - 1]
 }
+
+/** "2026-09-04 11:20:00" → "4 Sep · 11:20" — a timeline row's left column. */
+fun shortStamp(iso: String?): String {
+    val s = iso ?: return ""
+    val clock = Regex("""\d{2}:\d{2}""").find(s)?.value
+    val day = shortDate(s)
+    return listOfNotNull(day.ifBlank { null }, clock).joinToString(" · ").ifBlank { s }
+}
+
+/** "2026-09" → "Sep 2026"; anything else comes back as it arrived. */
+fun monthName(bucket: String?): String {
+    val m = Regex("""^(\d{4})-(\d{2})$""").find(bucket.orEmpty()) ?: return bucket.orEmpty()
+    return MONTHS[m.groupValues[2].toInt() - 1] + " " + m.groupValues[1]
+}
+
+/** Whole kilometres with Indian grouping: 1,25,000 km */
+fun km(n: Int?): String = NumberFormat.getIntegerInstance(Locale("en", "IN")).format(n ?: 0) + " km"
 
 /* ── the Modernist kit ──────────────────────────────────────────────────── */
 
@@ -217,6 +244,92 @@ fun Chips(options: List<String>, selected: String, onSelect: (String) -> Unit, m
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
+    }
+}
+
+/**
+ * A one-of-many picker that starts empty: the field shows the placeholder
+ * until something is chosen, and the list drops below it. Used where a chip
+ * row would auto-select whatever happened to be first — a company on the
+ * onboarding form has to be a deliberate choice, not a default.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Dropdown(
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    var open by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = open && enabled && options.isNotEmpty(),
+        onExpandedChange = { if (enabled && options.isNotEmpty()) open = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            placeholder = { Text(placeholder, color = Qwik.N600, maxLines = 1) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Qwik.Surface,
+                unfocusedContainerColor = Qwik.Surface,
+                focusedBorderColor = Qwik.Accent,
+                unfocusedBorderColor = Qwik.Divider,
+                cursorColor = Qwik.Accent,
+                focusedTextColor = Qwik.Ink,
+                unfocusedTextColor = Qwik.Ink,
+            ),
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled)
+                .fillMaxWidth(),
+        )
+        // The menu's ground is the theme's surfaceContainer, set to the
+        // design's off-white in Theme.kt so this stays on palette.
+        ExposedDropdownMenu(
+            expanded = open && enabled && options.isNotEmpty(),
+            onDismissRequest = { open = false },
+        ) {
+            options.forEach { o ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            o,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (o == selected) Qwik.Accent else Qwik.Ink,
+                            maxLines = 1,
+                        )
+                    },
+                    onClick = { onSelect(o); open = false },
+                )
+            }
+        }
+    }
+}
+
+/** A member of staff's picture (the recruiter themselves is `me`), initials
+ *  while it loads or when there is none. Square, like the rider's. */
+@Composable
+fun StaffAvatar(email: String, name: String?, size: Dp = 96.dp, version: Int = 0) {
+    val url = BuildConfig.API_BASE_URL + "recruiters/" + email + "/photo" +
+        (if (version > 0) "?v=$version" else "")
+    Box(
+        modifier = Modifier.size(size).background(Qwik.N200).border(1.dp, Qwik.N400),
+        contentAlignment = Alignment.Center,
+    ) {
+        SubcomposeAsyncImage(
+            model = url,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size),
+            loading = { Initials(name, size) },
+            error = { Initials(name, size) },
+        )
     }
 }
 

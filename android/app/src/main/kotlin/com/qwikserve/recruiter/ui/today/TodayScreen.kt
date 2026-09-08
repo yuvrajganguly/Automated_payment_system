@@ -146,6 +146,14 @@ fun TodayScreen(
                 }
                 Rule()
             }
+
+            // Today's odometer sits above everything else: it is the first
+            // thing a recruiter does in the morning and the last at night.
+            item {
+                ShiftCard()
+                Rule()
+            }
+
             if (vm.error != null) item { Note(vm.error!!, color = Qwik.Accent700) }
 
             // The red band: how much needs a visit.

@@ -8,6 +8,9 @@ export interface WsPage {
   end?: boolean
   /** Shown only to recruiters (their own view of a shared route). */
   recruiterOnly?: boolean
+  /** Shown only to admins and creators — the page's own API is admin-gated,
+   *  so offering it to a plain user would open onto a 403. */
+  adminOnly?: boolean
 }
 
 export interface Workspace {
@@ -34,7 +37,10 @@ export const WORKSPACES: Workspace[] = [
   {
     key: 'analytics',
     label: 'Analytics',
-    pages: [{ to: '/dashboard', label: 'Dashboard' }],
+    pages: [
+      { to: '/dashboard', label: 'Dashboard' },
+      { to: '/recruiters', label: 'Recruiters', adminOnly: true },
+    ],
     // '/companies/<name>' (history) is Analytics; the bare '/companies' list is Admin.
     extra: ['/companies/'],
     noRecruiter: true,
@@ -94,12 +100,16 @@ const ALWAYS_ALLOWED = new Set(['/settings', '/requests'])
 
 /** The workspaces (and pages) a role may use. */
 export function workspacesFor(role: string | undefined): Workspace[] {
+  const isAdmin = role === 'admin' || role === 'creator'
   if (role !== 'recruiter') {
-    return WORKSPACES.map((ws) => ({ ...ws, pages: ws.pages.filter((p) => !p.recruiterOnly) }))
+    return WORKSPACES.map((ws) => ({
+      ...ws,
+      pages: ws.pages.filter((p) => !p.recruiterOnly && (!p.adminOnly || isAdmin)),
+    }))
   }
   return WORKSPACES.filter((ws) => !ws.noRecruiter).map((ws) => ({
     ...ws,
-    pages: ws.pages.filter((p) => !RECRUITER_HIDDEN_PAGES.has(p.to)),
+    pages: ws.pages.filter((p) => !RECRUITER_HIDDEN_PAGES.has(p.to) && !p.adminOnly),
   }))
 }
 

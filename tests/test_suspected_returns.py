@@ -50,12 +50,12 @@ def _client(db):
 
 def _seed_holder(db, rid, ev_id):
     pid = make_person(db, f"P-{rid}", balance=0, arrears=0)
-    make_rider(db, pid, rid, "Blitz", f"P-{rid}")
+    make_rider(db, pid, rid, "Kaptan", f"P-{rid}")
     make_ev(db, ev_id, provider="Raft", model="Regular")
     wk0 = date(2026, 6, 1)
     assign(db, pid, ev_id, charged_through=(wk0 - timedelta(days=1)).isoformat())
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id=? "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id=? "
         "WHERE person_id=?",
         (rid, pid),
     )
@@ -68,7 +68,7 @@ def _run_weeks(absent_rid, present_rid, n=2):
     for i in range(n):
         s = wk0 + timedelta(weeks=i)
         r = process_cycle(
-            "Blitz", s, s + timedelta(days=6), _file([(present_rid, 4000)]), commit=True
+            "Kaptan", s, s + timedelta(days=6), _file([(present_rid, 4000)]), commit=True
         )
     return r
 
@@ -164,10 +164,10 @@ def test_dismiss_not_a_return_hides_row_and_reflags_after_four_more_cycles(db):
     wk = date(2026, 6, 15)
     for i in range(3):
         s = wk + timedelta(weeks=i)
-        process_cycle("Blitz", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
+        process_cycle("Kaptan", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
     assert c.get("/api/evs/suspected-returns").json() == []
     s = wk + timedelta(weeks=3)
-    process_cycle("Blitz", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
+    process_cycle("Kaptan", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
     back = c.get("/api/evs/suspected-returns").json()
     assert [x["ev_id"] for x in back] == ["EV-S6"]
     assert back[0]["dismissed"]["reflagged"] is True and back[0]["missed_cycles"] == 6
@@ -179,7 +179,7 @@ def test_dismiss_not_a_return_hides_row_and_reflags_after_four_more_cycles(db):
     )
     assert r.status_code == 200
     s = wk + timedelta(weeks=4)
-    process_cycle("Blitz", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
+    process_cycle("Kaptan", s, s + timedelta(days=6), _file([("S7", 4000)]), commit=True)
     assert c.get("/api/evs/suspected-returns").json() == []
     # Undismiss → straight back.
     assert (

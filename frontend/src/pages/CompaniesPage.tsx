@@ -290,7 +290,7 @@ function DraftFields({ d, set, companies, self }: {
                    onChange={(e) => set({ per_order_rate: e.target.value })} className={input} required />
           </Field>
         ) : (
-          <Field label="Reuses rider ids of" hint="e.g. Nykaa pays Blitz riders under their Blitz ids.">
+          <Field label="Reuses rider ids of" hint="e.g. Nykaa pays Kaptan riders under their Kaptan ids.">
             <select value={d.rider_ids_shared_with} onChange={(e) => set({ rider_ids_shared_with: e.target.value })} className={input}>
               <option value="">— no —</option>
               {others.map((c) => <option key={c.company_name} value={c.company_name}>{c.company_name}</option>)}

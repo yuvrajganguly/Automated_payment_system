@@ -34,13 +34,13 @@ def test_ev_refs_match_schema():
 
 def _person_with_history(db):
     pid = make_person(db, "H", balance=-100, arrears=500)
-    make_rider(db, pid, "H1", "Blitz", "H")
+    make_rider(db, pid, "H1", "Kaptan", "H")
     make_ev(db, "EVH", provider="Raft", model="Regular")
     assign(db, pid, "EVH", charged_through="2026-06-07")
     tid = db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after) VALUES (?,?,?,?,?,'PAYOUT',1000,1000)",
-        (pid, "H1", "Blitz", "2026-06-01", "2026-06-07"),
+        (pid, "H1", "Kaptan", "2026-06-01", "2026-06-07"),
     ).lastrowid
     db.execute(
         "INSERT INTO ev_daily_ledger (ev_id, day, state, assigned_person_id, daily_cost, "
@@ -57,7 +57,7 @@ def _person_with_history(db):
     )
     db.execute(
         "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, person_id, worker_code, "
-        "amount, source) VALUES ('2026-06-01','2026-06-07','Blitz','H1',?,'H1',100,'x')",
+        "amount, source) VALUES ('2026-06-01','2026-06-07','Kaptan','H1',?,'H1',100,'x')",
         (pid,),
     )
     db.execute("INSERT INTO status_tracking (person_id, status) VALUES (?, 'active')", (pid,))

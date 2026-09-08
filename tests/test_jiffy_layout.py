@@ -1,4 +1,4 @@
-"""Spencer's 2026-08 payout layout, hub sync from the file, and the HOLD sheet.
+"""Jiffy 2026-08 payout layout, hub sync from the file, and the HOLD sheet.
 
 The client's export changed shape: the payout sheet is keyed on ``rider_phone``
 (the rider id has always been the phone number), pays ``Total Payable`` and
@@ -117,7 +117,7 @@ def test_parser_reads_new_spencers_layout(db):
             [3008272747, "H069", 6295515978, "Pradip Ray", 100, "Settled", "COD"],
         ],
     )
-    res = parse_file("Spencer's", data)
+    res = parse_file("Jiffy", data)
     assert res.sheet == "Payout"
     assert res.matched_columns["rider_id"] == "rider_phone"
     assert res.matched_columns["payout"] == "Total Payable"
@@ -164,7 +164,7 @@ def test_parser_still_reads_old_spencers_layout(db):
         [["9000000001", "Old Rider", "South City", 12, "1,200"]],
         [["O1", "9000000001", 300]],
     )
-    res = parse_file("Spencer's", data)
+    res = parse_file("Jiffy", data)
     assert res.matched_columns["rider_id"] == "Rider id"
     assert res.matched_columns["payout"] == "Total Payable Amount"
     assert res.matched_columns["orders"] == "Delivered Orders"
@@ -181,16 +181,16 @@ def test_parser_still_reads_old_spencers_layout(db):
 def _set_hub(db, rider_id, hub):
     db.execute(
         "UPDATE rider_master SET hub=? WHERE rider_id=? AND company=?",
-        (hub, rider_id, "Spencer's"),
+        (hub, rider_id, "Jiffy"),
     )
 
 
 def test_payout_file_updates_roster_hub_and_output_uses_it(db):
     pid = make_person(db, "Pradip Ray")
-    make_rider(db, pid, "6295515978", "Spencer's", "Pradip Ray")
+    make_rider(db, pid, "6295515978", "Jiffy", "Pradip Ray")
     _set_hub(db, "6295515978", "Old Hub")
     pid2 = make_person(db, "No Hub Col")
-    make_rider(db, pid2, "8355007139", "Spencer's", "Rajbir")
+    make_rider(db, pid2, "8355007139", "Jiffy", "Rajbir")
     _set_hub(db, "8355007139", "Keeps")
     db.commit()
     data = _new_layout(
@@ -201,7 +201,7 @@ def test_payout_file_updates_roster_hub_and_output_uses_it(db):
         [],
     )
     # Dry run: the file's hub shows on the row but the roster is untouched.
-    r = process_cycle("Spencer's", date(2026, 8, 10), date(2026, 8, 16), data, commit=False)
+    r = process_cycle("Jiffy", date(2026, 8, 10), date(2026, 8, 16), data, commit=False)
     rows = {x.rider_id: x for x in r.pay_rows + r.dues_rows}
     assert rows["6295515978"].hub == "NTS"
     assert rows["8355007139"].hub == "Keeps"  # blank store in the file → roster value
@@ -211,18 +211,18 @@ def test_payout_file_updates_roster_hub_and_output_uses_it(db):
     assert (
         db.execute(
             "SELECT hub FROM rider_master WHERE rider_id='6295515978' AND company=?",
-            ("Spencer's",),
+            ("Jiffy",),
         ).fetchone()[0]
         == "Old Hub"
     )
 
     # Commit: the roster follows the file.
-    r = process_cycle("Spencer's", date(2026, 8, 10), date(2026, 8, 16), data, commit=True)
+    r = process_cycle("Jiffy", date(2026, 8, 10), date(2026, 8, 16), data, commit=True)
     assert r.committed
     hubs = {
         row[0]: row[1]
         for row in db.execute(
-            "SELECT rider_id, hub FROM rider_master WHERE company=?", ("Spencer's",)
+            "SELECT rider_id, hub FROM rider_master WHERE company=?", ("Jiffy",)
         ).fetchall()
     }
     assert hubs == {"6295515978": "NTS", "8355007139": "Keeps"}
@@ -244,9 +244,9 @@ def _sheet_rows(xlsx_bytes: bytes, name: str) -> list[list]:
 
 def test_hold_sheet_separates_cod_riders_not_in_payout(db):
     pid = make_person(db, "Pradip Ray")
-    make_rider(db, pid, "6295515978", "Spencer's", "Pradip Ray")
+    make_rider(db, pid, "6295515978", "Jiffy", "Pradip Ray")
     pid2 = make_person(db, "Anish Biswas")
-    make_rider(db, pid2, "7439823275", "Spencer's", "Anish Biswas")
+    make_rider(db, pid2, "7439823275", "Jiffy", "Anish Biswas")
     _set_hub(db, "7439823275", "Roster Hub")
     db.commit()
     data = _new_layout(
@@ -263,7 +263,7 @@ def test_hold_sheet_separates_cod_riders_not_in_payout(db):
             [3008270001, "H012", 9999999999, "Stranger", 999, "Settled", "COD"],
         ],
     )
-    r = process_cycle("Spencer's", date(2026, 8, 10), date(2026, 8, 16), data, commit=True)
+    r = process_cycle("Jiffy", date(2026, 8, 10), date(2026, 8, 16), data, commit=True)
     assert r.file_rider_ids == ["6295515978"]
     hold = {h["rider_id"]: h for h in r.hold_rows}
     assert hold["6295515978"]["in_payout"] is True
@@ -282,7 +282,7 @@ def test_hold_sheet_separates_cod_riders_not_in_payout(db):
     # payout sheet's own store_ids/store_names pair.
     line = db.execute(
         "SELECT hub, hub_code FROM cod_holds WHERE rider_id='6295515978' AND company=?",
-        ("Spencer's",),
+        ("Jiffy",),
     ).fetchone()
     assert tuple(line) == ("NTS", "H069")
 
@@ -314,7 +314,7 @@ def test_hub_names_from_file_pairs_multi_store_rows():
     from payout.domain.models import ParseResult, RiderRecord
 
     pr = ParseResult(
-        company="Spencer's",
+        company="Jiffy",
         records=[
             RiderRecord("1", 0, hub="Marlin, Tolly DS", hub_code="e005, s111"),
             RiderRecord("2", 0, hub="NTS", hub_code="h069"),
@@ -331,9 +331,9 @@ def test_hub_codes_learnt_from_earlier_files_resolve_cod_hubs(db):
     Week 2's COD sheet mentions H049 / H012 for riders who are not in week 2's
     payout — the HOLD sheet still names the hub."""
     pid = make_person(db, "Akash Kirtania")
-    make_rider(db, pid, "7439440187", "Spencer's", "Akash Kirtania")
+    make_rider(db, pid, "7439440187", "Jiffy", "Akash Kirtania")
     pid2 = make_person(db, "Pradip Ray")
-    make_rider(db, pid2, "6295515978", "Spencer's", "Pradip Ray")
+    make_rider(db, pid2, "6295515978", "Jiffy", "Pradip Ray")
     db.commit()
     week1 = _new_layout(
         [
@@ -353,10 +353,10 @@ def test_hub_codes_learnt_from_earlier_files_resolve_cod_hubs(db):
         ],
         [],
     )
-    process_cycle("Spencer's", date(2026, 8, 3), date(2026, 8, 9), week1, commit=True)
+    process_cycle("Jiffy", date(2026, 8, 3), date(2026, 8, 9), week1, commit=True)
     learnt = {
         r[0]: r[1]
-        for r in db.execute("SELECT code, name FROM hub_codes WHERE company=?", ("Spencer's",))
+        for r in db.execute("SELECT code, name FROM hub_codes WHERE company=?", ("Jiffy",))
     }
     assert learnt == {"h049": "Axis Hyper", "h012": "South City"}
 
@@ -368,7 +368,7 @@ def test_hub_codes_learnt_from_earlier_files_resolve_cod_hubs(db):
             [3, "D375", 8888888888, "Nobody Knows", 100, "Pending", "COD"],
         ],
     )
-    r = process_cycle("Spencer's", date(2026, 8, 10), date(2026, 8, 16), week2, commit=True)
+    r = process_cycle("Jiffy", date(2026, 8, 10), date(2026, 8, 16), week2, commit=True)
     hold = {h["rider_id"]: h for h in r.hold_rows}
     assert hold["7439440187"]["hub"] == "Axis Hyper"  # learnt last week
     assert hold["9999999999"]["hub"] == "South City"  # this week's sheet

@@ -123,8 +123,8 @@ def _placeholder_rows(db, pid):
 
 def test_onboarding_link_retires_the_placeholder(db, client):
     h = _login(client, _ADMIN)
-    # Rider created before Spencer's issued an id → placeholder.
-    r = client.post("/api/riders", json={"company": "Spencer's", "name": "New Joiner"}, headers=h)
+    # Rider created before Jiffy issued an id → placeholder.
+    r = client.post("/api/riders", json={"company": "Jiffy", "name": "New Joiner"}, headers=h)
     assert r.status_code == 201, r.text
     ph = r.json()["rider_id"]
     pid = r.json()["person_id"]
@@ -132,7 +132,7 @@ def test_onboarding_link_retires_the_placeholder(db, client):
     # Some history already sits on the placeholder.
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
-        "event_type, amount, balance_after) VALUES (?, ?, 'Spencer''s', '2026-08-03', "
+        "event_type, amount, balance_after) VALUES (?, ?, 'Jiffy', '2026-08-03', "
         "'2026-08-09', 'OPENING', 0, 0)",
         (pid, ph),
     )
@@ -142,7 +142,7 @@ def test_onboarding_link_retires_the_placeholder(db, client):
     r = client.post(
         "/api/riders/onboard-unknowns",
         json={
-            "company": "Spencer's",
+            "company": "Jiffy",
             "rows": [{"rider_id": "9876543210", "action": "link", "link_to_person_id": pid}],
         },
         headers=h,
@@ -164,14 +164,14 @@ def test_onboarding_link_retires_the_placeholder(db, client):
 
 
 def test_placeholder_survives_when_real_id_is_at_another_company(db, client):
-    """A Spencer's placeholder stays while the person only has a real id at
-    Blitz — the placeholder is per company."""
+    """A Jiffy placeholder stays while the person only has a real id at
+    Kaptan — the placeholder is per company."""
     h = _login(client, _ADMIN)
-    r = client.post("/api/riders", json={"company": "Spencer's", "name": "Two Co"}, headers=h)
+    r = client.post("/api/riders", json={"company": "Jiffy", "name": "Two Co"}, headers=h)
     pid = r.json()["person_id"]
     r = client.post(
         "/api/riders",
-        json={"company": "Blitz", "name": "Two Co", "rider_id": "B77", "person_id": pid},
+        json={"company": "Kaptan", "name": "Two Co", "rider_id": "B77", "person_id": pid},
         headers=h,
     )
     assert r.status_code == 201, r.text
@@ -180,9 +180,9 @@ def test_placeholder_survives_when_real_id_is_at_another_company(db, client):
 
 def test_link_riders_merge_retires_placeholder(db, client):
     pid_ph = make_person(db, "Placeholder Person")
-    make_rider(db, pid_ph, "QSPEND0007", "Spencer's", "Placeholder Person")
+    make_rider(db, pid_ph, "QSPEND0007", "Jiffy", "Placeholder Person")
     pid_real = make_person(db, "Real Person")
-    make_rider(db, pid_real, "9998887776", "Spencer's", "Real Person")
+    make_rider(db, pid_real, "9998887776", "Jiffy", "Real Person")
     db.commit()
     h = _login(client, _ADMIN)
     r = client.post(
@@ -241,13 +241,30 @@ def test_admins_and_users_see_creators_as_admins(client):
     assert {r["email"]: r["role"] for r in rows}[_CREATOR[0]] == "creator"
 
 
-def test_creator_endpoints_refuse_generically(client):
+def test_admins_reach_diagnostics_but_not_history_or_roles(client):
+    """2026-09: most of what was creator-only opened to admin. What stayed
+    shut is the pair an admin must not have — rewriting history, and changing
+    who is what."""
     h = _login(client, _ADMIN)
-    r = client.get("/api/creator/system/stats", headers=h)
-    assert r.status_code == 403
-    assert "creator" not in r.text.lower()
-    r = client.patch("/api/users/user@t.test/role", json={"role": "admin"}, headers=h)
-    assert r.status_code == 403 and "creator" not in r.text.lower()
+    # Opened: read-only diagnostics and the EV model catalogue.
+    assert client.get("/api/creator/system/stats", headers=h).status_code == 200
+    assert client.get("/api/creator/audit-log", headers=h).status_code == 200
+    # Still shut: role changes, hard deletes, ledger edits, force merge, and
+    # the raw database download. Each refusal stays generic — an admin is
+    # never told the creator tier is what is refusing them.
+    for method, path, body in (
+        ("patch", "/api/users/user@t.test/role", {"role": "admin"}),
+        ("delete", "/api/creator/persons/1", None),
+        ("delete", "/api/creator/evs/EV1", None),
+        ("delete", "/api/creator/transactions/1", None),
+        ("patch", "/api/creator/transactions/1", {"amount": 1}),
+        ("post", "/api/creator/force-merge", {"keep_person_id": 1, "merge_person_id": 2}),
+        ("get", "/api/creator/system/backup", None),
+    ):
+        call = getattr(client, method)
+        r = call(path, json=body, headers=h) if body is not None else call(path, headers=h)
+        assert r.status_code == 403, f"{method.upper()} {path} -> {r.status_code}"
+        assert "creator" not in r.text.lower(), path
 
 
 def test_api_docs_are_creator_only(client):
@@ -298,12 +315,74 @@ def test_creator_sets_password_and_user_signs_in_with_it(client):
         ).status_code
         == 404
     )
+    # An admin may now do this too — but only downward. Setting a password is
+    # impersonation, so it must not be a route to a colleague's account.
     ha = _login(client, _ADMIN)
     assert (
         client.patch(
             "/api/users/user@t.test/password", json={"new_password": "Fresh-pass-9"}, headers=ha
         ).status_code
-        == 403
+        == 200
+    )
+    for target in (_ADMIN[0], _CREATOR[0]):
+        r = client.patch(
+            f"/api/users/{target}/password", json={"new_password": "Fresh-pass-9"}, headers=ha
+        )
+        assert r.status_code == 403, f"admin set {target}'s password"
+        assert "creator" not in r.text.lower()
+
+
+def test_every_admin_write_on_another_account_obeys_the_same_rank_rule(client):
+    """One rule, not five: an admin acts on recruiters and plain users, and
+    the set is the same whichever button they press."""
+    ha = _login(client, _ADMIN)
+    for method, path, body in (
+        ("patch", "/api/users/{t}/phone", {"phone": "+919876500000"}),
+        ("patch", "/api/users/{t}/password", {"new_password": "Fresh-pass-9"}),
+        ("patch", "/api/users/{t}/deactivate", None),
+        ("patch", "/api/users/{t}/reactivate", None),
+        ("post", "/api/users/{t}/sign-out-everywhere", None),
+    ):
+        call = getattr(client, method)
+        down = path.format(t=_USER[0])
+        r = call(down, json=body, headers=ha) if body is not None else call(down, headers=ha)
+        assert r.status_code == 200, f"{method.upper()} {down} -> {r.status_code}: {r.text}"
+        for target in (_ADMIN[0], _CREATOR[0]):
+            up = path.format(t=target)
+            r = call(up, json=body, headers=ha) if body is not None else call(up, headers=ha)
+            # Deactivating yourself is refused earlier, with its own message.
+            expected = 400 if up.endswith("deactivate") and target == _ADMIN[0] else 403
+            assert r.status_code == expected, f"{method.upper()} {up} -> {r.status_code}"
+            assert "creator" not in r.text.lower()
+
+
+def test_admin_creates_recruiters_but_not_admins(client):
+    """An admin hands out the accounts they actually need. Minting an admin —
+    or a creator — would be privilege escalation by proxy."""
+    ha = _login(client, _ADMIN)
+    ok = client.post(
+        "/api/users",
+        json={"email": "field@t.test", "password": "Field-pass-1", "role": "recruiter"},
+        headers=ha,
+    )
+    assert ok.status_code == 201, ok.text
+    for role in ("admin", "creator"):
+        r = client.post(
+            "/api/users",
+            json={"email": f"nope-{role}@t.test", "password": "Nope-pass-1", "role": role},
+            headers=ha,
+        )
+        assert r.status_code == 403, role
+        assert "creator" not in r.text.lower()
+    # The creator is not fenced.
+    hc = _login(client, _CREATOR)
+    assert (
+        client.post(
+            "/api/users",
+            json={"email": "second-admin@t.test", "password": "Admin-pass-2", "role": "admin"},
+            headers=hc,
+        ).status_code
+        == 201
     )
 
 

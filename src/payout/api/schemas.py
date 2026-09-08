@@ -179,6 +179,11 @@ class RiderOut(BaseModel):
     salary: int | None = None  # paise per cycle (salary companies); rupeeized out
     recruited_by: str | None = None  # users.email of who onboarded this rider id
     zone: str | None = None  # North | South from the hub, None when unassigned
+    # Has a paysheet company paid this rider for a cycle ending in the last 12
+    # days (payout/domain/worked.py)? `is_active` above is the roster flag an
+    # operator sets by hand; this one is what the ledger actually shows.
+    working: bool | None = None
+    last_worked_on: str | None = None  # end date of the last cycle they were paid for
     referred_by: str | None = None  # referrer's name, only on the create response
     # Set on create-for-existing-person when blank fields were filled from
     # another of their rider rows: {"from": "JI10000@Jiffy", "fields": [...]}.

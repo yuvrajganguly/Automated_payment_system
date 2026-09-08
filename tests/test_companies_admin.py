@@ -52,8 +52,8 @@ def test_list_shows_model_rate_and_rider_counts(db, client):
     assert sf["per_order_rate"] == 15.0  # rupees on the wire
     assert (sf["active_riders"], sf["rider_ids"]) == (1, 1)
     assert rows["Zomato"]["payment_model"] == "direct"
-    assert rows["Spencer's"]["cadence"] == "slots"
-    assert rows["Blitz"]["payment_model"] == "payout_file"
+    assert rows["Jiffy"]["cadence"] == "slots"
+    assert rows["Kaptan"]["payment_model"] == "payout_file"
 
 
 def test_create_and_update_company(db, client):
@@ -93,9 +93,9 @@ def test_create_and_update_company(db, client):
         == 1250
     )
 
-    # Update: switch Flipkart to a payout file once they send one; deactivate Porter.
+    # Update: switch Elastic to a payout file once they send one; deactivate Porter.
     r = client.patch(
-        "/api/companies/Flipkart",
+        "/api/companies/Elastic",
         json={
             "payment_model": "payout_file",
             "rider_id_column": "Rider",

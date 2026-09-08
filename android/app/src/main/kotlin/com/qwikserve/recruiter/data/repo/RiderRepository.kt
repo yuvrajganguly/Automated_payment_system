@@ -23,8 +23,12 @@ class RiderRepository @Inject constructor(
     private val db: AppDatabase,
     private val dao: RiderDao,
 ) {
-    fun search(q: String, mine: String? = null, zone: String? = null): Flow<List<RiderEntity>> =
-        dao.search(q.trim().lowercase(), mine, zone)
+    fun search(
+        q: String,
+        mine: String? = null,
+        zone: String? = null,
+        working: Boolean? = null,
+    ): Flow<List<RiderEntity>> = dao.search(q.trim().lowercase(), mine, zone, working)
 
     fun forPerson(personId: Long): Flow<List<RiderEntity>> = dao.forPerson(personId)
 
@@ -63,6 +67,8 @@ class RiderRepository @Inject constructor(
         isActive = isActive,
         recruitedBy = recruitedBy,
         zone = zone,
+        working = working,
+        lastWorkedOn = lastWorkedOn,
         haystack = listOfNotNull(name, riderId, mobNo?.filter { it.isDigit() }, mobNo, hub, company)
             .joinToString(" ")
             .lowercase(),

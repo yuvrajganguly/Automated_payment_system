@@ -14,6 +14,7 @@ from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.domain.referrals import ReferralError, create_referral
+from payout.domain.worked import active_person_sql, last_worked_sql
 from payout.exports import xlsx_response
 from payout.ingest.importer import _init_person
 from payout.money import to_paise
@@ -22,9 +23,18 @@ from payout.parsers.base import match_column
 router = APIRouter()
 
 
+# Built once: "has a paysheet company paid this person for a cycle ending in
+# the last 12 days". Distinct from rm.is_active, which is a roster flag an
+# operator sets by hand and which nothing keeps honest.
+_ACTIVE = active_person_sql("rm.person_id")
+_LAST_WORKED = last_worked_sql("rm.person_id")
+
+
 def _rider_dict(row) -> dict:
     d = dict(row)
     d["is_active"] = bool(d["is_active"])
+    if "working" in d:
+        d["working"] = bool(d["working"])
     return d
 
 
@@ -349,6 +359,11 @@ def list_riders(
     q: str | None = Query(None, description="matches name, rider id, phone or hub"),
     zone: str | None = Query(None, description="North | South | unassigned (by the rider's hub)"),
     mine: bool = Query(False, description="only riders the caller onboarded"),
+    activity: str = Query(
+        "all",
+        pattern="^(all|working|idle)$",
+        description="working | idle by the 12-day rule (payout/domain/worked.py)",
+    ),
     recruited_by: str | None = Query(None, description="riders a given recruiter onboarded"),
     limit: int | None = Query(None, ge=1, le=2000),
     offset: int = Query(0, ge=0),
@@ -379,6 +394,8 @@ def list_riders(
             "LIKE ? OR LOWER(COALESCE(rm.hub,'')) LIKE ?)"
         )
         params += [needle, needle, needle, needle]
+    if activity != "all":
+        where.append(_ACTIVE if activity == "working" else f"NOT {_ACTIVE}")
     if mine:
         where.append("rm.recruited_by=?")
         params.append(user["email"])
@@ -413,7 +430,8 @@ def list_riders(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
             f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
-            f"       rm.recruited_by, COALESCE(hz.zone, ru.zone) AS zone "
+            f"       rm.recruited_by, COALESCE(hz.zone, ru.zone) AS zone, "
+            f"       ({_ACTIVE}) AS working, {_LAST_WORKED} AS last_worked_on "
             f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
             params + page_params,
         ).fetchall()
@@ -543,6 +561,12 @@ def update_rider(
             dict(row),
             ("name", "hub", "vehicle", "account_no", "ifsc", "is_active", "salary", "recruited_by"),
         )
+        # The feed says a bank detail changed; it does not carry the number.
+        # Every admin reads this log, and an account number in it is a copy of
+        # the rider's banking details sitting somewhere nobody thinks to guard.
+        for field in ("account_no", "ifsc"):
+            if field in changed:
+                changed[field] = ["changed", "changed"]
         if body.mob_no is not None:
             changed["mob_no"] = [existing["mob_no"], fields.get("mob_no")]
         if (existing["rider_id"], existing["company"]) != (row["rider_id"], row["company"]):
@@ -772,8 +796,8 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             details={
                 "hub": body.hub,
                 "vehicle": body.vehicle,
-                "account_no": account_no,
-                "ifsc": ifsc,
+                # Whether bank details were supplied, never what they are.
+                "bank_details": bool(account_no or ifsc),
                 "mob_no": mob_no,
                 "copied_from": copied_from,
                 "placeholder": rider_id.startswith(PLACEHOLDER_PREFIX),

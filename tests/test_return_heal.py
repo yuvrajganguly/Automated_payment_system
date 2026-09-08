@@ -77,11 +77,11 @@ def _outstanding(db, pid):
 
 def _seed(db, rid, ev_id, wk_start):
     pid = make_person(db, f"R-{rid}", balance=0, arrears=0)
-    make_rider(db, pid, rid, "Blitz", f"R-{rid}")
+    make_rider(db, pid, rid, "Kaptan", f"R-{rid}")
     make_ev(db, ev_id, provider="Raft", model="Regular")
     assign(db, pid, ev_id, charged_through=(wk_start - timedelta(days=1)).isoformat())
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id=? "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id=? "
         "WHERE person_id=?",
         (rid, pid),
     )
@@ -93,7 +93,7 @@ def test_backdated_return_refunds_billed_days(db):
     """Rider PAID a full week via payout; EV actually left mid-week."""
     wk = date(2026, 6, 1)  # Monday
     pid = _seed(db, "H1", "EV-H", wk)
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("H1", 5000)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("H1", 5000)]), commit=True)
     bal_before = _balance(db, pid)
     ret = wk + timedelta(days=4)  # Friday — Fri/Sat/Sun were wrongly charged
     expected_refund = _ledger_cost(db, "EV-H", ret)
@@ -138,7 +138,7 @@ def test_backdated_return_writes_off_missed_days(db):
     before the week began, so the debt is written off, not kept."""
     wk = date(2026, 6, 1)
     pid = _seed(db, "H2", "EV-M", wk)
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("OTHER", 10)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("OTHER", 10)]), commit=True)
     assert _outstanding(db, pid) == WEEK
 
     c = _client(db)
@@ -163,7 +163,7 @@ def test_to_spare_keeps_provider_cost(db):
     provider for a unit we hold."""
     wk = date(2026, 6, 1)
     _seed(db, "H3", "EV-S", wk)
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("H3", 5000)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("H3", 5000)]), commit=True)
     ret = wk + timedelta(days=3)
     c = _client(db)
     r = c.post("/api/evs/to-spare", json={"ev_id": "EV-S", "returned_date": ret.isoformat()})
@@ -184,7 +184,7 @@ def test_amend_return_heals_and_validates(db):
     """Return recorded late with today's date, then corrected backwards."""
     wk = date(2026, 6, 1)
     pid = _seed(db, "H4", "EV-A", wk)
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("H4", 5000)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("H4", 5000)]), commit=True)
     c = _client(db)
     # Returned "today" (after the cycle) — nothing to heal yet.
     late = wk + timedelta(days=10)
@@ -225,7 +225,7 @@ def test_refund_offsets_remaining_arrears(db):
         (pid,),
     )
     db.commit()
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("H5", 8000)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("H5", 8000)]), commit=True)
     # The cycle recovered the 40k arrears too; put fresh ones back to test the offset.
     db.execute("UPDATE ev_arrears SET outstanding=30000 WHERE person_id=?", (pid,))
     db.commit()

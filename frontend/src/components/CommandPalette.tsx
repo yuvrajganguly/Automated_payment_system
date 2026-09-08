@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { WORKSPACES, workspacesFor } from './workspaces'
+import { workspacesFor } from './workspaces'
 
 /** ⌘K — jump anywhere. Pages always; riders and EVs load once per open so
  *  "kunal" or "RAFT14" takes you straight to the profile. */
@@ -30,28 +30,27 @@ interface EvRow {
   current_rider_name: string | null
 }
 
-const PAGE_ITEMS: Item[] = WORKSPACES.flatMap((ws) =>
-  ws.pages.map((p) => ({
-    key: 'page:' + p.to,
-    group: 'Pages' as const,
-    label: p.label,
-    sub: ws.label,
-    to: p.to,
-  })),
-)
-// Creator-only page; appended for creators inside the component so nobody
-// else ever sees the entry.
+// System has no workspace page of its own; it is appended for the roles that
+// can open it (admins now, not just the creator) so nobody else sees the entry.
 const SYSTEM_ITEM: Item = { key: 'page:/system', group: 'Pages', label: 'System', sub: 'Admin', to: '/system' }
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const role = user?.role
-  const pageItems = useMemo(() => {
-    if (role === 'creator') return [...PAGE_ITEMS, SYSTEM_ITEM]
-    if (role !== 'recruiter') return PAGE_ITEMS
-    const allowed = new Set(workspacesFor(role).flatMap((ws) => ws.pages.map((p) => p.to)))
-    return PAGE_ITEMS.filter((p) => allowed.has(p.to))
+  // One source of truth for "which pages may this role open" — the same
+  // workspace filter the command bar and the sub-rail use.
+  const pageItems = useMemo<Item[]>(() => {
+    const pages = workspacesFor(role).flatMap((ws) =>
+      ws.pages.map((p) => ({
+        key: 'page:' + p.to,
+        group: 'Pages' as const,
+        label: p.label,
+        sub: ws.label,
+        to: p.to,
+      })),
+    )
+    return role === 'admin' || role === 'creator' ? [...pages, SYSTEM_ITEM] : pages
   }, [role])
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)

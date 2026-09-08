@@ -61,11 +61,11 @@ def _login(client, who):
 def test_recruiter_can_run_the_roster_and_fleet(db, client):
     h = _login(client, _RECRUITER)
     # add a rider (placeholder id), edit hub + bank, tag the real id
-    r = client.post("/api/riders", json={"company": "Spencer's", "name": "Field Hire"}, headers=h)
+    r = client.post("/api/riders", json={"company": "Jiffy", "name": "Field Hire"}, headers=h)
     assert r.status_code == 201, r.text
     rid, pid = r.json()["rider_id"], r.json()["person_id"]
     r = client.patch(
-        f"/api/riders/{rid}?company=Spencer's",
+        f"/api/riders/{rid}?company=Jiffy",
         json={"hub": "South City", "account_no": "12345678", "ifsc": "sbin0001"},
         headers=h,
     )
@@ -73,7 +73,7 @@ def test_recruiter_can_run_the_roster_and_fleet(db, client):
     assert r.json()["hub"] == "South City" and r.json()["ifsc"] == "SBIN0001"
     r = client.post(
         "/api/riders/rename-rider-id",
-        json={"person_id": pid, "company": "Spencer's", "new_rider_id": "9000000001"},
+        json={"person_id": pid, "company": "Jiffy", "new_rider_id": "9000000001"},
         headers=h,
     )
     assert r.status_code == 200, r.text
@@ -132,7 +132,7 @@ def test_recruiter_is_fenced_off_money_and_admin_routes(db, client):
         ).status_code
         == 403
     )
-    assert client.delete("/api/riders/R?company=Blitz", headers=h).status_code == 403
+    assert client.delete("/api/riders/R?company=Kaptan", headers=h).status_code == 403
     assert client.post("/api/requests/1/approve", headers=h).status_code == 403
     assert (
         client.post(f"/api/persons/{pid}/arrears/write-off", json={}, headers=h).status_code == 403
@@ -158,7 +158,7 @@ def test_recruiter_sees_standing_but_not_ledger_or_exports(db, client):
 def test_viewer_role_still_cannot_write(db, client):
     h = _login(client, _USER)
     assert (
-        client.post("/api/riders", json={"company": "Blitz", "name": "X"}, headers=h).status_code
+        client.post("/api/riders", json={"company": "Kaptan", "name": "X"}, headers=h).status_code
         == 403
     )
     assert client.post("/api/requests", json={}, headers=h).status_code == 403
@@ -328,10 +328,10 @@ def test_money_request_validation(db, client):
 def test_activity_is_recorded_and_scoped(db, client):
     rec = _login(client, _RECRUITER)
     r = client.post(
-        "/api/riders", json={"company": "Blitz", "name": "Logged", "hub": "NTS"}, headers=rec
+        "/api/riders", json={"company": "Kaptan", "name": "Logged", "hub": "NTS"}, headers=rec
     )
     rid, pid = r.json()["rider_id"], r.json()["person_id"]
-    client.patch(f"/api/riders/{rid}?company=Blitz", json={"hub": "Axis Hyper"}, headers=rec)
+    client.patch(f"/api/riders/{rid}?company=Kaptan", json={"hub": "Axis Hyper"}, headers=rec)
     make_ev(db, "EV-LOG")
     db.commit()
     client.post("/api/evs/assign", json={"ev_id": "EV-LOG", "person_id": pid}, headers=rec)
@@ -457,7 +457,7 @@ def test_identity_numbers_set_validated_and_unique(db, client):
     r = client.post(
         "/api/riders",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "name": "New With Id",
             "aadhaar_no": "9999 8888 7777",
             "pan_no": "zzzzz9999z",
@@ -470,7 +470,7 @@ def test_identity_numbers_set_validated_and_unique(db, client):
     # ...and a known Aadhaar on a NEW rider is a duplicate warning, not a silent second person.
     r = client.post(
         "/api/riders",
-        json={"company": "Blitz", "name": "Someone Else", "aadhaar_no": "123456789012"},
+        json={"company": "Kaptan", "name": "Someone Else", "aadhaar_no": "123456789012"},
         headers=h,
     )
     assert r.status_code == 409 and "Id Rider" in r.text

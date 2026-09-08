@@ -33,7 +33,7 @@ COMPANIES: list[dict] = [
         "is_active": 1,
     },
     {
-        "company_name": "Blitz",
+        "company_name": "Kaptan",
         "parser_type": "blitz",
         "payout_sheet": "0",
         "rider_id_column": "rider_id",
@@ -49,9 +49,9 @@ COMPANIES: list[dict] = [
     },
     {
         # Provisional (2026-09): no Nykaa sample file yet, so the layout is a
-        # clone of Blitz's. Adjust the columns with `payout-admin update-company`
-        # once a real file arrives. Nykaa pays Blitz riders under their BLITZ rider ids — the
-        # engine links an unknown Nykaa id to the same id at Blitz automatically
+        # clone of Kaptan's. Adjust the columns with `payout-admin update-company`
+        # once a real file arrives. Nykaa pays Kaptan riders under their KAPTAN rider ids — the
+        # engine links an unknown Nykaa id to the same id at Kaptan automatically
         # (companies.rider_ids_shared_with).
         "company_name": "Nykaa",
         "parser_type": "nykaa",
@@ -66,7 +66,7 @@ COMPANIES: list[dict] = [
         "hold_amount_column": None,
         "hold_status_column": None,
         "is_active": 1,
-        "rider_ids_shared_with": "Blitz",
+        "rider_ids_shared_with": "Kaptan",
     },
     {
         "company_name": "Myntra",
@@ -84,7 +84,7 @@ COMPANIES: list[dict] = [
         "is_active": 1,
     },
     {
-        "company_name": "Spencer's",
+        "company_name": "Jiffy",
         "parser_type": "spencers",
         # Sheets are now named WEEK1, WEEK2, … so we just take the first sheet
         # (the parser also finds the payout sheet by its columns).
@@ -106,7 +106,7 @@ COMPANIES: list[dict] = [
         "cadence": "slots",
     },
     # ── Companies without a payout file (2026-09) ──────────────────────────
-    # Zomato and Flipkart pay riders themselves: roster only, nothing to
+    # Zomato and Elastic pay riders themselves: roster only, nothing to
     # process. Shadowfax sends no file either — the office reads each rider's
     # order count off the Shadowfax dashboard and we pay ₹15 an order.
     {
@@ -146,7 +146,7 @@ COMPANIES: list[dict] = [
         "₹15 per order paid by us.",
     },
     {
-        "company_name": "Flipkart",
+        "company_name": "Elastic",
         "parser_type": "none",
         "payout_sheet": None,
         "rider_id_column": "rider_id",

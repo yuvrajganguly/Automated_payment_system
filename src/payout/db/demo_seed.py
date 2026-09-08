@@ -16,9 +16,9 @@ import random
 import sqlite3
 from datetime import date, timedelta
 
-COMPANIES = ["Dealshare", "Myntra", "Jiffy", "Zepto", "Blitz"]
+COMPANIES = ["Dealshare", "Myntra", "Curato", "Zepto", "Kaptan"]
 # Rough relative size of each company's rider base.
-CO_WEIGHT = {"Dealshare": 8, "Myntra": 16, "Jiffy": 9, "Zepto": 6, "Blitz": 11}
+CO_WEIGHT = {"Dealshare": 8, "Myntra": 16, "Curato": 9, "Zepto": 6, "Kaptan": 11}
 MODELS = [
     ("Raft", "Regular", 125000),
     ("Raft", "Blue", 129500),
@@ -388,7 +388,7 @@ def seed_demo(conn: sqlite3.Connection) -> None:
     # ── COD holds (newest week) ─────────────────────────────────────────────
     cod_persons = rng.sample(persons, 16)
     for p in cod_persons:
-        src = "jiffy_sheet" if p["primary"] == "Jiffy" else "myntra_column"
+        src = "jiffy_sheet" if p["primary"] == "Curato" else "myntra_column"
         conn.execute(
             "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, "
             "person_id, worker_code, order_number, amount, payment_mode, txn_status, "

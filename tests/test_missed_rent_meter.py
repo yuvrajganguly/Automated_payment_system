@@ -24,11 +24,11 @@ def _blitz_file(rows):
 def test_missed_rent_then_catchup_does_not_double_charge(db):
     pid = db.execute(
         "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
-        "VALUES ('P','Blitz','P1')"
+        "VALUES ('P','Kaptan','P1')"
     ).lastrowid
     db.execute(
         "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-        "VALUES ('P1','Blitz',?,'P',1)",
+        "VALUES ('P1','Kaptan',?,'P',1)",
         (pid,),
     )
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
@@ -48,13 +48,13 @@ def test_missed_rent_then_catchup_does_not_double_charge(db):
     )
     db.commit()
 
-    # Cycle A: rider ABSENT from Blitz 06-14..06-20 -> rent falls to arrears.
+    # Cycle A: rider ABSENT from Kaptan 06-14..06-20 -> rent falls to arrears.
     process_cycle(
-        "Blitz", date(2026, 6, 14), date(2026, 6, 20), _blitz_file([("OTHER", 0)]), commit=True
+        "Kaptan", date(2026, 6, 14), date(2026, 6, 20), _blitz_file([("OTHER", 0)]), commit=True
     )
     # Cycle B: rider PRESENT 06-21..06-27 with a payout big enough to settle.
     process_cycle(
-        "Blitz", date(2026, 6, 21), date(2026, 6, 27), _blitz_file([("P1", 6000)]), commit=True
+        "Kaptan", date(2026, 6, 21), date(2026, 6, 27), _blitz_file([("P1", 6000)]), commit=True
     )
 
     agg = {
@@ -87,11 +87,11 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     days, never a catch-up that would double-charge the arrears days."""
     pid = db.execute(
         "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
-        "VALUES ('S','Blitz','S1')"
+        "VALUES ('S','Kaptan','S1')"
     ).lastrowid
     db.execute(
         "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-        "VALUES ('S1','Blitz',?,'S',1)",
+        "VALUES ('S1','Kaptan',?,'S',1)",
         (pid,),
     )
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
@@ -115,13 +115,13 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, days) "
-        "VALUES (?, 'S1', 'Blitz', '2026-06-15', '2026-06-21', 'RENT_MISSED', -125000, 0, 7)",
+        "VALUES (?, 'S1', 'Kaptan', '2026-06-15', '2026-06-21', 'RENT_MISSED', -125000, 0, 7)",
         (pid,),
     )
     db.commit()
 
     process_cycle(
-        "Blitz", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("S1", 6000)]), commit=True
+        "Kaptan", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("S1", 6000)]), commit=True
     )
 
     rent = db.execute(
@@ -141,11 +141,11 @@ def test_absence_missed_is_capped_when_arrears(db):
     only, not a catch-up that double-counts the earlier missed week."""
     pid = db.execute(
         "INSERT INTO person_registry (display_name, deduction_company, deduction_rider_id) "
-        "VALUES ('T','Blitz','T1')"
+        "VALUES ('T','Kaptan','T1')"
     ).lastrowid
     db.execute(
         "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-        "VALUES ('T1','Blitz',?,'T',1)",
+        "VALUES ('T1','Kaptan',?,'T',1)",
         (pid,),
     )
     db.execute("INSERT OR IGNORE INTO balances (person_id,current_balance) VALUES (?,0)", (pid,))
@@ -166,14 +166,14 @@ def test_absence_missed_is_capped_when_arrears(db):
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, days) "
-        "VALUES (?, 'T1', 'Blitz', '2026-06-15', '2026-06-21', 'RENT_MISSED', -125000, 0, 7)",
+        "VALUES (?, 'T1', 'Kaptan', '2026-06-15', '2026-06-21', 'RENT_MISSED', -125000, 0, 7)",
         (pid,),
     )
     db.commit()
 
     # T1 is ABSENT from this 7-day cycle (file has a different rider).
     process_cycle(
-        "Blitz", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("OTHER", 0)]), commit=True
+        "Kaptan", date(2026, 6, 22), date(2026, 6, 28), _blitz_file([("OTHER", 0)]), commit=True
     )
 
     m = db.execute(

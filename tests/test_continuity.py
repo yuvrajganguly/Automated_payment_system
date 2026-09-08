@@ -45,7 +45,7 @@ def test_gap_already_in_arrears_is_not_caught_up(db):
     db.execute(
         "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
         "event_type, amount, balance_after, days) "
-        "VALUES (?, 'B1', 'Blitz', '2026-03-09', '2026-03-15', 'RENT_MISSED', -126000, 0, 7)",
+        "VALUES (?, 'B1', 'Kaptan', '2026-03-09', '2026-03-15', 'RENT_MISSED', -126000, 0, 7)",
         (pid,),
     )
     db.commit()

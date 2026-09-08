@@ -6,7 +6,7 @@ from payout.domain.models import CodHoldLine, ParseResult, RiderRecord
 
 def test_jiffy_sum_per_worker():
     pr = ParseResult(
-        company="Jiffy",
+        company="Curato",
         records=[RiderRecord("J1", 500), RiderRecord("J2", 600)],
         cod_lines=[
             CodHoldLine("J1", 100, txn_status="Pending"),
@@ -23,7 +23,7 @@ def test_jiffy_sum_per_worker():
 
 def test_jiffy_skips_non_pending():
     pr = ParseResult(
-        company="Jiffy",
+        company="Curato",
         records=[],
         cod_lines=[
             CodHoldLine("J1", 100, txn_status="Pending"),
@@ -37,7 +37,7 @@ def test_jiffy_skips_non_pending():
 
 def test_blank_status_counts_as_pending():
     pr = ParseResult(
-        company="Jiffy",
+        company="Curato",
         records=[],
         cod_lines=[CodHoldLine("J1", 100, txn_status=None), CodHoldLine("J2", 50, txn_status="")],
     )
@@ -60,13 +60,14 @@ def test_myntra_inline_column():
 def test_persist_holds(db):
     pid = db.execute("INSERT INTO person_registry (display_name) VALUES ('R')").lastrowid
     db.execute(
-        "INSERT INTO rider_master (rider_id, company, person_id, name) VALUES ('J1','Jiffy',?,'R')",
+        "INSERT INTO rider_master (rider_id, company, person_id, name) "
+        "VALUES ('J1','Curato',?,'R')",
         (pid,),
     )
     db.commit()
     h = compute_holds(
         ParseResult(
-            company="Jiffy",
+            company="Curato",
             records=[],
             cod_lines=[
                 CodHoldLine("J1", 100, order_number="O1", txn_status="Pending"),
@@ -74,10 +75,10 @@ def test_persist_holds(db):
             ],
         )
     )
-    persist_holds(db, "Jiffy", date(2026, 3, 2), date(2026, 3, 8), h)
+    persist_holds(db, "Curato", date(2026, 3, 2), date(2026, 3, 8), h)
     db.commit()
     rows = db.execute(
-        "SELECT person_id, amount, source FROM cod_holds WHERE company='Jiffy'"
+        "SELECT person_id, amount, source FROM cod_holds WHERE company='Curato'"
     ).fetchall()
     assert len(rows) == 2
     assert all(r["person_id"] == pid and r["source"] == "jiffy_sheet" for r in rows)

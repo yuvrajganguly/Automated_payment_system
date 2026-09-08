@@ -38,6 +38,7 @@ const InactivePage = page(() => import('./pages/InactivePage'), 'InactivePage')
 const CodPage = page(() => import('./pages/CodPage'), 'CodPage')
 const PaymentsPage = page(() => import('./pages/PaymentsPage'), 'PaymentsPage')
 const DashboardPage = page(() => import('./pages/DashboardPage'), 'DashboardPage')
+const RecruitersPage = page(() => import('./pages/RecruitersPage'), 'RecruitersPage')
 const CompanyPage = page(() => import('./pages/CompanyPage'), 'CompanyPage')
 const HubsPage = page(() => import('./pages/HubsPage'), 'HubsPage')
 const FieldPage = page(() => import('./pages/FieldPage'), 'FieldPage')
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/cod" element={<CodPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/recruiters" element={<RecruitersPage />} />
             <Route path="/companies" element={<CompaniesPage />} />
             <Route path="/companies/:name" element={<CompanyPage />} />
             <Route path="/hubs" element={<HubsPage />} />

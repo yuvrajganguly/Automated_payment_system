@@ -13,7 +13,7 @@ export interface Company {
   has_hold_sheet: boolean
   hold_style: string | null
   is_active: boolean
-  /** Another company whose rider IDs this one reuses (Nykaa -> Blitz). */
+  /** Another company whose rider IDs this one reuses (Nykaa -> Kaptan). */
   rider_ids_shared_with?: string | null
   /** payout_file (they send a file) | per_order (we pay orders × rate) | direct (they pay riders). */
   payment_model?: 'payout_file' | 'per_order' | 'direct' | 'salary'

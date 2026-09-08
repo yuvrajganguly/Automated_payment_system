@@ -221,7 +221,9 @@ def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> E
                 "SELECT 1 FROM person_registry WHERE person_id=?", (body.person_id,)
             ).fetchone():
                 raise HTTPException(404, f"Person {body.person_id} not found")
-            handover = _open_assignment(conn, body.ev_id, body.person_id, body.handover_date)
+            handover = _open_assignment(
+                conn, body.ev_id, body.person_id, body.handover_date, user["email"]
+            )
             status_, current_person_id = "in_use", body.person_id
         record_activity(
             conn,
@@ -246,7 +248,9 @@ def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> E
     )
 
 
-def _open_assignment(conn, ev_id: str, pid: int, handover_date: date | None) -> str | None:
+def _open_assignment(
+    conn, ev_id: str, pid: int, handover_date: date | None, by: str | None = None
+) -> str | None:
     """Open an ev_assignments row for (person, EV) and mark the unit in_use.
     Refuses when either side already has an open assignment."""
     if conn.execute(
@@ -259,8 +263,9 @@ def _open_assignment(conn, ev_id: str, pid: int, handover_date: date | None) -> 
         raise HTTPException(409, "EV already assigned to someone else")
     hod = handover_date.isoformat() if handover_date else None
     conn.execute(
-        "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
-        (pid, ev_id, hod),
+        "INSERT INTO ev_assignments (person_id, ev_id, handover_date, assigned_by) "
+        "VALUES (?,?,?,?)",
+        (pid, ev_id, hod, by),
     )
     conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev_id,))
     # If there's a stale open maintenance window for this EV, close it
@@ -299,7 +304,7 @@ def assign_ev(body: EvAssignIn, user: dict = Depends(require_recruiter)) -> dict
             pid = rm["person_id"]
         else:
             raise HTTPException(400, "Provide person_id, or (rider_id + company)")
-        hod = _open_assignment(conn, body.ev_id, pid, body.handover_date)
+        hod = _open_assignment(conn, body.ev_id, pid, body.handover_date, user["email"])
         record_activity(
             conn,
             user,
@@ -366,7 +371,7 @@ def _close_open_maintenance(conn, ev_id: str, today: str) -> None:
 
 
 @router.post("/return")
-def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
+def return_ev(body: EvReturnIn, user: dict = Depends(require_recruiter)) -> dict:
     """Return an EV to the provider (retire it) - whether it is currently with a
     rider OR sitting as a spare.
 
@@ -385,8 +390,9 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
         if a:
             ev_id, person_id = a["ev_id"], a["person_id"]
             conn.execute(
-                "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
-                (today, a["assignment_id"]),
+                "UPDATE ev_assignments SET returned_date=?, returned_by=? "
+                "WHERE assignment_id=?",
+                (today, user["email"], a["assignment_id"]),
             )
             # Backdated? Reverse every rent charge for days the rider no
             # longer had the EV (see payout/domain/return_heal.py).
@@ -394,7 +400,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
                 conn,
                 assignment_id=a["assignment_id"],
                 retire=True,
-                created_by=_["email"],
+                created_by=user["email"],
             )
             # EV closed -> the admin now answers what happened to the security
             # deposit (POST /evs/closeouts/{assignment_id}); until then the
@@ -410,7 +416,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
         _close_open_maintenance(conn, ev_id, today)
         record_activity(
             conn,
-            _,
+            user,
             "ev.return",
             entity_type="ev",
             entity_id=ev_id,
@@ -431,7 +437,7 @@ def return_ev(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
 
 
 @router.post("/to-spare")
-def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
+def mark_spare(body: EvReturnIn, user: dict = Depends(require_recruiter)) -> dict:
     """Take an EV back from its rider and keep it as a SPARE (available for
     reassignment) instead of retiring it.
 
@@ -457,7 +463,7 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
             conn.execute("UPDATE ev_units SET status='spare' WHERE ev_id=?", (body.ev_id,))
             record_activity(
                 conn,
-                _,
+                user,
                 "ev.spare",
                 entity_type="ev",
                 entity_id=body.ev_id,
@@ -473,14 +479,15 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
                 "heal": None,
             }
         conn.execute(
-            "UPDATE ev_assignments SET returned_date=? WHERE assignment_id=?",
-            (today, a["assignment_id"]),
+            "UPDATE ev_assignments SET returned_date=?, returned_by=? "
+            "WHERE assignment_id=?",
+            (today, user["email"], a["assignment_id"]),
         )
         heal = heal_backdated_return(
             conn,
             assignment_id=a["assignment_id"],
             retire=False,
-            created_by=_["email"],
+            created_by=user["email"],
         )
         mark_pending(conn, a["assignment_id"])
         closeout = _closeout_prompt(conn, a["assignment_id"])
@@ -488,7 +495,7 @@ def mark_spare(body: EvReturnIn, _: dict = Depends(require_recruiter)) -> dict:
         _close_open_maintenance(conn, a["ev_id"], today)
         record_activity(
             conn,
-            _,
+            user,
             "ev.spare",
             entity_type="ev",
             entity_id=a["ev_id"],
@@ -764,7 +771,7 @@ def undismiss_suspected_return(
 
 
 @router.post("/amend-return")
-def amend_return(body: EvAmendReturnIn, _: dict = Depends(require_admin)) -> dict:
+def amend_return(body: EvAmendReturnIn, user: dict = Depends(require_admin)) -> dict:
     """Move an already-recorded return to an EARLIER date and heal the books.
 
     For the common ops mistake: the EV actually went back on the 3rd, but
@@ -799,10 +806,28 @@ def amend_return(body: EvAmendReturnIn, _: dict = Depends(require_admin)) -> dic
             conn,
             assignment_id=a["assignment_id"],
             retire=(u is not None and u["status"] == "returned"),
-            created_by=_["email"],
+            created_by=user["email"],
         )
         # The amend may free NEW debt below the deposit line; the deposit was
         # already applied once at the original return, so do NOT re-apply.
+        #
+        # This is the one EV action that never reached the activity feed —
+        # ``ev.amend_return`` was listed in ACTIONS but nothing wrote it, so a
+        # correction that moves money left no trace on the rider's timeline.
+        record_activity(
+            conn,
+            user,
+            "ev.amend_return",
+            entity_type="ev",
+            entity_id=body.ev_id,
+            person_id=a["person_id"],
+            details={
+                "from": a["returned_date"],
+                "to": new_ret,
+                "refunded_paise": (heal or {}).get("refunded"),
+                "days_reversed": (heal or {}).get("days_reversed"),
+            },
+        )
         conn.commit()
     return {
         "amended": True,

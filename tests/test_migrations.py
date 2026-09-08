@@ -143,7 +143,7 @@ def test_pre_runner_database_gets_every_migration():
 
 
 def test_0007_upgrades_stock_spencers_config_only():
-    """An existing DB whose Spencer's row still carries the pre-2026-08 headers
+    """An existing DB whose Jiffy row still carries the pre-2026-08 headers
     gets the '|'-alternatives; a row the operator customised is left alone."""
     from payout.db.migrations import _0007_cod_hub_and_spencers_layout
 
@@ -154,7 +154,7 @@ def test_0007_upgrades_stock_spencers_config_only():
             "UPDATE companies SET rider_id_column='Rider id', "
             "payout_column='Total Payable Amount', orders_column='Delivered Orders' "
             "WHERE company_name=?",
-            ("Spencer's",),
+            ("Jiffy",),
         )
         conn.execute(
             "INSERT INTO companies (company_name, parser_type, rider_id_column, payout_column, "
@@ -164,7 +164,7 @@ def test_0007_upgrades_stock_spencers_config_only():
         sp = conn.execute(
             "SELECT rider_id_column, payout_column, orders_column FROM companies "
             "WHERE company_name=?",
-            ("Spencer's",),
+            ("Jiffy",),
         ).fetchone()
         assert tuple(sp) == (
             "Rider id|rider_phone",
@@ -222,7 +222,7 @@ def test_0011_collapses_raft_warrior_into_regular_only_at_equal_rate(db):
 
 def test_0013_0014_payment_model_and_new_companies(db):
     """Fresh DB: seed carries the three file-less companies with their model;
-    Spencer's is the slots company. Re-running 0014 never duplicates."""
+    Jiffy is the slots company. Re-running 0014 never duplicates."""
     rows = {
         r["company_name"]: dict(r)
         for r in db.execute(
@@ -231,11 +231,11 @@ def test_0013_0014_payment_model_and_new_companies(db):
         )
     }
     assert rows["Zomato"]["payment_model"] == "direct"
-    assert rows["Flipkart"]["payment_model"] == "direct"
+    assert rows["Elastic"]["payment_model"] == "direct"
     assert rows["Shadowfax"]["payment_model"] == "per_order"
     assert rows["Shadowfax"]["per_order_rate"] == 1500
-    assert rows["Spencer's"]["cadence"] == "slots"
-    assert rows["Blitz"]["payment_model"] == "payout_file"
+    assert rows["Jiffy"]["cadence"] == "slots"
+    assert rows["Kaptan"]["payment_model"] == "payout_file"
     from payout.db.migrations import _0014_seed_direct_and_per_order_companies
 
     _0014_seed_direct_and_per_order_companies(db)
@@ -259,5 +259,5 @@ def test_cadence_next_cycle():
     )
     assert next_cycle_for("X", date(2026, 9, 7), "slots") == (date(2026, 9, 8), date(2026, 9, 14))
     assert next_cycle_for("X", date(2026, 9, 6), "weekly") == (date(2026, 9, 7), date(2026, 9, 13))
-    # No cadence given: Spencer's is still the slots company.
-    assert next_cycle_for("Spencer's", date(2026, 9, 14)) == (date(2026, 9, 15), date(2026, 9, 21))
+    # No cadence given: Jiffy is still the slots company.
+    assert next_cycle_for("Jiffy", date(2026, 9, 14)) == (date(2026, 9, 15), date(2026, 9, 21))

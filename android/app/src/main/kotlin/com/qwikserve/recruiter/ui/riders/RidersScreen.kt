@@ -42,6 +42,7 @@ import com.qwikserve.recruiter.ui.common.SearchField
 import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Skeleton
 import com.qwikserve.recruiter.ui.common.Tag
+import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -60,6 +61,22 @@ import javax.inject.Inject
 /** Which riders: everyone, or only the ones I onboarded. */
 enum class Scope { MINE, ALL }
 
+/**
+ * Working or idle, by the server's 12-day rule: a rider is "working" when a
+ * paysheet company paid them for a cycle that ended within the last twelve
+ * days. The flag is cached with the rest of the roster, so this filter works
+ * with no signal like the zone and Mine/All ones do.
+ */
+enum class Activity(val label: String, val working: Boolean?) {
+    ALL("All", null), WORKING("Working", true), IDLE("Idle", false);
+
+    companion object {
+        fun of(label: String): Activity = entries.firstOrNull { it.label == label } ?: ALL
+    }
+}
+
+private data class Filters(val q: String, val scope: Scope, val zone: String, val activity: Activity)
+
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
 class RidersViewModel @Inject constructor(
@@ -71,6 +88,7 @@ class RidersViewModel @Inject constructor(
     val scope = MutableStateFlow(Scope.ALL)
     /** "North" / "South" / "All" — All riders opens on the recruiter's own zone. */
     val zone = MutableStateFlow(app.defaultZone())
+    val activity = MutableStateFlow(Activity.ALL)
     var refreshing by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -82,12 +100,13 @@ class RidersViewModel @Inject constructor(
 
     /** The list reacts to typing and filters from Room — no network on a keystroke. */
     val riders: StateFlow<List<RiderEntity>> =
-        combine(query.debounce(80), scope, zone) { q, s, z -> Triple(q, s, z) }
-            .flatMapLatest { (q, s, z) ->
+        combine(query.debounce(80), scope, zone, activity) { q, s, z, a -> Filters(q, s, z, a) }
+            .flatMapLatest { f ->
                 repo.search(
-                    q,
-                    mine = if (s == Scope.MINE) me.orEmpty() else null,
-                    zone = if (s == Scope.ALL && z != "All") z else null,
+                    f.q,
+                    mine = if (f.scope == Scope.MINE) me.orEmpty() else null,
+                    zone = if (f.scope == Scope.ALL && f.zone != "All") f.zone else null,
+                    working = f.activity.working,
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -124,6 +143,7 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
     val q by vm.query.collectAsStateWithLifecycle()
     val scope by vm.scope.collectAsStateWithLifecycle()
     val zone by vm.zone.collectAsStateWithLifecycle()
+    val activity by vm.activity.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -146,6 +166,15 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                     Chips(listOf("North", "South", "Misc", "All"), zone, onSelect = { vm.zone.value = it })
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Kicker("Working")
+                Spacer(Modifier.width(10.dp))
+                Chips(
+                    Activity.entries.map { it.label },
+                    activity.label,
+                    onSelect = { vm.activity.value = Activity.of(it) },
+                )
+            }
             SearchField(q, onChange = { vm.query.value = it }, placeholder = "Name, rider id, phone or hub")
         }
         Rule()
@@ -156,6 +185,10 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 riders.isEmpty() -> Note(
                     when {
                         q.isNotBlank() -> "No rider matches \"$q\"."
+                        activity == Activity.WORKING ->
+                            "Nobody here has been paid for a cycle in the last 12 days. Try All."
+                        activity == Activity.IDLE ->
+                            "Everybody here is working — nothing idle to chase."
                         scope == Scope.MINE -> "You haven't onboarded anyone yet. Riders you add will show here."
                         zone != "All" -> "No riders at $zone stores yet — or their hubs still need a zone on the web."
                         else -> "No riders yet."
@@ -165,13 +198,27 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                     items(riders, key = { it.riderId + "@" + it.company }) { r ->
                         ListRow(
                             title = r.name ?: "—",
-                            sub = listOfNotNull(r.riderId, r.hub, r.zone?.let { "$it zone" }).joinToString(" · "),
+                            sub = listOfNotNull(
+                                r.riderId,
+                                r.hub,
+                                r.zone?.let { "$it zone" },
+                                lastWorked(r),
+                            ).joinToString(" · "),
                             onClick = { onOpenPerson(r.personId) },
                             leading = { Avatar(r.personId, r.name) },
+                            // Company and EV on top, the working state under
+                            // them — three tags side by side would run off a
+                            // 360 dp phone.
                             trailing = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Tag(r.company, outline = true)
-                                    if (r.vehicle == "EV") Tag("EV", accent = true)
+                                Column(
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Tag(r.company, outline = true)
+                                        if (r.vehicle == "EV") Tag("EV", accent = true)
+                                    }
+                                    Tag(if (r.working == true) "working" else "idle", accent = r.working == true)
                                 }
                             },
                         )
@@ -184,6 +231,10 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
         BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
     }
 }
+
+/** "last worked 4 Sep", or "never worked" for a rider no company ever paid. */
+private fun lastWorked(r: RiderEntity): String =
+    r.lastWorkedOn?.let { "last worked " + shortDate(it) } ?: "never worked"
 
 @Composable
 private fun SkeletonList() {

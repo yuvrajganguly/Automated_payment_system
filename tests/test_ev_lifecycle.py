@@ -27,7 +27,7 @@ def _setup(db, ev_id="EVZ"):
     pid = db.execute("INSERT INTO person_registry (display_name) VALUES ('R')").lastrowid
     db.execute(
         "INSERT INTO rider_master (rider_id,company,person_id,name,is_active) "
-        "VALUES ('R1','Blitz',?,'R',1)",
+        "VALUES ('R1','Kaptan',?,'R',1)",
         (pid,),
     )
     mid = db.execute(
@@ -40,7 +40,7 @@ def _setup(db, ev_id="EVZ"):
 
 def test_mark_spare_then_return_spare(db):
     _setup(db, "EVZ")
-    assign_ev(EvAssignIn(ev_id="EVZ", rider_id="R1", company="Blitz"), _USER)
+    assign_ev(EvAssignIn(ev_id="EVZ", rider_id="R1", company="Kaptan"), _USER)
     assert _status("EVZ") == "in_use"
 
     # take it back into the spare pool (rent stops, EV stays available)

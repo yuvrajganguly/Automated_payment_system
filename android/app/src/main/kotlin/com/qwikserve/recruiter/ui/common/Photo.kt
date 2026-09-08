@@ -29,10 +29,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.qwikserve.recruiter.ui.theme.Qwik
 import java.io.File
 
@@ -82,18 +84,24 @@ private fun cameraTarget(context: Context): Uri {
 }
 
 /**
- * The square photo tile used on the onboarding form and the rider's page:
- * the picture when there is one, otherwise a prompt. Tapping it offers the
- * camera or the gallery.
+ * The square photo tile used on the onboarding form, a rider's page, the
+ * odometer card and the Profile tab: the picture when there is one, otherwise
+ * a prompt. Tapping it offers the camera or the gallery.
+ *
+ * Three ways to show what is already there — a [picked] file the recruiter
+ * just chose, a rider's own [personId] thumbnail, or any [url] on the server
+ * (a dash photo, a recruiter's face). The first one given wins.
  */
 @Composable
 fun PhotoTile(
     picked: Uri?,
     personId: Long? = null,
+    url: String? = null,
     name: String? = null,
     version: Int = 0,
     size: Dp = 96.dp,
     busy: Boolean = false,
+    label: String? = null,
     onPicked: (Uri) -> Unit,
 ) {
     val picker = rememberPhotoPicker(onPicked)
@@ -112,7 +120,15 @@ fun PhotoTile(
                     modifier = Modifier.size(size),
                 )
                 personId != null -> Avatar(personId, name, size = size, thumb = false, version = version)
-                else -> Text("Photo", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+                url != null -> SubcomposeAsyncImage(
+                    model = if (version > 0) "$url${if (url.contains('?')) "&" else "?"}v=$version" else url,
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(size),
+                    loading = { Prompt(label) },
+                    error = { Prompt(label) },
+                )
+                else -> Prompt(label)
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -125,11 +141,22 @@ fun PhotoTile(
             }
         } else {
             Text(
-                if (picked != null) "Tap to change" else "Tap to add",
+                if (picked != null || url != null) "Tap to change" else "Tap to add",
                 style = MaterialTheme.typography.bodySmall,
                 color = Qwik.N600,
                 modifier = Modifier.clickable { asking = true }.padding(end = 8.dp).width(size),
             )
         }
     }
+}
+
+@Composable
+private fun Prompt(label: String?) {
+    Text(
+        label ?: "Photo",
+        style = MaterialTheme.typography.bodySmall,
+        color = Qwik.N700,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 6.dp),
+    )
 }

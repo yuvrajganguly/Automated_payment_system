@@ -53,6 +53,17 @@ ACTIONS: dict[str, str] = {
     "hub.update": "Updated a store",
     "referral.create": "Recorded a referral",
     "referral.void": "Cancelled a referral",
+    # Written for a while before they were named here, so the feed showed the
+    # raw dotted string as its own label. Registering them costs nothing and
+    # the timeline reads properly.
+    "person.identity": "Set Aadhaar / PAN",
+    "ev.suspected_return.dismiss": "Dismissed a suspected EV return",
+    "ev.suspected_return.undismiss": "Re-flagged a suspected EV return",
+    "company.create": "Added a company",
+    "company.update": "Updated a company",
+    "profile.update": "Updated their profile",
+    "shift.start": "Logged the opening odometer",
+    "shift.end": "Logged the closing odometer",
 }
 
 

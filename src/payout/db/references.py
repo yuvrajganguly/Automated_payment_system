@@ -1,4 +1,4 @@
-"""Every table that references a person or an EV — in one place.
+"""Every table that references a person, an EV or a company — in one place.
 
 Person merges (``persons.link_riders``, ``creator.force_merge``) and the
 creator's hard deletes each carried their own hand-written list of dependent
@@ -40,6 +40,95 @@ EV_REFS: tuple[tuple[str, str], ...] = (
     ("ev_assignments", "ev_id"),
     ("ev_maintenance", "ev_id"),
 )
+
+
+# (table, column) pairs holding a company NAME as text. ``companies.company_name``
+# is the primary key — there is no surrogate id — so the name is copied verbatim
+# into every table below, several of them inside a composite primary key or a
+# UNIQUE constraint. Renaming a company means updating all of them in one
+# transaction; miss one and its rows point at a company that no longer exists.
+COMPANY_REFS: tuple[tuple[str, str], ...] = (
+    ("person_registry", "deduction_company"),
+    ("rider_master", "company"),  # part of PK (rider_id, company)
+    ("transactions", "company"),
+    ("balances", "xc_origin_company"),
+    ("cod_holds", "company"),
+    ("hub_codes", "company"),  # part of PK (company, code)
+    ("company_hubs", "company"),  # part of PK (company, hub)
+    ("referrals", "company"),
+    ("ev_requests", "company"),
+    ("salary_inputs", "company"),
+    ("company_cycles", "company"),  # part of UNIQUE(company, cycle_start, cycle_end)
+    ("companies", "rider_ids_shared_with"),  # company -> company pointer
+)
+
+
+def rename_company(conn, old: str, new: str) -> bool:
+    """Rename a company everywhere, including history.
+
+    Returns False, changing nothing, when there is no such company or the new
+    name is already taken — both make this a no-op, so the caller can run it
+    twice. Raises ``ValueError``, changing nothing, when rows already sit under
+    the new name in a table that keys on (company, …); see below.
+
+    ``activity_log.entity_id`` carries a composite ``rider_id@company`` string
+    baked in at write time; it is rewritten by suffix here so the feed keeps
+    resolving. The name is always bound as a parameter: a double-quoted
+    "Spencer's" is an identifier on PostgreSQL, not a string.
+    """
+    if old == new:
+        return False
+    have = {r[0] for r in conn.execute(
+        "SELECT company_name FROM companies WHERE company_name IN (?, ?)", (old, new)
+    ).fetchall()}
+    if old not in have or new in have:
+        return False
+
+    # Four of the tables below carry the company inside a composite primary key
+    # or a UNIQUE constraint, so a row already sitting under the new name would
+    # make the UPDATE raise. Migrations run as one transaction, so that would
+    # roll the whole batch back and the app would fail to start — a rename is
+    # not worth an outage. This is reachable in practice: deleting a company
+    # leaves company_hubs rows behind, and a later rename onto that name
+    # collides with them. Report the clash instead, and change nothing.
+    for table, key in (
+        ("rider_master", "rider_id"),
+        ("hub_codes", "code"),
+        ("company_hubs", "hub"),
+        ("company_cycles", "cycle_start"),
+    ):
+        clash = conn.execute(
+            f"SELECT COUNT(*) FROM {table} a JOIN {table} b "  # noqa: S608 - literals above
+            f"ON a.{key} = b.{key} WHERE a.company=? AND b.company=?",
+            (old, new),
+        ).fetchone()[0]
+        if clash:
+            raise ValueError(
+                f"cannot rename {old!r} to {new!r}: {clash} row(s) in {table} already "
+                f"exist under {new!r}. Merge or remove them first."
+            )
+
+    # The PK row first: every other table holds a copy, not a real foreign key,
+    # so the order only matters for readability.
+    conn.execute("UPDATE companies SET company_name=? WHERE company_name=?", (new, old))
+    for table, col in COMPANY_REFS:
+        conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new, old))
+    # entity_id is "<rider_id>@<company>": keep everything up to the '@' and
+    # re-attach the new name. LENGTH(old) counts the name only, so the '@'
+    # survives the trim, and trimming from the right means a rider_id that
+    # itself contains the company name is not corrupted.
+    #
+    # The match is an exact suffix comparison rather than LIKE '%@<old>'. A
+    # company name is data: '_' and '%' are LIKE wildcards, so a company called
+    # Big_Basket would have matched (and rewritten) BigXBasket's rows. Worse,
+    # SQLite's LIKE is case-insensitive and PostgreSQL's is not, so the same
+    # migration would have produced different data on the two backends.
+    conn.execute(
+        "UPDATE activity_log SET entity_id = SUBSTR(entity_id, 1, LENGTH(entity_id) - ?) || ? "
+        "WHERE SUBSTR(entity_id, LENGTH(entity_id) - ? + 1) = ?",
+        (len(old), new, len(old) + 1, f"@{old}"),
+    )
+    return True
 
 
 def repoint_person(conn, from_person_id: int, to_person_id: int) -> None:

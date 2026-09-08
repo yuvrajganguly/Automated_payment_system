@@ -48,12 +48,12 @@ def client(db):
 
 def test_same_name_creates_a_new_person(db, client):
     existing = make_person(db, "Amit Naskar")
-    make_rider(db, existing, "J1", "Jiffy", "Amit Naskar")
+    make_rider(db, existing, "J1", "Curato", "Amit Naskar")
     db.commit()
     r = client.post(
         "/api/riders/onboard-unknowns",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "rows": [{"rider_id": "B9", "action": "create", "name": "Amit Naskar"}],
         },
     )
@@ -71,12 +71,12 @@ def test_same_name_creates_a_new_person(db, client):
 
 def test_explicit_link_still_works(db, client):
     existing = make_person(db, "Same Guy")
-    make_rider(db, existing, "J2", "Jiffy", "Same Guy")
+    make_rider(db, existing, "J2", "Curato", "Same Guy")
     db.commit()
     r = client.post(
         "/api/riders/onboard-unknowns",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "rows": [{"rider_id": "B10", "action": "link", "link_to_person_id": existing}],
         },
     )
@@ -86,13 +86,13 @@ def test_explicit_link_still_works(db, client):
 
 def test_shared_account_is_still_a_conflict(db, client):
     existing = make_person(db, "Owner")
-    make_rider(db, existing, "J3", "Jiffy", "Owner")
+    make_rider(db, existing, "J3", "Curato", "Owner")
     db.execute("UPDATE rider_master SET account_no='111222333' WHERE rider_id='J3'")
     db.commit()
     r = client.post(
         "/api/riders/onboard-unknowns",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "rows": [
                 {
                     "rider_id": "B11",
@@ -119,7 +119,7 @@ def test_parser_reads_worker_name_column(db):
     ws.append(["NEW1", "Fresh Rider", 1000])
     buf = io.BytesIO()
     wb.save(buf)
-    r = process_cycle("Blitz", "2026-06-01", "2026-06-07", buf.getvalue(), commit=False)
+    r = process_cycle("Kaptan", "2026-06-01", "2026-06-07", buf.getvalue(), commit=False)
     unk = [u for u in r.unknown_riders if u["rider_id"] == "NEW1"]
     assert unk and unk[0].get("name") == "Fresh Rider", (
         "'Worker Name' header must feed the onboarding panel's name"
@@ -155,24 +155,24 @@ def test_assign_ev_by_person_id(db, client):
 
 def test_delete_rider_id_reanchors_deduction(db, client):
     pid = make_person(db, "TwoIds")
-    make_rider(db, pid, "R1", "Blitz", "TwoIds")
+    make_rider(db, pid, "R1", "Kaptan", "TwoIds")
     make_rider(db, pid, "R2", "Myntra", "TwoIds")
     db.execute(
-        "UPDATE person_registry SET deduction_rider_id='R1', deduction_company='Blitz' "
+        "UPDATE person_registry SET deduction_rider_id='R1', deduction_company='Kaptan' "
         "WHERE person_id=?",
         (pid,),
     )
     db.commit()
 
-    r = client.delete("/api/riders/R1?company=Blitz")
+    r = client.delete("/api/riders/R1?company=Kaptan")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["deleted"] == {"rider_id": "R1", "company": "Blitz"}
+    assert body["deleted"] == {"rider_id": "R1", "company": "Kaptan"}
     assert body["remaining_rider_ids"] == 1
     assert body["deduction_moved_to"] == {"rider_id": "R2", "company": "Myntra"}
     assert (
         db.execute(
-            "SELECT COUNT(*) FROM rider_master WHERE rider_id='R1' AND company='Blitz'"
+            "SELECT COUNT(*) FROM rider_master WHERE rider_id='R1' AND company='Kaptan'"
         ).fetchone()[0]
         == 0
     )
@@ -199,7 +199,7 @@ def test_delete_rider_id_reanchors_deduction(db, client):
 
 
 def test_delete_rider_id_unknown_404(db, client):
-    assert client.delete("/api/riders/NOPE?company=Blitz").status_code == 404
+    assert client.delete("/api/riders/NOPE?company=Kaptan").status_code == 404
 
 
 def test_duplicate_name_can_be_added_anyway_but_not_duplicate_account(db, client):
@@ -207,11 +207,11 @@ def test_duplicate_name_can_be_added_anyway_but_not_duplicate_account(db, client
     operator can push through by name — never by bank account."""
     r = client.post(
         "/api/riders",
-        json={"company": "Blitz", "name": "Amit Naskar", "account_no": "111"},
+        json={"company": "Kaptan", "name": "Amit Naskar", "account_no": "111"},
     )
     assert r.status_code == 201, r.text
     first = r.json()["person_id"]
-    dup = {"company": "Blitz", "name": "amit naskar", "account_no": "222"}
+    dup = {"company": "Kaptan", "name": "amit naskar", "account_no": "222"}
     r = client.post("/api/riders", json=dup)
     assert r.status_code == 409 and "add anyway" in r.text
     r = client.post("/api/riders", json={**dup, "allow_duplicate_name": True})
@@ -221,7 +221,7 @@ def test_duplicate_name_can_be_added_anyway_but_not_duplicate_account(db, client
     r = client.post(
         "/api/riders",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "name": "Amit Naskar",
             "account_no": "111",
             "allow_duplicate_name": True,
@@ -237,7 +237,7 @@ def test_second_rider_id_copies_bank_and_phone_from_the_person(db, client):
     r = client.post(
         "/api/riders",
         json={
-            "company": "Blitz",
+            "company": "Kaptan",
             "name": "Copy Rider",
             "account_no": "5550001",
             "ifsc": "HDFC0000123",
@@ -259,7 +259,7 @@ def test_second_rider_id_copies_bank_and_phone_from_the_person(db, client):
         "98765 43210",
     )
     assert body["copied_from"]["fields"] == ["account_no", "ifsc", "mob_no"]
-    assert body["copied_from"]["from"].endswith("@Blitz")
+    assert body["copied_from"]["from"].endswith("@Kaptan")
     row = db.execute(
         "SELECT account_no, ifsc, mob_no FROM rider_master WHERE rider_id='MY-COPY'"
     ).fetchone()

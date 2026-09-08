@@ -1,6 +1,6 @@
 """Dashboard analytics endpoints (routes/analytics.py).
 
-Real data path: two weekly Blitz cycles through process_cycle — one where the
+Real data path: two weekly Kaptan cycles through process_cycle — one where the
 EV holder was ABSENT (rent falls to arrears), one where they were PRESENT with
 a payout large enough to recover everything. The endpoints must tell that
 story back: the missed week, the recovery, the fleet margin, the rider counts.
@@ -47,12 +47,12 @@ def _mondays_back(n: int) -> date:
 def seeded(db):
     """One Raft EV holder; absent two weeks ago, paid last week."""
     pid = make_person(db, "Trend Rider", balance=0, arrears=0)
-    make_rider(db, pid, "T1", "Blitz", "Trend Rider")
+    make_rider(db, pid, "T1", "Kaptan", "Trend Rider")
     make_ev(db, "EV-T", provider="Raft", model="Regular")
     wk_a_start = _mondays_back(2)
     assign(db, pid, "EV-T", charged_through=(wk_a_start - timedelta(days=1)).isoformat())
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='T1' "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id='T1' "
         "WHERE person_id=?",
         (pid,),
     )
@@ -60,11 +60,11 @@ def seeded(db):
     wk_b_start = _mondays_back(1)
     # Week A: absent -> RENT_MISSED to arrears.
     process_cycle(
-        "Blitz", wk_a_start, wk_a_start + timedelta(days=6), _file([("OTHER", 10)]), commit=True
+        "Kaptan", wk_a_start, wk_a_start + timedelta(days=6), _file([("OTHER", 10)]), commit=True
     )
     # Week B: present, payout covers rent + arrears with money left over.
     process_cycle(
-        "Blitz", wk_b_start, wk_b_start + timedelta(days=6), _file([("T1", 6000)]), commit=True
+        "Kaptan", wk_b_start, wk_b_start + timedelta(days=6), _file([("T1", 6000)]), commit=True
     )
     return {"pid": pid, "wk_a": _week(wk_a_start), "wk_b": _week(wk_b_start)}
 
@@ -136,17 +136,17 @@ def test_collection_rate_and_recovery(seeded, client):
 def test_aging_shows_unrecovered_debt(db, client):
     """Only the absent week has run: the rider must sit in a young bucket."""
     pid = make_person(db, "Aging", balance=0, arrears=0)
-    make_rider(db, pid, "G1", "Blitz", "Aging")
+    make_rider(db, pid, "G1", "Kaptan", "Aging")
     make_ev(db, "EV-G", provider="Raft", model="Regular")
     wk = _mondays_back(1)
     assign(db, pid, "EV-G", charged_through=(wk - timedelta(days=1)).isoformat())
     db.execute(
-        "UPDATE person_registry SET deduction_company='Blitz', deduction_rider_id='G1' "
+        "UPDATE person_registry SET deduction_company='Kaptan', deduction_rider_id='G1' "
         "WHERE person_id=?",
         (pid,),
     )
     db.commit()
-    process_cycle("Blitz", wk, wk + timedelta(days=6), _file([("OTHER", 10)]), commit=True)
+    process_cycle("Kaptan", wk, wk + timedelta(days=6), _file([("OTHER", 10)]), commit=True)
     body = client.get("/api/dashboard/collection?weeks=12").json()
     young = body["aging"][0]  # 0-14d
     assert young["riders"] == 1

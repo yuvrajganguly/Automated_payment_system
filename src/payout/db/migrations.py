@@ -232,10 +232,12 @@ def _0007_cod_hub_and_spencers_layout(conn: Any) -> None:
         ("orders_column", "Delivered Orders", "Delivered Orders|total_orders_delivered"),
     ):
         # Company name bound as a parameter: a double-quoted "Spencer's" would
-        # be an identifier on Postgres, not a string.
+        # be an identifier on Postgres, not a string. Both the old and the new
+        # name are matched — migration 0024 renamed this client to Jiffy, and a
+        # config repair should not be defeated by a later rename.
         conn.execute(
-            f"UPDATE companies SET {col}=? WHERE company_name=? AND {col}=?",
-            (new, "Spencer's", old),
+            f"UPDATE companies SET {col}=? WHERE company_name IN (?, ?) AND {col}=?",
+            (new, "Spencer's", "Jiffy", old),
         )
 
 
@@ -651,6 +653,144 @@ def _0023_app_crashes(conn: Any) -> None:
         conn.execute(ddl)
 
 
+COMPANY_RENAMES_2026_09: tuple[tuple[str, str], ...] = (
+    ("Flipkart", "Elastic"),
+    ("Spencer's", "Jiffy"),
+    ("Blitz", "Kaptan"),
+)
+
+
+def _0024_rename_companies(conn: Any) -> None:
+    """Three clients renamed (2026-09-08): Flipkart→Elastic, Spencer's→Jiffy,
+    Blitz→Kaptan.
+
+    ``companies.company_name`` is the primary key and there is no surrogate id,
+    so the name is copied verbatim into a dozen other tables — including the
+    append-only ledger and the activity feed. The owner asked for the rename to
+    reach history too: one name, one truth, no legacy label surviving in old
+    payout rows. ``rename_company`` walks ``COMPANY_REFS`` and does the lot in
+    this migration's transaction.
+
+    Idempotent by construction: a rename whose source is gone or whose target
+    already exists changes nothing, so re-running is a no-op. A database that
+    was seeded fresh after this release already carries the new names and skips
+    every pair here.
+    """
+    from payout.db.references import rename_company
+
+    for old, new in COMPANY_RENAMES_2026_09:
+        rename_company(conn, old, new)
+
+
+def _0025_recruiter_profiles(conn: Any) -> None:
+    """A recruiter's own profile (2026-09-08): display name, bank details and
+    identity numbers, kept off ``users`` so a row of login credentials never
+    carries PII beside the password hash.
+
+    Aadhaar and PAN are stored as entered — the rider-side columns on
+    ``person_registry`` already work that way and a second scheme would be
+    worse than one consistent one — but unlike the rider fields these are
+    masked on every response except the recruiter's own profile and an
+    admin's view of it. ``photo_key`` points into the same document store the
+    rider photos use.
+    """
+    add_column(conn, "users", "display_name", "TEXT")
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS recruiter_profiles ("
+        "  email        TEXT PRIMARY KEY,"
+        "  full_name    TEXT,"
+        "  phone        TEXT,"
+        "  address      TEXT,"
+        "  account_name TEXT,"
+        "  account_no   TEXT,"
+        "  ifsc         TEXT,"
+        "  bank_name    TEXT,"
+        "  aadhaar_no   TEXT,"
+        "  pan_no       TEXT,"
+        "  photo_key    TEXT,"
+        "  updated_at   TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+
+
+def _0026_ev_assignment_actor(conn: Any) -> None:
+    """Who handed the EV over (2026-09-08).
+
+    ``ev_assignments`` recorded the rider and the dates but never the person
+    who performed the handover — that only existed in ``activity_log``, which
+    made "how many EVs did this recruiter deploy" a string-matching query over
+    a feed table. Two columns, backfilled from the feed so history is not lost.
+    """
+    add_column(conn, "ev_assignments", "assigned_by", "TEXT")
+    add_column(conn, "ev_assignments", "returned_by", "TEXT")
+    if not table_exists(conn, "activity_log"):
+        return
+    # The feed keys EV rows by ev_id; pair each assignment with the closest
+    # preceding log row for the same unit. Ties and gaps simply stay NULL.
+    for action, col, date_col in (
+        ("ev.assign", "assigned_by", "handover_date"),
+        ("ev.return", "returned_by", "returned_date"),
+    ):
+        conn.execute(
+            f"UPDATE ev_assignments SET {col} = ("  # noqa: S608 - names are literals above
+            "  SELECT a.email FROM activity_log a"
+            "  WHERE a.entity_type='ev' AND a.action=?"
+            "    AND a.entity_id = ev_assignments.ev_id"
+            "    AND SUBSTR(a.at, 1, 10) = SUBSTR(ev_assignments." + date_col + ", 1, 10)"
+            "  ORDER BY a.id LIMIT 1"
+            f") WHERE {col} IS NULL AND {date_col} IS NOT NULL",
+            (action,),
+        )
+
+
+def _0027_recruiter_shifts(conn: Any) -> None:
+    """Odometer readings per recruiter per day (2026-09-08).
+
+    A recruiter types the vehicle's reading at the start of the shift and again
+    at the end, photographing the dash both times; the day's distance is
+    ``end_km - start_km`` and the month's total is what the fuel claim is paid
+    on. Readings are whole kilometres — that is what a dash shows, and it is
+    one less thing to mistype on a phone.
+
+    One row per (email, day): re-saving a start reading corrects it rather than
+    adding a second row. The photos are the evidence behind the claim, so the
+    row keeps both keys and the timestamps at which each half was recorded.
+    """
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS recruiter_shifts ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  email           TEXT NOT NULL,"
+        "  day             TEXT NOT NULL,"          # YYYY-MM-DD, the recruiter's local day
+        "  start_km        INTEGER,"
+        "  start_photo_key TEXT,"
+        "  start_at        TEXT,"
+        "  end_km          INTEGER,"
+        "  end_photo_key   TEXT,"
+        "  end_at          TEXT,"
+        "  note            TEXT,"
+        "  created_at      TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    idx = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_recruiter_shift_day "
+        "ON recruiter_shifts (email, day)"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+        conn.executescript(translate_ddl(idx))
+    else:
+        conn.execute(ddl)
+        conn.execute(idx)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -678,6 +818,10 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0021_referrals", _0021_referrals),
     ("0022_ev_requests", _0022_ev_requests),
     ("0023_app_crashes", _0023_app_crashes),
+    ("0024_rename_companies", _0024_rename_companies),
+    ("0025_recruiter_profiles", _0025_recruiter_profiles),
+    ("0026_ev_assignment_actor", _0026_ev_assignment_actor),
+    ("0027_recruiter_shifts", _0027_recruiter_shifts),
 ]
 
 _TRACKING_DDL = (

@@ -13,7 +13,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from payout.api.auth import VALID_ROLES, get_current_user, require_admin, require_creator
+from payout.api.auth import (
+    VALID_ROLES,
+    get_current_user,
+    require_admin,
+    require_admin_over,
+    require_creator,
+)
 from payout.api.routes.hubs import ZONES
 from payout.auth import hash_password
 from payout.auth.sessions import revoke_all
@@ -103,9 +109,14 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
 
 
 @router.post("", response_model=UserOut, status_code=201)
-def create_user(body: UserCreateIn, _: dict = Depends(require_creator)) -> UserOut:
+def create_user(body: UserCreateIn, user: dict = Depends(require_admin)) -> UserOut:
+    """Make an account. An admin can create recruiters and plain users — the
+    accounts they actually have to hand out. Creating another admin, or a
+    creator, stays with the creator: an admin who could mint an admin could
+    escalate their own privilege by proxy."""
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
+    require_admin_over(user, body.role)
     if len(body.password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
     email = body.email.strip().lower()
@@ -124,13 +135,20 @@ def create_user(body: UserCreateIn, _: dict = Depends(require_creator)) -> UserO
 
 
 @router.patch("/{email}/phone")
-def set_phone(email: str, body: PhoneIn, _: dict = Depends(require_creator)) -> dict:
-    """Creator sets (or clears) a user's phone number — their second login id."""
+def set_phone(email: str, body: PhoneIn, user: dict = Depends(require_admin)) -> dict:
+    """Set (or clear) a user's phone number — their second login id.
+
+    Rank-guarded like the rest: the phone is one of the two identifiers an
+    account can sign in with, so taking one off a colleague's account is a
+    lock-out an admin should not be able to perform.
+    """
     target = email.strip().lower()
     phone = _phone_or_400(body.phone)
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         if phone and _phone_taken(conn, phone, except_email=target):
             raise HTTPException(409, "That phone number is already on another account.")
         conn.execute("UPDATE users SET phone=? WHERE email=?", (phone, target))
@@ -139,16 +157,23 @@ def set_phone(email: str, body: PhoneIn, _: dict = Depends(require_creator)) -> 
 
 
 @router.patch("/{email}/zone")
-def set_zone(email: str, body: ZoneIn, _: dict = Depends(require_admin)) -> dict:
+def set_zone(email: str, body: ZoneIn, user: dict = Depends(require_admin)) -> dict:
     """Admin sets (or clears) the zone a recruiter works — North or South.
-    The app opens its to-do list on the stores of that zone."""
+    The app opens its to-do list on the stores of that zone.
+
+    Rank-guarded like every other write here. Zone is not cosmetic: the rider
+    list falls back to the recruiter's zone for hub-less riders, so writing it
+    onto a colleague's account moves data around on their screen.
+    """
     target = email.strip().lower()
     zone = (body.zone or "").strip().title() or None
     if zone is not None and zone not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)} (or empty to clear)")
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
         conn.commit()
     return {"email": target, "zone": zone}
@@ -177,18 +202,24 @@ class PasswordSetIn(BaseModel):
 
 
 @router.patch("/{email}/password")
-def set_password(email: str, body: PasswordSetIn, user: dict = Depends(require_creator)) -> dict:
-    """Creator sets another user's password (no email round-trip needed).
+def set_password(email: str, body: PasswordSetIn, user: dict = Depends(require_admin)) -> dict:
+    """Set another user's password (no email round-trip needed).
 
     This is the "ask an administrator" path the forgot-password screen points
     to when SMTP is not configured. Any live reset codes for the user are
-    invalidated so an old OTP cannot undo the new password."""
+    invalidated so an old OTP cannot undo the new password.
+
+    Setting a password is impersonation — whoever sets it can sign in as that
+    person — so an admin may do it only for recruiters and plain users. Only a
+    creator can set another admin's or a creator's password."""
     target = email.strip().lower()
     if len(body.new_password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         conn.execute(
             "UPDATE users SET password_hash=? WHERE email=?",
             (hash_password(body.new_password), target),
@@ -204,26 +235,32 @@ def set_password(email: str, body: PasswordSetIn, user: dict = Depends(require_c
 
 
 @router.post("/{email}/sign-out-everywhere")
-def sign_out_everywhere(email: str, user: dict = Depends(require_creator)) -> dict:
+def sign_out_everywhere(email: str, user: dict = Depends(require_admin)) -> dict:
     """Revoke every app session of a user (lost phone). The web console's
     cookie still expires within 12 h; deactivate for an immediate lock-out."""
     target = email.strip().lower()
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         n = revoke_all(conn, target, reason=f"signed out everywhere by {user['email']}")
         conn.commit()
     return {"email": target, "sessions_revoked": n}
 
 
 @router.patch("/{email}/deactivate")
-def deactivate(email: str, user: dict = Depends(require_creator)) -> dict:
+def deactivate(email: str, user: dict = Depends(require_admin)) -> dict:
+    """Lock an account out. An admin may deactivate recruiters and plain
+    users; locking out another admin, or a creator, stays with the creator."""
     target = email.strip().lower()
     if target == user["email"]:
         raise HTTPException(400, "You can't deactivate yourself.")
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         conn.execute("UPDATE users SET is_active=0 WHERE email=?", (target,))
         revoke_all(conn, target, reason=f"deactivated by {user['email']}")
         conn.commit()
@@ -231,11 +268,15 @@ def deactivate(email: str, user: dict = Depends(require_creator)) -> dict:
 
 
 @router.patch("/{email}/reactivate")
-def reactivate(email: str, _: dict = Depends(require_creator)) -> dict:
+def reactivate(email: str, user: dict = Depends(require_admin)) -> dict:
+    """Let an account back in. Same rank rule as the rest, so the set of
+    accounts an admin can act on is one rule, not five."""
     target = email.strip().lower()
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
+        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
             raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
         conn.execute("UPDATE users SET is_active=1 WHERE email=?", (target,))
         conn.commit()
     return {"email": target, "is_active": True}
