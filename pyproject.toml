@@ -27,7 +27,13 @@ dependencies = [
 api = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
-    "python-jose[cryptography]>=3.3",
+    # PyJWT, not python-jose. Both do HS256 identically and the swap was ten
+    # lines, but jose sat unmaintained for years with a critical algorithm-
+    # confusion CVE in its history (CVE-2024-33663), and it dragged in ecdsa
+    # and rsa for JWS algorithms this system never issues. PyJWT is narrower
+    # and actively maintained; the auth path is the wrong place to carry a
+    # library nobody is watching.
+    "PyJWT>=2.8",
     "python-multipart>=0.0.7",
     "pydantic>=2.0",
     "psycopg[binary]>=3.1",

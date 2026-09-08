@@ -451,3 +451,22 @@ def test_a_pdf_is_not_a_photo_of_a_scooter(client):
         headers=h,
     )
     assert r.status_code == 415
+
+
+def test_the_board_is_recruiters_only(client):
+    """An admin can onboard a rider, so their row would not be empty — but
+    this board compares field staff against each other, and an office account
+    in it distorts the ordering and the retention column it is read for."""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO rider_master (rider_id, company, person_id, name, recruited_by) "
+            "SELECT 'R9','Kaptan', p.person_id, 'R', ? FROM ("
+            "  SELECT person_id FROM person_registry LIMIT 1) p",
+            (_ADMIN[0],),
+        )
+        conn.commit()
+    rows = client.get("/api/recruiters", headers=_login(client, _ADMIN)).json()["recruiters"]
+    emails = {r["email"] for r in rows}
+    assert _REC[0] in emails
+    assert _ADMIN[0] not in emails
+    assert _CREATOR[0] not in emails

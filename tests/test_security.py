@@ -17,6 +17,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from payout.api import ratelimit  # noqa: E402
@@ -278,3 +279,44 @@ def test_login_is_rate_limited(client):
     r = client.post("/api/auth/login", data={"username": "nobody@t.test", "password": "x"})
     assert r.status_code == 429
     assert "Retry-After" in r.headers
+
+
+# ── the token is only ever HS256 ─────────────────────────────────────────────
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")  # PyJWT grumbles about the short HS512 key
+def test_a_token_signed_with_a_different_algorithm_is_refused(db):  # noqa: ARG001
+    """Algorithm confusion — trusting the `alg` the token declares — is the
+    class of bug that produced CVE-2024-33663 in the library this used to
+    use. `decode` pins `algorithms=[HS256]`, so a token that asks to be
+    verified some other way is refused whatever it carries."""
+    import jwt as pyjwt
+
+    from payout.api.auth import decode_token
+    from payout.api.config import JWT_SECRET
+
+    # 'none': the classic. Signature dropped entirely.
+    unsigned = pyjwt.encode({"sub": "owner@t.test", "role": "creator"}, None, algorithm="none")
+    with pytest.raises(HTTPException) as exc:
+        decode_token(unsigned)
+    assert exc.value.status_code == 401
+
+    # A real signature, but with an algorithm this system never issues.
+    other = pyjwt.encode({"sub": "owner@t.test", "role": "creator"}, JWT_SECRET, algorithm="HS512")
+    with pytest.raises(HTTPException):
+        decode_token(other)
+
+    # And the genuine article still works.
+    from payout.api.auth import create_access_token
+
+    assert decode_token(create_access_token("a@t.test", "user"))["sub"] == "a@t.test"
+
+
+def test_an_expired_token_is_refused(db):  # noqa: ARG001
+    from datetime import timedelta
+
+    from payout.api.auth import create_access_token, decode_token
+
+    with pytest.raises(HTTPException) as exc:
+        decode_token(create_access_token("a@t.test", "user", expires=timedelta(seconds=-30)))
+    assert exc.value.status_code == 401

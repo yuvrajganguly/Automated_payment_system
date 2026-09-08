@@ -18,10 +18,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 app
 
-# Install the package with API extras (cached unless these change).
-COPY pyproject.toml README.md ./
+# Dependencies from the lock, then the package itself without re-resolving.
+#
+# requirements.lock is the pinned resolution of the api + docs extras, so the
+# image installs what CI tested rather than whatever satisfies the floors in
+# pyproject.toml on the day of the build. Copying it before src/ also means a
+# code change reuses this layer; only a dependency change repeats the install.
+COPY pyproject.toml README.md requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY src/ ./src/
-RUN pip install --no-cache-dir -e ".[api,docs]"
+RUN pip install --no-cache-dir --no-deps -e .
 
 # Built frontend where FastAPI serves it (/app/frontend/dist), + entrypoint.
 COPY --from=frontend /app/frontend/dist ./frontend/dist

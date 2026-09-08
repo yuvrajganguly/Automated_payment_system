@@ -618,7 +618,14 @@ def recruiter_board(
             "SELECT u.email, u.display_name, u.zone, u.is_active, p.full_name, "
             "       p.photo_key IS NOT NULL AS has_photo "
             "FROM users u LEFT JOIN recruiter_profiles p ON p.email = u.email "
-            "WHERE u.role IN ('recruiter','admin','creator') ORDER BY u.email"
+            # Recruiters only. Admins and the creator were included because
+            # they *can* onboard a rider and hand over an EV, so their rows
+            # would not be empty — but this board exists to compare field
+            # staff against each other, and an office account sitting in it
+            # with a handful of corrections distorts the ordering and the
+            # retention column it is read for. An admin who has genuinely
+            # onboarded riders is still reachable at /recruiters/<email>.
+            "WHERE u.role = 'recruiter' ORDER BY u.email"
         ):
             email = r["email"]
             counts = conn.execute(
