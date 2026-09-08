@@ -463,7 +463,9 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel()) {
         }
         Rule()
 
-        /* ── Odometer history ── */
+        /* ── Odometer: today's two readings, then the record ── */
+        ShiftCard(Modifier.formWidth())
+        Rule()
         OdometerHistory(vm)
         Spacer(Modifier.height(36.dp))
     }
@@ -517,7 +519,8 @@ private fun OdometerHistory(vm: ProfileViewModel) {
             }
             s == null -> Text("Loading…", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
             s.days.isEmpty() -> Text(
-                "No readings yet. Start and end a shift on the Today tab and the days collect here.",
+                "No readings yet. Open and close a shift above and the days collect here, "
+                    + "one row each, with the month's total underneath.",
                 style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
             )
             else -> {

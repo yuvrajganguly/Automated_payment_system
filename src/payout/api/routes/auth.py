@@ -29,6 +29,7 @@ from payout.auth.sessions import (
     rotate_refresh_token,
 )
 from payout.db import get_connection
+from payout.domain.naming import display_name_for
 from payout.notifications import email_configured, send_email
 
 router = APIRouter()
@@ -291,7 +292,11 @@ def logout_everywhere(response: Response, user: dict = Depends(get_current_user)
 
 @router.get("/me", response_model=UserOut)
 def me(user: dict = Depends(get_current_user)) -> UserOut:
-    return UserOut(**user)
+    # The name is looked up here rather than in get_current_user: this runs
+    # once when the console boots, that runs on every single request.
+    with get_connection() as conn:
+        name = display_name_for(conn, user["email"])
+    return UserOut(**{**user, "name": name})
 
 
 class PhoneSelfIn(BaseModel):

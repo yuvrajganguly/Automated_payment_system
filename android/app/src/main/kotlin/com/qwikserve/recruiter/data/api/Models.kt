@@ -23,7 +23,15 @@ data class RefreshIn(@SerialName("refresh_token") val refreshToken: String)
 data class LogoutIn(@SerialName("refresh_token") val refreshToken: String?)
 
 @Serializable
-data class UserOut(val email: String, val role: String, val phone: String? = null, val zone: String? = null)
+data class UserOut(
+    val email: String,
+    val role: String,
+    val phone: String? = null,
+    val zone: String? = null,
+    /** What to call them on screen. The bootstrap fills this in from their
+     *  profile; endpoints that do not send it fall back to the email. */
+    val name: String? = null,
+)
 
 @Serializable
 data class CompanyLite(
@@ -381,6 +389,8 @@ data class RecruitingCounts(
     val persons: Int = 0,
     val active: Int = 0,
     @SerialName("ev_holders") val evHolders: Int = 0,
+    /** Still on the roster — the switch, not the 12-day worked rule. */
+    @SerialName("on_roster") val onRoster: Int = 0,
 )
 
 @Serializable
@@ -505,6 +515,8 @@ data class RecruiterRider(
     @SerialName("on_roster") val onRoster: Boolean = true,
     val working: Boolean = false,
     @SerialName("last_worked_on") val lastWorkedOn: String? = null,
+    /** The EV this rider is holding right now, or null. */
+    @SerialName("ev_id") val evId: String? = null,
 )
 
 /* ── The odometer at the start and end of a shift ──

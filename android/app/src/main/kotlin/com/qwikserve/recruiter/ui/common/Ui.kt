@@ -409,6 +409,28 @@ fun Avatar(personId: Long, name: String?, size: Dp = 44.dp, thumb: Boolean = tru
     }
 }
 
+/** The signed-in recruiter's own face, for the header chip that opens their
+ *  profile. Same fallback as [Avatar]: their initials until they upload one.
+ *  [version] busts the cache after they change the picture. */
+@Composable
+fun MeAvatar(name: String?, size: Dp = 28.dp, version: Int = 0) {
+    val url = BuildConfig.API_BASE_URL + "recruiters/me/photo" +
+        (if (version > 0) "?v=$version" else "")
+    Box(
+        modifier = Modifier.size(size).background(Qwik.N200).border(1.dp, Qwik.N400),
+        contentAlignment = Alignment.Center,
+    ) {
+        SubcomposeAsyncImage(
+            model = url,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size),
+            loading = { Initials(name, size) },
+            error = { Initials(name, size) },
+        )
+    }
+}
+
 @Composable
 private fun Initials(name: String?, size: Dp) {
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {

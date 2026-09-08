@@ -38,8 +38,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
-import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.Layout
+import com.qwikserve.recruiter.ui.common.MeAvatar
 import com.qwikserve.recruiter.ui.common.PageBox
 import com.qwikserve.recruiter.ui.common.Rule
 import com.qwikserve.recruiter.ui.common.VDivider
@@ -53,11 +53,18 @@ import com.qwikserve.recruiter.ui.stats.StatsScreen
 import com.qwikserve.recruiter.ui.theme.Qwik
 import com.qwikserve.recruiter.ui.today.TodayScreen
 
-/** The six tabs. Order is the order of a recruiter's day, with their own
- *  record — photo, details, password, odometer history — at the end. */
-enum class Tab(val label: String) {
+/**
+ * The tabs. Order is the order of a recruiter's day.
+ *
+ * PROFILE is deliberately **not** in the strip. It was once the sixth tab, and
+ * on a phone the strip scrolls, so it sat just past the right edge with nothing
+ * to say it was there — in practice it did not exist. It is reached instead by
+ * tapping your own name in the header, which is where people look for their own
+ * account, and the five that remain fit on a phone without scrolling.
+ */
+enum class Tab(val label: String, val inStrip: Boolean = true) {
     TODAY("Today"), RIDERS("Riders"), EVS("EVs"), REQUESTS("Requests"),
-    STATS("My numbers"), PROFILE("Profile"),
+    STATS("My numbers"), PROFILE("Profile", inStrip = false),
 }
 
 /**
@@ -78,7 +85,11 @@ fun HomeScreen(
     var tab by rememberSaveable { mutableIntStateOf(Tab.TODAY.ordinal) }
     var picked by rememberSaveable { mutableStateOf<Long?>(null) }
     val boot by vm.bootstrap.collectAsStateWithLifecycle()
-    val who = listOfNotNull(boot?.me?.email?.substringBefore('@'), boot?.me?.zone?.let { "$it zone" })
+    // Their name, not their login. The email is a credential; printing it as
+    // a name gives you "YUVRAJ.GANGULY.DS26" across the top of every screen.
+    val myName = boot?.me?.name?.takeIf { it.isNotBlank() }
+        ?: boot?.me?.email?.substringBefore('@')
+    val who = listOfNotNull(myName, boot?.me?.zone?.let { "$it zone" })
         .joinToString(" · ").uppercase()
 
     // Location: ask once; the fix itself is taken by AppOpenLocation on every foreground.
@@ -111,7 +122,14 @@ fun HomeScreen(
     Surface(Modifier.fillMaxSize(), color = Qwik.Bg) {
         if (layout.rail) {
             Row(Modifier.fillMaxSize().statusBarsPadding()) {
-                Rail(who = who, selected = tab, onSelect = { tab = it }, onNewRider = onNewRider, onSignOut = onSignOut)
+                Rail(
+                    who = who,
+                    name = myName,
+                    selected = tab,
+                    onSelect = { tab = it },
+                    onNewRider = onNewRider,
+                    onSignOut = onSignOut,
+                )
                 VDivider()
                 Box(
                     if (splitPane) Modifier.width(layout.listPane).fillMaxHeight()
@@ -131,13 +149,13 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Qwikserve", style = MaterialTheme.typography.headlineSmall, color = Qwik.Ink)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        who,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Qwik.N700,
-                        modifier = Modifier.weight(1f).padding(top = 3.dp),
-                        maxLines = 1,
+                    Spacer(Modifier.width(10.dp))
+                    MeChip(
+                        who = who,
+                        name = myName,
+                        selected = Tab.entries[tab] == Tab.PROFILE,
+                        onClick = { tab = Tab.PROFILE.ordinal },
+                        modifier = Modifier.weight(1f),
                     )
                     GhostAction("Sign out", onClick = onSignOut)
                 }
@@ -150,11 +168,51 @@ fun HomeScreen(
     }
 }
 
+/**
+ * Your own face and name — and the only way to your profile.
+ *
+ * Profile carries the picture, the account and bank details, the Aadhaar and
+ * PAN, the password, and the odometer with its day-by-day record. All of that
+ * used to sit behind a tab nobody could see. A face beside your own name is
+ * where every other app puts your account, so that is where it is now.
+ */
+@Composable
+private fun MeChip(
+    who: String,
+    name: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MeAvatar(name = name)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                who,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) Qwik.Accent else Qwik.N700,
+                maxLines = 1,
+            )
+            Text(
+                "Your profile",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) Qwik.Accent else Qwik.N600,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 /** Wide screens: the tabs stand in a column down the left, with the brand
  *  above them and the two whole-app actions at the foot. */
 @Composable
 private fun Rail(
     who: String,
+    name: String?,
     selected: Int,
     onSelect: (Int) -> Unit,
     onNewRider: () -> Unit,
@@ -163,13 +221,20 @@ private fun Rail(
     Column(Modifier.width(232.dp).fillMaxHeight().padding(bottom = 16.dp)) {
         Column(Modifier.padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 18.dp)) {
             Text("Qwikserve", style = MaterialTheme.typography.headlineSmall, color = Qwik.Ink)
-            Spacer(Modifier.height(6.dp))
-            Kicker(who)
+            Spacer(Modifier.height(10.dp))
+            // Same rule as the phone header: your own name is the way to your
+            // own profile, so the rail does not list it as a tab either.
+            MeChip(
+                who = who,
+                name = name,
+                selected = Tab.entries[selected] == Tab.PROFILE,
+                onClick = { onSelect(Tab.PROFILE.ordinal) },
+            )
         }
-        Tab.entries.forEachIndexed { i, t ->
-            val on = i == selected
+        Tab.entries.filter { it.inStrip }.forEach { t ->
+            val on = t.ordinal == selected
             Row(
-                Modifier.fillMaxWidth().clickable { onSelect(i) }.padding(vertical = 11.dp),
+                Modifier.fillMaxWidth().clickable { onSelect(t.ordinal) }.padding(vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.width(4.dp).height(22.dp).background(if (on) Qwik.Accent else Qwik.Bg))
@@ -224,10 +289,10 @@ private fun TabStrip(selected: Int, onSelect: (Int) -> Unit, layout: Layout) {
                     .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp),
             ) {
-                Tab.entries.forEachIndexed { i, t ->
-                    val on = i == selected
+                Tab.entries.filter { it.inStrip }.forEach { t ->
+                    val on = t.ordinal == selected
                     Column(
-                        Modifier.clickable { onSelect(i) }.padding(horizontal = 8.dp),
+                        Modifier.clickable { onSelect(t.ordinal) }.padding(horizontal = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(

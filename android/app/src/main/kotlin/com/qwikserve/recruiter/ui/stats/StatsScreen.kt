@@ -60,18 +60,23 @@ import javax.inject.Inject
  * the first. Getting this wrong would make a tile and its drilldown disagree,
  * which is worse than having no drilldown at all.
  */
-enum class Period(val label: String) {
+enum class Period(val label: String, val status: String = "all", val fixedStatus: Boolean = false) {
     TODAY("Onboarded today"),
     WEEK("Onboarded this week"),
     MONTH("Onboarded this month"),
-    ALL("Everyone you onboarded");
+    ALL("Everyone you onboarded"),
+
+    /** The two tiles that are a filter rather than a date window. Both fix the
+     *  status, because widening it would list people the tile did not count. */
+    ACTIVE("Still active", status = "working", fixedStatus = true),
+    HOLDING("Holding an EV", status = "holding", fixedStatus = true);
 
     /** Inclusive first day, or null for all time. */
     fun start(today: LocalDate): LocalDate? = when (this) {
         TODAY -> today
         WEEK -> today.minusDays((today.dayOfWeek.value - 1).toLong())
         MONTH -> today.withDayOfMonth(1)
-        ALL -> null
+        ALL, ACTIVE, HOLDING -> null
     }
 }
 
@@ -154,7 +159,7 @@ class StatsViewModel @Inject constructor(private val api: PayoutApi) : ViewModel
 
     fun openDrill(period: Period) {
         drill = period
-        drillStatus = "all"
+        drillStatus = period.status
         drillRows = emptyList()
         drillError = null
         loadDrill()
@@ -235,13 +240,21 @@ fun StatsScreen(onOpenPerson: (Long) -> Unit, vm: StatsViewModel = hiltViewModel
                         onClick = { vm.openDrill(Period.ALL) },
                     )
                     Box(Modifier.width(1.dp).height(78.dp).background(Qwik.N400))
-                    NumberTile((c?.active ?: 0).toString(), "Still active", Modifier.weight(1f))
+                    NumberTile(
+                        (c?.active ?: 0).toString(), "Still active", Modifier.weight(1f),
+                        onClick = { vm.openDrill(Period.ACTIVE) },
+                    )
                     Box(Modifier.width(1.dp).height(78.dp).background(Qwik.N400))
-                    NumberTile((c?.evHolders ?: 0).toString(), "Holding an EV", Modifier.weight(1f))
+                    NumberTile(
+                        (c?.evHolders ?: 0).toString(), "Holding an EV", Modifier.weight(1f),
+                        onClick = { vm.openDrill(Period.HOLDING) },
+                    )
                 }
                 Rule()
                 Text(
-                    "Tap a count to see who is behind it.",
+                    "Tap any count to see who is behind it. \"Still active\" is the same "
+                        + "12-day rule the Riders tab uses"
+                        + (c?.onRoster?.let { " — $it are still on the roster" } ?: "") + ".",
                     style = MaterialTheme.typography.bodySmall, color = Qwik.N600,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
@@ -414,13 +427,19 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
             Spacer(Modifier.height(4.dp))
             Kicker("${vm.drillRows.size} shown")
             Spacer(Modifier.height(12.dp))
-            Segmented(
-                listOf("All", "Working", "Idle"),
-                selected = when (vm.drillStatus) { "working" -> 1; "idle" -> 2; else -> 0 },
-                onSelect = { vm.chooseDrillStatus(listOf("all", "working", "idle")[it]) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
+            // The date tiles can be widened or narrowed by status. The two
+            // filter tiles cannot: "Still active" IS the working filter and
+            // "Holding an EV" IS the EV one, so a chip row here would only
+            // offer ways to stop showing what was tapped.
+            if (!period.fixedStatus) {
+                Segmented(
+                    listOf("All", "Working", "Idle"),
+                    selected = when (vm.drillStatus) { "working" -> 1; "idle" -> 2; else -> 0 },
+                    onSelect = { vm.chooseDrillStatus(listOf("all", "working", "idle")[it]) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
         }
         Rule()
         when {
@@ -430,9 +449,13 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
             }
             vm.loadingDrill && vm.drillRows.isEmpty() -> Note("Loading…")
             vm.drillRows.isEmpty() -> Note(
-                when (vm.drillStatus) {
-                    "working" -> "Nobody from this period has been paid in the last 12 days."
-                    "idle" -> "Everybody from this period is still working."
+                when {
+                    period == Period.HOLDING -> "None of your riders has an EV out right now."
+                    period == Period.ACTIVE ->
+                        "None of your riders has been paid for a cycle in the last 12 days."
+                    vm.drillStatus == "working" ->
+                        "Nobody from this period has been paid in the last 12 days."
+                    vm.drillStatus == "idle" -> "Everybody from this period is still working."
                     else -> "Nobody onboarded in this period."
                 },
             )
@@ -453,7 +476,13 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Tag(r.companyName, outline = true)
-                                Tag(if (r.working) "working" else "idle", accent = r.working)
+                                // On the EV list the vehicle is the point; on
+                                // the others whether they are working is.
+                                if (period == Period.HOLDING && r.evId != null) {
+                                    Tag(r.evId, accent = true)
+                                } else {
+                                    Tag(if (r.working) "working" else "idle", accent = r.working)
+                                }
                             }
                         },
                     )

@@ -50,6 +50,7 @@ import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.home.Tab
+import com.qwikserve.recruiter.ui.profile.ShiftNudge
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
@@ -147,11 +148,12 @@ fun TodayScreen(
                 Rule()
             }
 
-            // Today's odometer sits above everything else: it is the first
-            // thing a recruiter does in the morning and the last at night.
+            // The odometer itself lives on Profile — it is twice-a-day data
+            // entry about the recruiter's own vehicle, not about riders, and
+            // as a panel here it sat in the way of the work all day. What
+            // stays is one line, and only while a reading is still owed.
             item {
-                ShiftCard()
-                Rule()
+                ShiftNudge(onOpen = { onGoTab(Tab.PROFILE) })
             }
 
             if (vm.error != null) item { Note(vm.error!!, color = Qwik.Accent700) }

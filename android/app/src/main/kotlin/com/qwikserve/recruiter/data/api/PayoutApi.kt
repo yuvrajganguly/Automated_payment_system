@@ -176,9 +176,11 @@ interface PayoutApi {
         @Query("buckets") buckets: Int? = null,
     ): RecruiterSeries
 
+    /** all | working | idle | holding. The first three are one row per rider
+     *  id; `holding` is one row per person, to match the EV holder count. */
     @GET("recruiters/me/riders")
     suspend fun myRiders(
-        @Query("status") status: String? = null, // all | working | idle
+        @Query("status") status: String? = null,
         @Query("limit") limit: Int? = null,
     ): List<RecruiterRider>
 

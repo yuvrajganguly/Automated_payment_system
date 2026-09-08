@@ -37,6 +37,7 @@ from payout.db import get_connection
 from payout.documents import ALLOWED_CONTENT_TYPES, get_storage, make_staff_key
 from payout.domain.activity import record_activity
 from payout.domain.identity import normalize_aadhaar, normalize_pan
+from payout.domain.naming import name_from
 from payout.domain.worked import ACTIVE_WITHIN_DAYS, active_person_sql
 
 router = APIRouter()
@@ -652,7 +653,7 @@ def recruiter_board(
             rows.append(
                 {
                     "email": email,
-                    "name": r["full_name"] or r["display_name"] or email.split("@")[0],
+                    "name": name_from(r["full_name"], r["display_name"], email),
                     "zone": r["zone"],
                     "is_active": bool(r["is_active"]),
                     "has_photo": bool(r["has_photo"]),
@@ -757,15 +758,45 @@ def recruiter_series(
 @router.get("/{email}/riders")
 def recruiter_riders(
     email: str,
-    status: str = Query("all", pattern="^(all|working|idle)$"),
+    status: str = Query("all", pattern="^(all|working|idle|holding)$"),
     limit: int = Query(200, ge=1, le=2000),
     user: dict = Depends(get_current_user),
 ) -> list[dict]:
     """The riders this recruiter onboarded, each flagged working or idle by the
-    12-day rule, newest first."""
+    12-day rule, newest first.
+
+    ``holding`` is the odd one out: it lists the people who have an EV out
+    right now, and it returns **one row per person**, not one per rider id.
+    That is deliberate. The count it sits behind (``counts.ev_holders``) is a
+    ``COUNT(DISTINCT person_id)`` — one vehicle, one holder — so a person
+    carrying two company rider ids would otherwise appear twice under a tile
+    that said 1. A tile that disagrees with the list behind it is worse than
+    no list at all.
+    """
     email = _resolve(user, email)
     active = active_person_sql("rm.person_id")
-    where = {"all": "", "working": f" AND {active}", "idle": f" AND NOT {active}"}[status]
+    holds = (
+        "EXISTS (SELECT 1 FROM ev_assignments _ha WHERE _ha.person_id = rm.person_id "
+        "AND _ha.returned_date IS NULL)"
+    )
+    # One row per person for `holding`: keep the first of this recruiter's
+    # rows for that person. The comparison is on the WHOLE key, (rider_id,
+    # company) — a rider id is not unique on its own. Companies that share
+    # ids (companies.rider_ids_shared_with, and _auto_link_rider) put the
+    # same id under two companies for one person, and a MIN(rider_id) test
+    # would match both of those rows and hand back the duplicate this is
+    # here to prevent.
+    one_per_person = (
+        " AND NOT EXISTS (SELECT 1 FROM rider_master _rm2 "
+        "WHERE _rm2.person_id = rm.person_id AND _rm2.recruited_by = rm.recruited_by "
+        "AND (_rm2.rider_id, _rm2.company) < (rm.rider_id, rm.company))"
+    )
+    where = {
+        "all": "",
+        "working": f" AND {active}",
+        "idle": f" AND NOT {active}",
+        "holding": f" AND {holds}{one_per_person}",
+    }[status]
     from payout.domain.worked import last_worked_sql
 
     with get_connection() as conn:
@@ -780,12 +811,19 @@ def recruiter_riders(
                 "on_roster": bool(r["is_active"]),
                 "working": bool(r["working"]),
                 "last_worked_on": r["last_worked_on"],
+                "ev_id": r["ev_id"],
             }
             for r in conn.execute(
                 "SELECT rm.rider_id, rm.company, rm.name, rm.person_id, rm.hub, "
                 "       rm.created_at, rm.is_active, "
                 f"      ({active}) AS working, "  # noqa: S608 - both are literals above
-                f"      {last_worked_sql('rm.person_id')} AS last_worked_on "
+                f"      {last_worked_sql('rm.person_id')} AS last_worked_on, "
+                # The EV they are holding right now, if any — shown as a badge
+                # in every list, not only the holding one.
+                "       (SELECT _ea.ev_id FROM ev_assignments _ea "
+                "        WHERE _ea.person_id = rm.person_id AND _ea.returned_date IS NULL "
+                "        ORDER BY _ea.handover_date DESC, _ea.assignment_id DESC "
+                "        LIMIT 1) AS ev_id "
                 f"FROM rider_master rm WHERE rm.recruited_by=?{where} "
                 "ORDER BY rm.created_at DESC, rm.rider_id DESC LIMIT ?",
                 (email, limit),

@@ -92,6 +92,7 @@ interface RiderRow {
   rent_collected: number
   rent_missed: number
   arrears_recovered: number
+  prior_dues_collected: number
   written_off: number
   outstanding: number
   balance: number
@@ -403,7 +404,10 @@ export function DashboardPage() {
       </div>
 
       {tab === 'story' && <StoryTab s={s} suffix={suffix} setTab={setTab} />}
-      {tab === 'companies' && <CompaniesTab suffix={suffix} />}
+      {tab === 'companies' && (
+        <CompaniesTab suffix={suffix}
+          onDrillRiders={(c) => { setCompanies([c]); setTab('riders') }} />
+      )}
       {tab === 'evs' && <EvsTab suffix={suffix} />}
       {tab === 'riders' && <RidersTab suffix={suffix} />}
     </div>
@@ -657,7 +661,9 @@ function TableShell({ children }: { children: React.ReactNode }) {
   )
 }
 
-function CompaniesTab({ suffix }: { suffix: string }) {
+function CompaniesTab(
+  { suffix, onDrillRiders }: { suffix: string; onDrillRiders: (company: string) => void },
+) {
   const { data, loading, error } = useApi<{ rows: CompanyRow[] }>(
     '/dashboard/story/by' + (suffix ? suffix + '&dim=company' : '?dim=company'),
   )
@@ -669,7 +675,9 @@ function CompaniesTab({ suffix }: { suffix: string }) {
       <p className="text-sm text-slate-500 mb-3">
         Each company over the window: what they sent, what riders got, and how their rent behaved.
         A payout cycle counts as soon as any of its days falls in the window — whenever the file was processed.
-        Click a company for its complete week-by-week history.
+        Click a company name for its complete week-by-week history, or <b>Who</b> for the riders
+        behind these numbers — who paid rent, who missed it, whose arrears came back, whose old
+        dues cleared, who owes now.
         <span className="text-slate-400"> "Owed now" is live (not window-scoped), active riders only.</span>
       </p>
       <TableShell>
@@ -699,6 +707,13 @@ function CompaniesTab({ suffix }: { suffix: string }) {
                         title={'Complete history for ' + r.company}>
                     {r.company}
                   </Link>
+                  <button
+                    onClick={() => onDrillRiders(r.company)}
+                    title={'The riders behind ' + r.company + "'s numbers, same window"}
+                    className="ml-2 text-xs text-slate-500 hover:text-brand-300 underline
+                               decoration-dotted underline-offset-2">
+                    Who →
+                  </button>
                 </td>
                 <td className={cell}>{r.riders}</td>
                 <td className={cell}>{r0(r.gross_payout)}</td>
@@ -829,7 +844,7 @@ function RidersTab({ suffix }: { suffix: string }) {
       .toLowerCase().includes(q.trim().toLowerCase()),
   )
   const { sorted, sortKey, sortDir, toggleSort } = useSort(rows, { urlKey: 'rsort' })
-  if (loading && !data) return <SkeletonTable cols={8} />
+  if (loading && !data) return <SkeletonTable cols={9} />
   if (error) return <p className="text-red-400">{error}</p>
   return (
     <>
@@ -851,6 +866,7 @@ function RidersTab({ suffix }: { suffix: string }) {
             <SortableTh tag="rent_collected" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent paid</SortableTh>
             <SortableTh tag="rent_missed" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Rent missed</SortableTh>
             <SortableTh tag="arrears_recovered" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Clawed back</SortableTh>
+            <SortableTh tag="prior_dues_collected" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Prior dues cleared</SortableTh>
             <SortableTh tag="written_off" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Written off</SortableTh>
             <SortableTh tag="outstanding" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Owes now</SortableTh>
           </tr>
@@ -879,6 +895,7 @@ function RidersTab({ suffix }: { suffix: string }) {
                 <td className={cell}>{r0(r.rent_collected)}</td>
                 <td className={cell + (r.rent_missed > 0 ? ' text-red-300' : '')}>{r0(r.rent_missed)}</td>
                 <td className={cell}>{r0(r.arrears_recovered)}</td>
+                <td className={cell}>{r0(r.prior_dues_collected)}</td>
                 <td className={cell}>{r0(r.written_off)}</td>
                 <td className={cell + ' font-semibold ' +
                     (!r.dormant && owes > 0 ? 'text-red-300' : 'text-slate-500')}>
@@ -896,6 +913,7 @@ function RidersTab({ suffix }: { suffix: string }) {
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_collected, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.rent_missed, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.arrears_recovered, 0))}</td>
+            <td className={cell}>{r0(sorted.reduce((a, r) => a + r.prior_dues_collected, 0))}</td>
             <td className={cell}>{r0(sorted.reduce((a, r) => a + r.written_off, 0))}</td>
             <td className={cell}>
               {r0(sorted.filter((r) => !r.dormant)

@@ -18,6 +18,8 @@ from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import ZONES
 from payout.db import get_connection
 from payout.domain.activity import ACTIONS
+from payout.domain.naming import display_name_for
+from payout.domain.worked import active_person_sql
 
 router = APIRouter()
 
@@ -68,11 +70,17 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
                 "SELECT model_id, provider, model_name FROM ev_models ORDER BY provider, model_name"
             )
         ]
+        # What to call this person. The profile's full name if they have filled
+        # it in, the display name an admin set otherwise, and only as a last
+        # resort the email — which is a login credential, not a name, and
+        # reads like one on screen ("YUVRAJ.GANGULY.DS26").
+        me_name = display_name_for(conn, user["email"])
     return {
         "api_version": APP_API_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "me": {
             "email": user["email"],
+            "name": me_name,
             "role": user["role"],
             "phone": user.get("phone"),
             "zone": user.get("zone"),
@@ -109,14 +117,26 @@ def _period_starts(today: date) -> dict[str, str]:
 
 def _recruiting_for(conn, email: str, today: date) -> dict:
     starts = _period_starts(today)
+    # "active" is the 12-day worked rule — the same one the Riders tab, the
+    # active/idle filter and the drilldown use. It was the roster flag
+    # (is_active) until 2026-09, which made the tile disagree with the list
+    # behind it and with the word "active" everywhere else in the app. The
+    # roster count is still here, under its own honest name.
+    # The alias is load-bearing. active_person_sql builds a correlated subquery
+    # over `transactions`, which has a person_id of its own; handed a bare
+    # "person_id" the inner scope wins and the predicate becomes
+    # `_wt.person_id = _wt.person_id` — always true — so the count silently
+    # becomes "has anyone, anywhere, been paid recently".
+    active = active_person_sql("rm.person_id")
     row = conn.execute(
         "SELECT COUNT(*) AS all_time, "
-        "  COUNT(DISTINCT person_id) AS persons, "
-        "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active, "
-        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
-        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
-        "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
-        "FROM rider_master WHERE recruited_by=?",
+        "  COUNT(DISTINCT rm.person_id) AS persons, "
+        f"  SUM(CASE WHEN {active} THEN 1 ELSE 0 END) AS active, "  # noqa: S608 - literal
+        "  SUM(CASE WHEN rm.is_active=1 THEN 1 ELSE 0 END) AS on_roster, "
+        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
+        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
+        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
+        "FROM rider_master rm WHERE rm.recruited_by=?",
         (starts["today"], starts["week"], starts["month"], email),
     ).fetchone()
     by_company = [
@@ -162,6 +182,7 @@ def _recruiting_for(conn, email: str, today: date) -> dict:
             "all_time": int(row["all_time"] or 0),
             "persons": int(row["persons"] or 0),
             "active": int(row["active"] or 0),
+            "on_roster": int(row["on_roster"] or 0),
             "ev_holders": int(ev_holders or 0),
         },
         "by_company": by_company,

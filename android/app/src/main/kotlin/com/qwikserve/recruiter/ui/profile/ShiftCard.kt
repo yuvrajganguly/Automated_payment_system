@@ -1,7 +1,8 @@
-package com.qwikserve.recruiter.ui.today
+package com.qwikserve.recruiter.ui.profile
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -192,15 +193,19 @@ class ShiftViewModel @Inject constructor(
 }
 
 /**
- * Today's odometer, at the top of the Today tab because it is the first and
- * last thing a recruiter does with the app each day: start the shift, end the
- * shift, see the distance.
+ * Today's odometer: start the shift, end the shift, see the distance.
+ *
+ * This lives on Profile, not on Today. It is used twice a day and it is about
+ * the recruiter's own vehicle, not about riders — sitting at the top of Today
+ * it was a data-entry panel occupying a third of the screen a recruiter opens
+ * twenty times a day, long after both readings were in. Today keeps only
+ * [ShiftNudge], a single line, and only while a reading is actually owed.
  */
 @Composable
-fun ShiftCard(vm: ShiftViewModel = hiltViewModel()) {
+fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel()) {
     val s = vm.shift
     val day = s?.day ?: ""
-    Column(Modifier.fillMaxWidth().background(Qwik.Surface).padding(horizontal = 20.dp, vertical = 14.dp)) {
+    Column(modifier.fillMaxWidth().background(Qwik.Surface).padding(horizontal = 20.dp, vertical = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Kicker("Odometer", Modifier.weight(1f))
             if (s != null && s.complete) {
@@ -416,3 +421,40 @@ private fun ShiftPhoto(
 
 private fun shiftPhotoUrl(day: String, kind: String): String =
     BuildConfig.API_BASE_URL + "recruiters/me/shift/photo?kind=" + kind + "&day=" + day
+
+/**
+ * The one line the odometer keeps on the Today tab.
+ *
+ * It appears only while a reading is actually owed — before the shift is
+ * opened, and after it is opened but before it is closed — and disappears the
+ * moment the day is complete. Tapping it goes to Profile, where the readings,
+ * the photos and the history live.
+ *
+ * It shares [ShiftViewModel] with the card on Profile (both sit under the same
+ * navigation entry), so a reading saved there makes this line change or vanish
+ * without a reload.
+ */
+@Composable
+fun ShiftNudge(onOpen: () -> Unit, vm: ShiftViewModel = hiltViewModel()) {
+    val s = vm.shift ?: return
+    val (what, then) = when {
+        s.startKm == null -> "Your shift is not open yet" to "Enter the opening reading"
+        s.endKm == null -> "Open at ${km(s.startKm)}" to "Close the day when you park"
+        else -> return
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen)
+            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(3.dp).height(30.dp).background(Qwik.Accent))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Kicker("Odometer")
+            Spacer(Modifier.height(2.dp))
+            Text(what, style = MaterialTheme.typography.bodyMedium, color = Qwik.Ink)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(then, style = MaterialTheme.typography.labelLarge, color = Qwik.Accent, maxLines = 2)
+    }
+}

@@ -848,6 +848,20 @@ def money_story_by(
                 "   AS written_off, "
                 " SUM(CASE WHEN t.event_type='DEPOSIT_APPLIED' THEN t.amount ELSE 0 END) "
                 "   AS deposit_applied, "
+                # Added after deposit_applied on purpose: ORDER BY below is
+                # positional (Postgres will not take an alias in an ORDER BY
+                # expression), so a new column ahead of position 6 would
+                # silently re-sort the whole table.
+                #
+                # DUES_CLEARED is a flow — an amount actually collected — so it
+                # sums correctly over any window. There is deliberately no
+                # carried_forward here to match the company table: DUES_CARRY's
+                # balance_after is a running snapshot, not a delta, and summing
+                # it over a window that spans several cycles counts the same
+                # debt once per cycle. What a rider still owes is the
+                # `balance` column, which is the live figure.
+                " SUM(CASE WHEN t.event_type='DUES_CLEARED' THEN t.amount ELSE 0 END) "
+                "   AS prior_dues_collected, "
                 " COALESCE(MAX(ea.outstanding), 0) AS outstanding, "
                 " COALESCE(MAX(b.current_balance), 0) AS balance, "
                 " MAX(CASE WHEN oa.person_id IS NOT NULL THEN 1 ELSE 0 END) AS has_open_ev, "

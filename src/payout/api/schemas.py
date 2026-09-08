@@ -38,6 +38,9 @@ class UserOut(BaseModel):
     email: str
     role: str
     phone: str | None = None
+    # What to call them on screen. The email is a login credential; only
+    # endpoints that have looked the real name up send this.
+    name: str | None = None
 
 
 # ── Companies ───────────────────────────────────────────────────────────────

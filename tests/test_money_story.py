@@ -127,6 +127,25 @@ def test_story_by_rider(seeded, client):
     assert by_name["N-G1"]["outstanding"] == 0
 
 
+def test_rider_dimension_carries_dues_so_a_company_drilldown_can_answer_who(seeded, client):
+    """Clicking a company to find out *whose* dues those were has to land on a
+    table that can answer, so the rider dimension carries prior_dues_collected.
+
+    It deliberately does NOT carry carried_forward. DUES_CARRY's balance_after
+    is a running snapshot rather than a delta, so summing it over a window that
+    spans several cycles counts the same debt once per cycle. What a rider
+    still owes is `balance`, which is live and correct."""
+    co = client.get("/api/dashboard/story/by?dim=company").json()["rows"]
+    riders = client.get("/api/dashboard/story/by?dim=rider").json()["rows"]
+    assert co and riders
+    assert all("prior_dues_collected" in r for r in riders)
+    assert all("carried_forward" not in r for r in riders)
+    assert all("balance" in r for r in riders)
+    # Same window, same events: the rider rows add up to the company rows.
+    for key in ("prior_dues_collected", "rent_collected", "arrears_recovered"):
+        assert round(sum(r[key] for r in riders), 2) == round(sum(r[key] for r in co), 2)
+
+
 def test_story_by_ev(seeded, client):
     rows = client.get("/api/dashboard/story/by?dim=ev").json()["rows"]
     evs = {r["ev_id"]: r for r in rows}

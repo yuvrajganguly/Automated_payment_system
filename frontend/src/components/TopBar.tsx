@@ -110,9 +110,9 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
                 ? 'bg-fuchsia-500/20 text-fuchsia-300 ring-1 ring-fuchsia-400/30'
                 : 'bg-brand-500/20 text-brand-300 ring-1 ring-brand-400/30')
             }
-            title={`${user?.email} · ${user?.role} — account settings`}
+            title={`${user?.name || user?.email} · ${user?.role} — account settings`}
           >
-            {(user?.email ?? '?')[0]}
+            {((user?.name || user?.email) ?? '?')[0]}
           </Link>
           <button
             onClick={logout}

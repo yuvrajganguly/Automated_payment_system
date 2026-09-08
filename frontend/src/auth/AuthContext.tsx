@@ -78,7 +78,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const r = await api.loginForm(email, password)
-    const u: User = { email: r.email, role: r.role }
+    // The login response is a token, not a profile — it has no name. Ask who
+    // we are, or the top bar shows the email until the next page reload.
+    const u: User = await api
+      .get<User>('/auth/me', { silent401: true })
+      .catch(() => ({ email: r.email, role: r.role }))
     setUser(u)
     safeSet(USER_KEY, JSON.stringify(u))
   }

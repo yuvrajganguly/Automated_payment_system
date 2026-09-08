@@ -236,7 +236,27 @@ def test_recruiting_numbers(db, client):
     s = client.get("/api/app/my-recruiting", headers=rec).json()
     assert s["email"] == "rec@t.test"
     c = s["counts"]
-    assert c["all_time"] == 3 and c["persons"] == 2 and c["active"] == 2 and c["ev_holders"] == 1
+    assert c["all_time"] == 3 and c["persons"] == 2 and c["ev_holders"] == 1
+    # "active" is the 12-day worked rule, not the roster switch: nobody here
+    # has ever been paid for a cycle, so nobody is active — while two rider
+    # ids are still on the roster. The two answer different questions and the
+    # tile in the app now asks the same one as the list behind it.
+    assert c["active"] == 0 and c["on_roster"] == 2
+    # Somebody else, at a paysheet company, paid today. It must not make this
+    # recruiter's riders active: active_person_sql correlates on person_id,
+    # and an unqualified column would bind to the subquery's own transactions
+    # row instead, turning the count into "has anyone anywhere been paid".
+    stranger = make_person(db, "Nobody Related")
+    db.execute(
+        "INSERT INTO transactions "
+        "  (person_id, company, event_type, amount, balance_after, cycle_start, cycle_end) "
+        "VALUES (?, 'Shadowfax', 'PAYOUT', 100000, 100000, "
+        "        date('now','-6 day'), date('now'))",
+        (stranger,),
+    )
+    db.commit()
+    again = client.get("/api/app/my-recruiting", headers=rec).json()["counts"]
+    assert again["active"] == 0, "an unrelated person's payout made this recruiter's riders active"
     assert c["today"] == 2 and c["week"] == 2 and c["month"] == 2
     assert [(x["company_name"], x["riders"]) for x in s["by_company"]] == [
         ("Shadowfax", 2),
@@ -416,3 +436,78 @@ def test_the_console_can_tell_when_something_moved(db, client):
     # Nothing new since that cursor → nothing to reload.
     quiet = client.get(f"/api/activity/changes?since={after['cursor']}", headers=boss).json()
     assert quiet["changed"] == [] and quiet["cursor"] == after["cursor"]
+
+
+def test_holding_list_is_one_row_per_person_and_matches_the_tile(db, client):
+    """The EV tile counts holders; the list behind it must count the same way.
+
+    ``counts.ev_holders`` is a COUNT(DISTINCT person_id) — one vehicle, one
+    holder. A person carrying two company rider ids would show as two rows
+    under a tile that said 1, and a tile that disagrees with its own list is
+    worse than a tile with no list at all.
+    """
+    rec = _hdr(client)
+    a = _onboard(client, rec, "Arjun Das", rider_id="SF-1")
+    _onboard(client, rec, "Arjun Das", company="Kaptan", rider_id="31111", person_id=a["person_id"])
+    _onboard(client, rec, "Bikash Roy", rider_id="SF-2")
+    # And a THIRD id for the same person that reuses a spelling — companies
+    # that share rider ids do exactly this. rider_master is keyed on
+    # (rider_id, company), so deduping on the id alone would keep both rows.
+    _onboard(client, rec, "Arjun Das", company="Elastic", rider_id="SF-1", person_id=a["person_id"])
+    assign(db, a["person_id"], make_ev(db, "EV-A"), handover="2026-08-01")
+    db.commit()
+
+    tile = client.get("/api/app/my-recruiting", headers=rec).json()["counts"]["ev_holders"]
+    rows = client.get("/api/recruiters/me/riders?status=holding", headers=rec).json()
+    assert tile == 1
+    assert len(rows) == tile
+    assert rows[0]["person_id"] == a["person_id"]
+    assert rows[0]["ev_id"] == "EV-A"
+    # Whichever of the two rider ids is shown, it is one of that person's.
+    assert rows[0]["rider_id"] in ("SF-1", "31111")
+
+    # And the plain list is still one row per rider id, EV badge included.
+    every = client.get("/api/recruiters/me/riders", headers=rec).json()
+    assert len(every) == 4
+    assert sorted((r["rider_id"], r["company_name"], r["ev_id"]) for r in every) == [
+        ("31111", "Kaptan", "EV-A"),
+        ("SF-1", "Elastic", "EV-A"),
+        ("SF-1", "Shadowfax", "EV-A"),
+        ("SF-2", "Shadowfax", None),
+    ]
+
+
+def test_returning_the_ev_empties_the_holding_list(db, client):
+    rec = _hdr(client)
+    a = _onboard(client, rec, "Arjun Das", rider_id="SF-1")
+    assign(db, a["person_id"], make_ev(db, "EV-A"), handover="2026-08-01")
+    db.commit()
+    assert len(client.get("/api/recruiters/me/riders?status=holding", headers=rec).json()) == 1
+
+    db.execute("UPDATE ev_assignments SET returned_date='2026-09-01' WHERE ev_id='EV-A'")
+    db.commit()
+    assert client.get("/api/recruiters/me/riders?status=holding", headers=rec).json() == []
+    assert client.get("/api/app/my-recruiting", headers=rec).json()["counts"]["ev_holders"] == 0
+
+
+def test_bootstrap_calls_you_by_your_name_not_your_login(db, client):
+    """The email is a credential. Printed as a name it reads like one, and it
+    puts a login id on screen in front of whoever is standing behind you."""
+    rec = _hdr(client)
+
+    # Nothing set yet: the local part stands in, because something must.
+    assert client.get("/api/app/bootstrap", headers=rec).json()["me"]["name"] == "rec"
+
+    # An admin's display_name is the next best thing.
+    db.execute("UPDATE users SET display_name='R. Kumar' WHERE email='rec@t.test'")
+    db.commit()
+    assert client.get("/api/app/bootstrap", headers=rec).json()["me"]["name"] == "R. Kumar"
+
+    # What they wrote about themselves wins over what an admin typed for them.
+    r = client.patch("/api/recruiters/me/profile", json={"full_name": "Rahul Kumar"}, headers=rec)
+    assert r.status_code == 200, r.text
+    me = client.get("/api/app/bootstrap", headers=rec).json()["me"]
+    assert me["name"] == "Rahul Kumar"
+    assert me["email"] == "rec@t.test"  # still there, still the login id
+    # And the console's own /auth/me agrees, so the two never disagree.
+    assert client.get("/api/auth/me", headers=rec).json()["name"] == "Rahul Kumar"

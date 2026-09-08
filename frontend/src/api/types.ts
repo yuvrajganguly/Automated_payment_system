@@ -1,4 +1,4 @@
-export interface User { email: string; role: string; phone?: string | null }
+export interface User { email: string; role: string; phone?: string | null; name?: string | null }
 export interface TokenResponse {
   access_token: string
   token_type: string
