@@ -307,6 +307,18 @@ fun EvUnitSheet(
                     error = closeouts.saveError,
                     skipLabel = "Later",
                     onSkip = leavePrompt,
+                    // The vehicle has only just come back, so there is no
+                    // report yet: a picture taken here waits for the save and
+                    // rides along with it.
+                    photo = closeouts.heldPhoto?.takeIf { closeouts.heldPhotoFor == pending.assignmentId },
+                    photoLanded = closeouts.photoLanded && closeouts.heldPhotoFor == pending.assignmentId,
+                    photoUploading = closeouts.uploading && closeouts.heldPhotoFor == pending.assignmentId,
+                    photoError = closeouts.photoError?.takeIf { closeouts.heldPhotoFor == pending.assignmentId },
+                    photoVersion = closeouts.photoVersion,
+                    onPhoto = { uri ->
+                        closeouts.pickPhoto(pending.assignmentId, uri, pending.report != null)
+                    },
+                    onRetryPhoto = closeouts::retryPhoto,
                     onSubmit = { sdReturned, charges, damageNote ->
                         closeouts.save(pending.assignmentId, sdReturned, charges, damageNote) { said ->
                             vm.dismissPrompt()

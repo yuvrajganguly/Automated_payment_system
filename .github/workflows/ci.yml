@@ -69,10 +69,17 @@ jobs:
           PAYOUT_DB_URL: postgresql://payout:payout@localhost:5432/payout_test
         run: pytest --no-cov
 
+      # `--strict` used to make this step abort on its first line: the project
+      # installs itself with `pip install -e .`, pip-audit cannot look
+      # `payout-system` up on PyPI, and under --strict that unresolvable local
+      # package is fatal. It exited before printing the vulnerability table, so
+      # the warning in the log was always about our own package rather than
+      # about any dependency — which is why nobody ever acted on it.
       - name: Dependency audit
         run: |
           pip install pip-audit
-          pip-audit --strict --progress-spinner off || echo "::warning::pip-audit found issues (advisory)"
+          pip-audit --skip-editable --progress-spinner off \
+            || echo "::warning::pip-audit found issues (advisory)"
 
   frontend:
     name: Frontend · typecheck + lint + build

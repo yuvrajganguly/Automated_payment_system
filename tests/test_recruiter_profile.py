@@ -404,3 +404,50 @@ def test_the_app_lists_the_vehicles_i_took_back_that_still_need_an_answer(client
     assert mine[0]["report"] is None  # not answered yet
     # A colleague who did not take it back is not prompted about it.
     assert client.get("/api/evs/closeouts/mine", headers=_login(client, _REC2)).json() == []
+
+
+def test_the_damage_photo_hangs_off_a_report_that_already_exists(client):
+    """Same ordering as everywhere else: the assessment saves first, the
+    picture follows, so a failed upload costs the photo and not the number."""
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    h = _login(client, _REC)
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    files = {"file": ("damage.png", png, "image/png")}
+
+    # No report yet — the photo has nothing to hang off.
+    early = client.post(f"/api/evs/closeouts/{aid}/photo", files=files, headers=h)
+    assert early.status_code == 404
+
+    client.post(
+        f"/api/evs/closeouts/{aid}/report",
+        json={"sd_returned": False, "damage_charges": 850, "damage_note": "Cracked panel"},
+        headers=h,
+    )
+    assert client.post(f"/api/evs/closeouts/{aid}/photo", files=files, headers=h).status_code == 200
+
+    # The office can see what it is being asked to charge for.
+    got = client.get(f"/api/evs/closeouts/{aid}/photo", headers=_login(client, _ADMIN))
+    assert got.status_code == 200
+    assert got.content == png
+    pending = client.get("/api/evs/closeouts", headers=_login(client, _ADMIN)).json()
+    assert next(p for p in pending if p["assignment_id"] == aid)["report"]["has_photo"] is True
+
+
+def test_a_pdf_is_not_a_photo_of_a_scooter(client):
+    with get_connection() as conn:
+        aid = _closed_assignment(conn, returned_by=_REC[0])
+        conn.commit()
+    h = _login(client, _REC)
+    client.post(f"/api/evs/closeouts/{aid}/report", json={"sd_returned": False}, headers=h)
+    r = client.post(
+        f"/api/evs/closeouts/{aid}/photo",
+        files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")},
+        headers=h,
+    )
+    assert r.status_code == 415

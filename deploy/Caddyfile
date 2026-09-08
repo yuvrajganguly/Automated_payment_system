@@ -11,6 +11,26 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+
+	# Cache the fingerprinted assets hard, and the HTML shell not at all.
+	#
+	# Vite names every bundle with a content hash (index-CMYkjyvM.js), so an
+	# asset URL never changes meaning and can be cached for a year. index.html
+	# is the opposite: its URL is constant and its CONTENT changes on every
+	# deploy, because that is where the new hashed filenames are written down.
+	#
+	# Served with no directive at all, a browser is free to apply heuristic
+	# caching to the shell — and it does. That is how a deploy can go out,
+	# be verifiably live on the server, and still not reach somebody's tab:
+	# they hold an old index.html, so they keep asking for the old bundle,
+	# which is still there and still serves happily. It looks exactly like a
+	# feature that failed to ship. It cost us the "rider not showing up"
+	# false alarm on 2026-09-07 and the missing Recruiters page on 09-08.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	@shell path / /index.html
+	header @shell Cache-Control "no-cache"
 }
 
 # Public demo copy (compose profile "demo"). With DEMO_ADDRESS unset this is

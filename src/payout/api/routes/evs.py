@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import date
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
+from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import zone_filter
 from payout.api.schemas import (
     BackrentIn,
@@ -24,6 +27,7 @@ from payout.api.schemas import (
     MaintenanceOut,
 )
 from payout.db import get_connection
+from payout.documents import ALLOWED_CONTENT_TYPES, get_storage, make_staff_key
 from payout.domain.activity import record_activity
 from payout.domain.adjustments import log_maintenance
 from payout.domain.backrent import apply_backrent, compute_backrent, latest_cycle_end_for
@@ -40,6 +44,9 @@ from payout.exports import xlsx_response
 from payout.money import to_paise
 
 router = APIRouter()
+
+# The dash of a scratched scooter, shrunk by the app before it is sent.
+MAX_CLOSEOUT_PHOTO_BYTES = 8 * 1024 * 1024
 
 
 @router.get("/models", response_model=list[EvModelOut])
@@ -648,6 +655,72 @@ def report_closeout(
         )
         conn.commit()
     return out
+
+
+@router.post("/closeouts/{assignment_id}/photo")
+def upload_closeout_photo(
+    assignment_id: int,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_recruiter),
+    _: None = Depends(rate_limit("staff-photo", 40, 3600)),
+) -> dict:
+    """The damage, photographed. Hangs off a report that already exists.
+
+    Same ordering as everywhere else in the app: the report saves first and
+    the picture follows, so a failed upload on a hub's signal costs the photo
+    and not the assessment. The image is the evidence behind a charge somebody
+    will dispute, so it is kept even after the office settles — unlike the
+    report itself, which is frozen at that point.
+    """
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if ctype not in ALLOWED_CONTENT_TYPES or ctype == "application/pdf":
+        raise HTTPException(415, "Send a JPEG, PNG or WebP image")
+    data = file.file.read(MAX_CLOSEOUT_PHOTO_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "The file was empty")
+    if len(data) > MAX_CLOSEOUT_PHOTO_BYTES:
+        raise HTTPException(413, "That image is too large — the app should shrink it first")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT photo_key FROM ev_closeout_reports WHERE assignment_id=?", (assignment_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Record what the vehicle came back like first")
+        key = make_staff_key(user["email"], "ev_damage", ctype)
+        get_storage().put(key, data, ctype)
+        conn.execute(
+            "UPDATE ev_closeout_reports SET photo_key=? WHERE assignment_id=?",
+            (key, assignment_id),
+        )
+        conn.commit()
+        old = row["photo_key"]
+    if old and old != key:
+        with contextlib.suppress(Exception):
+            get_storage().delete(old)
+    return {"ok": True}
+
+
+@router.get("/closeouts/{assignment_id}/photo")
+def closeout_photo(assignment_id: int, user: dict = Depends(get_current_user)) -> Response:
+    """The damage photo behind a deposit charge. Any signed-in member of staff:
+    the office has to see what it is being asked to charge for, and the
+    recruiter has to be able to check what they sent."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT photo_key FROM ev_closeout_reports WHERE assignment_id=?", (assignment_id,)
+        ).fetchone()
+    if not row or not row["photo_key"]:
+        raise HTTPException(404, "No photo")
+    try:
+        data = get_storage().get(row["photo_key"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "No photo") from exc
+    ext = row["photo_key"].rsplit(".", 1)[-1]
+    ctype = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+    return Response(
+        content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=300"}
+    )
 
 
 @router.post("/close")

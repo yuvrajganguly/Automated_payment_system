@@ -66,6 +66,7 @@ _EXPECTED_STATUS = {
     "/api/persons/{person_id}/photo": 404,  # no photo uploaded in the demo seed
     "/api/recruiters/{email}/photo": 404,  # no recruiter has uploaded one
     "/api/recruiters/{email}/shift/photo": 404,  # no odometer photo in the demo seed
+    "/api/evs/closeouts/{assignment_id}/photo": 404,  # no damage photo in the demo seed
 }
 if DB_URL:
     # No single file to stream on Postgres; the route says to use pg_dump.
@@ -112,6 +113,7 @@ def smoke():
             "{bill_id}": "1",
             "{doc_id}": "1",
             "{request_id}": "1",
+            "{assignment_id}": "1",
         }
         yield client, app, subs
 

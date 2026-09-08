@@ -32,7 +32,8 @@ app/src/main/kotlin/com/qwikserve/recruiter/
                         every Riders-tab filter reads the cache, so all of them work offline)
   data/location/        AppOpenLocation (one fix per foreground, ≥30 min apart), header interceptor
   data/repo/            RiderRepository — read cached, write online; AppRepository — bootstrap;
-                        PhotoRepository — shrink once, upload anywhere (rider, recruiter, dash)
+                        PhotoRepository — shrink once, upload anywhere (rider, recruiter,
+                        dash, damage)
   ui/                   AppRoot (nav), SessionViewModel, home/ (tab shell), today/, riders/, evs/,
                         requests/, stats/, person/, profile/, login/, common/ (the kit), theme/
 ```
@@ -137,8 +138,8 @@ closed flagged: the month is what the fuel claim is paid on, and it should
 never be quietly short by a day somebody forgot to end.
 
 Photos: the onboarding form opens with a photo tile, a rider's page has the
-same tile, and so do the shift card and the Profile tab — tap for Camera or
-Gallery. Neither needs a runtime permission
+same tile, and so do the shift card, the Profile tab and the damage half of
+the deposit sheet — tap for Camera or Gallery. Neither needs a runtime permission
 (the app never declares CAMERA, so `ACTION_IMAGE_CAPTURE` just works; the
 picture picker hands back one image). `PhotoRepository` turns the camera's
 4–6 MB into ~200 kB (1 280 px, JPEG 80, EXIF rotation applied) before
@@ -173,6 +174,25 @@ pre-fills the office's close-out, which is still the only thing that settles
 the money — the sheet says so in a line, above the button. A refusal (that
 combination, or a deposit the office has already settled) is shown word for
 word under the fields it is about.
+
+The damage also gets a **photo**, and only where the damage fields are: a
+deposit that went back whole has nothing to photograph. It follows the order
+the odometer and the onboarding form use, and for the same reason — the report
+first (`POST /evs/closeouts/{assignment_id}/report`), the picture after it
+(`POST /evs/closeouts/{assignment_id}/photo`). The assessment is the claim and
+the photo is only evidence for it, and a hub on one bar of signal must never be
+able to cost somebody the figure. The server keeps the same order — a photo
+with no report behind it comes back 404, "Record what the vehicle came back
+like first" — so one taken before the answer is saved is **held on the phone**
+and goes up the moment the save lands rather than quietly going nowhere, and
+the line beside the tile says which of the two it is doing. When the upload is
+the thing that fails, the sheet stays where it is with the server's own
+sentence (a file that is not a picture, one over 8 MB) and a retry that asks
+for nothing already typed: the report and its figure are on the server by then.
+The same sentence and the same retry wait on the deposits card for a sheet that
+has already been closed. A report that has a photo shows it — on its row and in
+the tile, `GET /evs/closeouts/{assignment_id}/photo` through Coil on the API's
+own OkHttp client, so the token rides along — and tapping it replaces it.
 
 The EVs tab opens on **Deposits to report** — `GET /evs/closeouts/mine`, the
 vehicles this recruiter took back that nobody has answered for yet, each with

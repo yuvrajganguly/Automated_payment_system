@@ -1,7 +1,10 @@
 package com.qwikserve.recruiter.ui.evs
 
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,21 +29,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil.compose.AsyncImage
+import com.qwikserve.recruiter.BuildConfig
 import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.CloseoutReport
 import com.qwikserve.recruiter.data.api.CloseoutReportIn
 import com.qwikserve.recruiter.data.api.CloseoutRow
 import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
@@ -70,10 +79,17 @@ import javax.inject.Inject
  * deposit that went back whole cannot also have damage owed against it (the
  * app hides the damage fields rather than sending the pair), and once the
  * office has settled, the answer is fixed and the server says so.
+ *
+ * The damage photo follows the report, never the other way round: the
+ * assessment is the claim and the picture is only evidence for it, and the
+ * server refuses a photo (404) until a report exists to hang it on. So a
+ * picture chosen before the save is **held**, not sent and lost, and goes up
+ * the moment the save lands.
  */
 @HiltViewModel
 class CloseoutsViewModel @Inject constructor(
     private val api: PayoutApi,
+    private val photos: PhotoRepository,
     private val json: Json,
 ) : ViewModel() {
     var rows by mutableStateOf<List<CloseoutRow>>(emptyList())
@@ -94,6 +110,36 @@ class CloseoutsViewModel @Inject constructor(
      *  is about. Never swallowed, never rewritten. */
     var saveError by mutableStateOf<String?>(null)
         private set
+
+    /** A damage photo chosen on the phone that is not on the server yet, and
+     *  the assignment it belongs to. It survives a "Later": a picture taken of
+     *  a vehicle that has already gone back cannot be taken again. */
+    var heldPhoto by mutableStateOf<Uri?>(null)
+        private set
+    var heldPhotoFor by mutableStateOf<Long?>(null)
+        private set
+
+    /** True once that picture is on the server. It is kept on screen after it
+     *  lands — the row in hand still says `has_photo: false` until the list
+     *  reloads, and a tile that empties itself on success reads as a failure. */
+    var photoLanded by mutableStateOf(false)
+        private set
+    var uploading by mutableStateOf(false)
+        private set
+
+    /** Why the last upload did not land — the server's sentence when it sent
+     *  one (a 415, an over-size file), ours when there was no answer at all. */
+    var photoError by mutableStateOf<String?>(null)
+        private set
+
+    /** Bumped when a picture lands, so the tiles re-fetch the server's copy
+     *  instead of showing the one Coil already has cached for that URL. */
+    var photoVersion by mutableStateOf(0)
+        private set
+
+    /** Assignments known to carry a report now — they arrived with one, or we
+     *  just saved one. Below that, the photo endpoint is a 404. */
+    private val reportedIds = mutableSetOf<Long>()
 
     init { load() }
 
@@ -141,12 +187,26 @@ class CloseoutsViewModel @Inject constructor(
                         damageNote = if (sdReturned) null else note.trim().ifBlank { null },
                     ),
                 )
-                onSaved(
+                reportedIds += assignmentId
+                val said =
                     if (out.sdReturned) "Deposit returned — reported. The office settles it."
                     else "Deposit kept" +
                         (out.damageCharges.takeIf { it > 0 }?.let { ", damage " + rupees(it) } ?: ", no damage") +
-                        " — reported. The office settles it.",
-                )
+                        " — reported. The office settles it."
+                // A deposit that went back whole has no damage to photograph,
+                // so a picture chosen before the answer changed is dropped
+                // rather than quietly filed against nothing.
+                if (sdReturned && heldPhotoFor == assignmentId) dropHeldPhoto()
+                // The report first, the photo after it — that is the whole
+                // ordering. If the picture does not go up, the sheet stays
+                // where it is with the reason and a retry: the figure is on
+                // the server by now, so nobody types it a second time.
+                val held = heldPhoto?.takeIf { heldPhotoFor == assignmentId && !photoLanded }
+                if (held != null && !sendPhoto(assignmentId, held)) {
+                    load()
+                    return@launch
+                }
+                onSaved(said)
                 load()
             } catch (e: HttpException) {
                 saveError = e.readable("The server answered ${e.code()} — the report was not saved.")
@@ -157,6 +217,70 @@ class CloseoutsViewModel @Inject constructor(
             } finally {
                 saving = false
             }
+        }
+    }
+
+    /* ── The damage photo ── */
+
+    /**
+     * A picture chosen for [assignmentId]. If the report is already on the
+     * server — [reported] from the row in hand, or one we saved a moment ago —
+     * it goes up now; otherwise it waits for the save, which sends it. Either
+     * way it is held, so nothing a recruiter photographed is thrown away.
+     */
+    fun pickPhoto(assignmentId: Long, uri: Uri, reported: Boolean) {
+        heldPhoto = uri
+        heldPhotoFor = assignmentId
+        photoLanded = false
+        photoError = null
+        if (reported || assignmentId in reportedIds) uploadHeld(assignmentId, uri)
+    }
+
+    /** Try the picture again after a failed upload. It asks for nothing that
+     *  was already typed: the report, and the damage figure in it, are saved. */
+    fun retryPhoto() {
+        val uri = heldPhoto ?: return
+        val id = heldPhotoFor ?: return
+        if (photoLanded) return
+        uploadHeld(id, uri)
+    }
+
+    /** Give up on the held picture — the report keeps whatever it had. */
+    fun dropHeldPhoto() {
+        heldPhoto = null
+        heldPhotoFor = null
+        photoLanded = false
+        photoError = null
+    }
+
+    private fun uploadHeld(assignmentId: Long, uri: Uri) {
+        if (uploading || saving) return
+        viewModelScope.launch { if (sendPhoto(assignmentId, uri)) load() }
+    }
+
+    /** The upload itself. It never throws: a photo that did not go up is a
+     *  sentence and a retry, never a report lost on the way. */
+    private suspend fun sendPhoto(assignmentId: Long, uri: Uri): Boolean {
+        uploading = true
+        photoError = null
+        return try {
+            photos.uploadCloseoutPhoto(assignmentId, uri)
+            photoLanded = true
+            photoVersion++
+            true
+        } catch (e: HttpException) {
+            // 415 for a file that is not a picture, 413 over 8 MB, 404 for a
+            // report that is not there — the server's own words, as sent.
+            photoError = e.readable("The report is saved. The photo did not go up — the server answered ${e.code()}.")
+            false
+        } catch (e: IOException) {
+            photoError = "The report is saved. The photo did not go up — no signal."
+            false
+        } catch (e: Exception) {
+            photoError = e.message ?: "The report is saved. The photo did not go up."
+            false
+        } finally {
+            uploading = false
         }
     }
 
@@ -210,7 +334,7 @@ fun CloseoutsCard(vm: CloseoutsViewModel, onAnswer: (CloseoutRow) -> Unit) {
                 )
                 Spacer(Modifier.height(6.dp))
                 vm.rows.forEach { row ->
-                    CloseoutListRow(row, onAnswer = { onAnswer(row) })
+                    CloseoutListRow(row, version = vm.photoVersion, onAnswer = { onAnswer(row) })
                 }
             }
             vm.loadError != null -> Column(Modifier.fillMaxWidth()) {
@@ -232,11 +356,22 @@ fun CloseoutsCard(vm: CloseoutsViewModel, onAnswer: (CloseoutRow) -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(vm.loadError!!, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
         }
+        // A photo that did not go up after the sheet closed. The report is on
+        // the server; this is the picture, and it is still on the phone.
+        if (vm.photoError != null && vm.heldPhoto != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(vm.photoError!!, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GhostAction("Send the photo again", onClick = vm::retryPhoto, enabled = !vm.uploading)
+                Spacer(Modifier.width(16.dp))
+                GhostAction("Drop it", onClick = vm::dropHeldPhoto, color = Qwik.N700, enabled = !vm.uploading)
+            }
+        }
     }
 }
 
 @Composable
-private fun CloseoutListRow(row: CloseoutRow, onAnswer: () -> Unit) {
+private fun CloseoutListRow(row: CloseoutRow, version: Int, onAnswer: () -> Unit) {
     val report = row.report
     Column(Modifier.fillMaxWidth().clickable(onClick = onAnswer).padding(vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -257,6 +392,13 @@ private fun CloseoutListRow(row: CloseoutRow, onAnswer: () -> Unit) {
                 )
             }
             Spacer(Modifier.width(10.dp))
+            // The damage, when there is a picture of it: small, but there —
+            // an answer with evidence behind it should look different from one
+            // without, on the list and not only inside the sheet.
+            if (report?.hasPhoto == true) {
+                DamageThumb(row.assignmentId, version)
+                Spacer(Modifier.width(10.dp))
+            }
             if (report == null) {
                 GhostAction("Answer", onClick = onAnswer)
             } else {
@@ -276,6 +418,40 @@ private fun CloseoutListRow(row: CloseoutRow, onAnswer: () -> Unit) {
     }
 }
 
+/** The quiet line beside the photo tile: what is happening to the picture. */
+@Composable
+private fun PhotoNote(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+}
+
+/**
+ * The damage photo on a list row. It loads through Coil, which is wired to the
+ * API's own OkHttp client in [com.qwikserve.recruiter.QwikApp], so the bearer
+ * token rides along; a picture that is not there yet is a grey square, never a
+ * broken one. Tapping the row opens the sheet, where it can be replaced.
+ */
+@Composable
+private fun DamageThumb(assignmentId: Long, version: Int) {
+    Box(
+        Modifier.size(44.dp).background(Qwik.N200).border(1.dp, Qwik.N400),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            // The ?v= is Coil's cache, not the server's: without it a replaced
+            // photo keeps showing the one it fetched an hour ago.
+            model = closeoutPhotoUrl(assignmentId) + (if (version > 0) "?v=$version" else ""),
+            contentDescription = "Damage photo",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(44.dp),
+        )
+    }
+}
+
+/** The server's copy of the damage photo. Bare — [PhotoTile] adds its own
+ *  cache-busting `v` the way the rider and dash photos have it. */
+private fun closeoutPhotoUrl(assignmentId: Long): String =
+    BuildConfig.API_BASE_URL + "evs/closeouts/" + assignmentId + "/photo"
+
 /** "CBICEVD0244 · Zypp Ather · back 4 Sep" */
 private fun evLine(row: CloseoutRow): String = listOfNotNull(
     row.evId,
@@ -291,6 +467,7 @@ private fun answerLine(report: CloseoutReport): String = if (report.sdReturned) 
         "Deposit kept",
         report.damageCharges.takeIf { it > 0 }?.let { "damage " + rupees(it) } ?: "no damage",
         report.damageNote?.takeIf { it.isNotBlank() },
+        if (report.hasPhoto) "photo" else null,
     ).joinToString(" · ")
 }
 
@@ -315,6 +492,13 @@ fun CloseoutSheet(
                 error = vm.saveError,
                 skipLabel = if (row.report == null) "Later" else "Leave it as it is",
                 onSkip = onDismiss,
+                photo = vm.heldPhoto?.takeIf { vm.heldPhotoFor == row.assignmentId },
+                photoLanded = vm.photoLanded && vm.heldPhotoFor == row.assignmentId,
+                photoUploading = vm.uploading && vm.heldPhotoFor == row.assignmentId,
+                photoError = vm.photoError?.takeIf { vm.heldPhotoFor == row.assignmentId },
+                photoVersion = vm.photoVersion,
+                onPhoto = { uri -> vm.pickPhoto(row.assignmentId, uri, row.report != null) },
+                onRetryPhoto = vm::retryPhoto,
                 onSubmit = { sdReturned, charges, damageNote ->
                     vm.save(row.assignmentId, sdReturned, charges, damageNote, onDone)
                 },
@@ -331,6 +515,11 @@ fun CloseoutSheet(
  * about money. "Later" is a first-class button, not a dismissal: a recruiter
  * with a rider waiting must be able to leave, and the vehicle simply stays on
  * the list until somebody has a minute.
+ *
+ * The photo tile appears with the damage fields and for the same reason: a
+ * deposit that went back whole has nothing to photograph. It is the last
+ * thing here rather than the first because it is the last thing to happen —
+ * the report saves, and then the picture follows it up.
  */
 @Composable
 fun CloseoutForm(
@@ -339,6 +528,13 @@ fun CloseoutForm(
     error: String?,
     skipLabel: String,
     onSkip: () -> Unit,
+    photo: Uri?,
+    photoLanded: Boolean,
+    photoUploading: Boolean,
+    photoError: String?,
+    photoVersion: Int,
+    onPhoto: (Uri) -> Unit,
+    onRetryPhoto: () -> Unit,
     onSubmit: (Boolean, Double, String) -> Unit,
 ) {
     val existing = row.report
@@ -410,6 +606,50 @@ fun CloseoutForm(
                 colors = fieldColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            Spacer(Modifier.height(14.dp))
+            Kicker("Photo of the damage")
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                PhotoTile(
+                    picked = photo,
+                    url = if (existing?.hasPhoto == true) closeoutPhotoUrl(row.assignmentId) else null,
+                    size = 76.dp,
+                    busy = photoUploading,
+                    version = photoVersion,
+                    label = "Damage photo",
+                    onPicked = onPhoto,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f).padding(top = 2.dp)) {
+                    when {
+                        photoUploading -> PhotoNote("Going up now.")
+                        // The server's own words when it sent any, and a way
+                        // to try again that asks for nothing already typed.
+                        photoError != null -> {
+                            Text(
+                                photoError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Qwik.Accent700,
+                            )
+                            GhostAction(
+                                "Send the photo again",
+                                onClick = onRetryPhoto,
+                                enabled = !busy,
+                            )
+                        }
+                        photoLanded -> PhotoNote("Saved with the report.")
+                        // Held, because there is nothing on the server to hang
+                        // it on yet. Saying so is the difference between
+                        // waiting and disappearing.
+                        photo != null -> PhotoNote("It goes up when you save the report.")
+                        existing?.hasPhoto == true -> PhotoNote("A photo is attached. Tap it to replace it.")
+                        else -> PhotoNote(
+                            "Optional. The office settles the deposit from this report, and a picture is what it has to go on.",
+                        )
+                    }
+                }
+            }
         }
 
         // The server's answer, verbatim, under the fields it is about.

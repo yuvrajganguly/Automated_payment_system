@@ -125,6 +125,17 @@ interface PayoutApi {
         @Body body: CloseoutReportIn,
     ): CloseoutReport
 
+    /** The damage behind a kept deposit, in a picture. The report is saved
+     *  first and this goes up after it: until there is a report the server
+     *  answers 404, because a photo of damage nobody has claimed hangs off
+     *  nothing. jpeg/png/webp only, 8 MB — we send a shrunk JPEG. */
+    @Multipart
+    @POST("evs/closeouts/{assignment_id}/photo")
+    suspend fun uploadCloseoutPhoto(
+        @Path("assignment_id") assignmentId: Long,
+        @Part file: MultipartBody.Part,
+    ): OkOut
+
     @GET("evs/maintenance")
     suspend fun maintenance(@Query("ev_id") evId: String? = null): List<MaintenanceOut>
 

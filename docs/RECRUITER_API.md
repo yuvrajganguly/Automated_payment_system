@@ -399,8 +399,15 @@ POST /evs/closeouts/{assignment_id}/report   recruiter
        {sd_returned, damage_charges, damage_note?}
        → {assignment_id, ev_id, person_id, sd_returned, damage_charges,
           damage_note, has_photo, reported_by, reported_at}
+POST /evs/closeouts/{assignment_id}/photo    recruiter — multipart `file`
+GET  /evs/closeouts/{assignment_id}/photo    the damage, any signed-in staff
 POST /evs/closeouts/{assignment_id}          admin — settles the deposit
 ```
+
+The photo hangs off a report that already exists (`404` until one does), for
+the same reason the odometer photo follows its reading: the assessment is the
+claim and the picture is the evidence, and a failed upload on a hub's signal
+must cost the photo rather than the number. JPEG, PNG or WebP, 8 MB.
 
 The report writes no transaction, touches no arrears and moves no rupee: it is
 an observation by the person who was actually holding the vehicle. The admin's

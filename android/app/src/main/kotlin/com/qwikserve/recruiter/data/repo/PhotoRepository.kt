@@ -49,6 +49,12 @@ class PhotoRepository @Inject constructor(
         api.uploadShiftPhoto(kind, day, part(uri, "odo-$kind-$day.jpg"))
     }
 
+    /** The damage behind a deposit that was kept. The report is saved first —
+     *  this only ever attaches evidence to a claim that already exists. */
+    suspend fun uploadCloseoutPhoto(assignmentId: Long, uri: Uri) = withContext(Dispatchers.IO) {
+        api.uploadCloseoutPhoto(assignmentId, part(uri, "damage-$assignmentId.jpg"))
+    }
+
     /** One picture off the phone, shrunk, as a `file` part. */
     private fun part(uri: Uri, filename: String): MultipartBody.Part {
         val jpeg = readAndShrink(uri) ?: error("That picture could not be read.")
