@@ -16,14 +16,8 @@ import { api } from '../api/client'
 import type { Company } from '../api/types'
 import { Spinner } from '../components/Spinner'
 import { rupees } from '../lib/format'
-
-type Zone = 'North' | 'South' | 'Misc'
-const ZONES: Zone[] = ['North', 'South', 'Misc']
-const ZONE_TONE: Record<Zone, string> = {
-  North: 'bg-sky-500 text-white border-sky-500',
-  South: 'bg-amber-500 text-white border-amber-500',
-  Misc: 'bg-slate-500 text-white border-slate-500',
-}
+import { ZONE_TONE, ZONES } from '../lib/zones'
+import type { Zone } from '../lib/zones'
 
 interface HubRow {
   company: string

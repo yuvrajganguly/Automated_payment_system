@@ -14,10 +14,12 @@
  * Nothing is deleted here: a company that stops is deactivated so its history
  * stays readable. Company names link to their week-by-week history.
  */
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Company } from '../api/types'
+import { ZONE_TONE, ZONES } from '../lib/zones'
+import type { Zone } from '../lib/zones'
 import { Spinner } from '../components/Spinner'
 
 type Model = 'payout_file' | 'per_order' | 'direct' | 'salary'
@@ -95,6 +97,10 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
   rows: Company[]; title: string; editing: string | null; setEditing: (n: string | null) => void
   onChanged: () => void; companies: Company[]; dim?: boolean
 }) {
+  // Which company's stores are open. Separate from `editing` on purpose — the
+  // two panels answer different questions and you often want the stores open
+  // while reading the row above them.
+  const [stores, setStores] = useState<string | null>(null)
   return (
     <section className="mb-8">
       <h2 className="font-semibold mb-2">{title}</h2>
@@ -139,9 +145,11 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
                     <td className="px-3 py-2 whitespace-nowrap tabular-nums">
                       {c.active_riders ?? 0}<span className="text-slate-400"> / {c.rider_ids ?? 0}</span>
                       <div className="text-[11px]">
-                        <Link to={'/hubs?company=' + encodeURIComponent(c.company_name)} className="text-brand underline decoration-dotted">
+                        <button type="button"
+                          onClick={() => setStores(stores === c.company_name ? null : c.company_name)}
+                          className="text-brand underline decoration-dotted">
                           {c.hubs ?? 0} store{(c.hubs ?? 0) === 1 ? '' : 's'}
-                        </Link>
+                        </button>
                       </div>
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600">
@@ -163,6 +171,14 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
                       </button>
                     </td>
                   </tr>
+                  {stores === c.company_name && (
+                    <tr className="border-t border-edge-soft bg-white/[0.02]">
+                      <td colSpan={8} className="px-3 py-3">
+                        <CompanyStores company={c.company_name} perOrder={m === 'per_order'}
+                                       defaultRate={c.per_order_rate ?? null} onChanged={onChanged} />
+                      </td>
+                    </tr>
+                  )}
                   {open && (
                     <tr className="border-t border-edge-soft bg-white/[0.02]">
                       <td colSpan={8} className="px-3 py-3">
@@ -181,6 +197,203 @@ function CompanyTable({ rows, title, editing, setEditing, onChanged, companies, 
         </table>
       </div>
     </section>
+  )
+}
+
+
+/**
+ * A company's stores, inline: what they are, how many riders and EVs sit at
+ * each, and which zone each one belongs to.
+ *
+ * It lives here because this is where somebody is already thinking about the
+ * company. A store with no zone used to be findable only by going to Admin →
+ * Hubs and knowing to look — which is how Ruby sat unclassified under
+ * Shadowfax for weeks. Since the zone fence, an unzoned store is shown to
+ * every recruiter rather than to none, so it is no longer invisible work; it
+ * is still nobody's, though, so it is flagged here in red until it is placed.
+ *
+ * A per-order company can charge a different rate at different stores — a
+ * quiet store is not worth the same per delivery as a busy one — so that rate
+ * is editable here too, with the company's own rate showing through as the
+ * placeholder so a blank cell obviously means "whatever the company pays".
+ * Salaried companies have three per-store figures rather than one; those stay
+ * on the Hubs page, where there is room for them.
+ *
+ * Notes and deactivation stay there too. This panel does what the company view
+ * actually wants: see the stores, add one, place it, price it.
+ */
+function CompanyStores(
+  { company, perOrder, defaultRate, onChanged }:
+  { company: string; perOrder: boolean; defaultRate: number | null; onChanged: () => void },
+) {
+  const [rows, setRows] = useState<StoreRow[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [zone, setZone] = useState<Zone | ''>('')
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await api.get<StoreRow[]>('/hubs?company=' + encodeURIComponent(company)))
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load the stores')
+    }
+  }, [company])
+
+  useEffect(() => { void load() }, [load])
+
+  async function put(hub: string, body: Record<string, unknown>) {
+    setBusy(true); setError(null)
+    try {
+      await api.put('/hubs/' + encodeURIComponent(company) + '/' + encodeURIComponent(hub), body)
+      await load()
+      onChanged()   // the row's store count may have changed
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function add(e: FormEvent) {
+    e.preventDefault()
+    const hub = name.trim()
+    if (!hub) return
+    // The same PUT creates the store and places it: the route accepts a store
+    // that has no riders yet, which is the whole point of adding one here —
+    // you classify it before the first rider arrives, not after.
+    await put(hub, zone ? { zone } : {})
+    setName(''); setZone('')
+  }
+
+  if (error && !rows) return <p className="text-red-400 text-sm">{error}</p>
+  if (!rows) return <p className="text-slate-500 text-sm">Loading stores…</p>
+
+  const unzoned = rows.filter((r) => !r.zone).length
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 mb-2">
+        <h3 className="font-semibold text-sm">
+          Stores at {company}
+          {unzoned > 0 && (
+            <span className="ml-2 text-xs text-red-400 font-normal">
+              {unzoned} with no zone — no recruiter owns {unzoned === 1 ? 'it' : 'them'}
+            </span>
+          )}
+        </h3>
+        <Link to={'/hubs?company=' + encodeURIComponent(company)}
+              className="text-xs text-brand underline decoration-dotted">
+          rates, notes and more →
+        </Link>
+      </div>
+
+      <table className="w-full text-sm mb-3">
+        <thead className="text-left border-b border-edge-soft text-xs text-slate-500">
+          <tr><th className="px-2 py-1 font-medium">Store</th><th className="px-2 py-1 font-medium">Zone</th>
+            <th className="px-2 py-1 font-medium text-right">Riders</th>
+            <th className="px-2 py-1 font-medium text-right">EVs</th>
+            {perOrder && <th className="px-2 py-1 font-medium text-right">₹ / order</th>}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.hub} className={'border-t border-edge-soft ' + (!r.zone ? 'bg-red-500/5' : '')
+              + (r.is_active === false ? ' opacity-50' : '')}>
+              <td className="px-2 py-1.5 font-medium">
+                {r.hub}
+                {r.is_active === false && <span className="ml-2 text-xs text-slate-400">inactive</span>}
+              </td>
+              <td className="px-2 py-1.5">
+                <div className="flex gap-1 items-center">
+                  {ZONES.map((z) => (
+                    <button key={z} type="button" disabled={busy}
+                      onClick={() => put(r.hub, { zone: r.zone === z ? null : z })}
+                      className={'text-xs px-2 py-0.5 rounded border '
+                        + (r.zone === z ? ZONE_TONE[z] : 'hover:bg-slate-100')}>
+                      {z}
+                    </button>
+                  ))}
+                  {!r.zone && <span className="text-xs text-red-500 ml-1">unassigned</span>}
+                </div>
+              </td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{r.riders}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{r.evs}</td>
+              {perOrder && (
+                <td className="px-2 py-1.5 text-right">
+                  <RateCell value={r.per_order_rate ?? null} fallback={defaultRate} disabled={busy}
+                            onCommit={(v) => put(r.hub, { per_order_rate: v })} />
+                </td>
+              )}
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={perOrder ? 5 : 4} className="px-2 py-3 text-slate-500 text-sm">
+              No stores yet. Add the first one below — it can be placed in a zone before
+              anybody works there.
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+
+      <form onSubmit={add} className="flex flex-wrap gap-2 items-center">
+        <input value={name} onChange={(e) => setName(e.target.value)}
+               placeholder="Add a store — e.g. Salt Lake"
+               className="border rounded px-3 py-1.5 text-sm" />
+        <select value={zone} onChange={(e) => setZone(e.target.value as Zone | '')}
+                className="border rounded px-3 py-1.5 text-sm">
+          <option value="">No zone yet</option>
+          {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
+        </select>
+        <button type="submit" disabled={busy || !name.trim()}
+                className="text-sm px-3 py-1.5 rounded border border-edge hover:bg-white/[0.04] disabled:opacity-50">
+          {busy ? 'Saving…' : 'Add store'}
+        </button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </form>
+    </div>
+  )
+}
+
+interface StoreRow {
+  hub: string
+  zone: Zone | null
+  riders: number
+  evs: number
+  is_active?: boolean
+  per_order_rate: number | null
+}
+
+/**
+ * A store's own per-order rate. Blank means the company's rate applies, and
+ * the placeholder shows what that is, so nobody has to remember which stores
+ * they overrode. Clearing the box sends null and hands the store back to the
+ * company default rather than pricing it at zero.
+ */
+function RateCell(
+  { value, fallback, disabled, onCommit }:
+  { value: number | null; fallback: number | null; disabled: boolean; onCommit: (v: number | null) => void },
+) {
+  const [v, setV] = useState(value == null ? '' : String(value))
+  useEffect(() => { setV(value == null ? '' : String(value)) }, [value])
+  const commit = () => {
+    const t = v.trim()
+    const next = t === '' ? null : Number(t)
+    if (t !== '' && !Number.isFinite(next)) { setV(value == null ? '' : String(value)); return }
+    if (next !== value) onCommit(next)
+  }
+  return (
+    <input
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      disabled={disabled}
+      inputMode="decimal"
+      placeholder={fallback == null ? '—' : String(fallback)}
+      title={value == null ? 'Using the company rate' : 'This store has its own rate'}
+      className={'w-20 border rounded px-2 py-0.5 text-sm text-right tabular-nums '
+        + (value == null ? 'text-slate-400' : '')}
+    />
   )
 }
 
