@@ -90,10 +90,20 @@ class EvsViewModel @Inject constructor(
 
     private val me get() = store.email.orEmpty()
 
+    /** The zones this recruiter may pick between; empty when the server has
+     *  fenced them to one, in which case there is no filter row to draw. */
+    fun zoneChoices(): List<String> = app.zoneChoices()
+
+    /** Fenced to a single zone. The server then sends their own zone *plus*
+     *  anything nobody has classified, and both belong on screen — filtering
+     *  client-side on an exact zone match would throw the unzoned ones away
+     *  again, one layer further down. */
+    private val fenced get() = app.zoneChoices().isEmpty()
+
     /** Units in the chosen scope before the state filter (for the state counts). */
     fun scoped(): List<EvUnitOut> = all.filter { u ->
         (if (mine) me.isNotEmpty() && (u.recruitedBy ?: "").split(",").contains(me) else true) &&
-            (mine || zone == "All" || u.zone == zone)
+            (mine || zone == "All" || u.zone == zone || (fenced && u.zone == null))
     }
 
     fun shown(): List<EvUnitOut> {
@@ -148,11 +158,12 @@ fun EvsScreen(
                     if (vm.state !in (if (vm.mine) MY_STATES else ALL_STATES).map { s -> s.first }) vm.state = "in_use"
                 },
             )
-            if (!vm.mine) {
+            val zoneChoices = vm.zoneChoices()
+            if (!vm.mine && zoneChoices.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Kicker("Zone")
                     Spacer(Modifier.width(10.dp))
-                    Chips(listOf("North", "South", "Misc", "All"), vm.zone, onSelect = { vm.zone = it })
+                    Chips(zoneChoices + "All", vm.zone, onSelect = { vm.zone = it })
                 }
             }
             val states = if (vm.mine) MY_STATES else ALL_STATES

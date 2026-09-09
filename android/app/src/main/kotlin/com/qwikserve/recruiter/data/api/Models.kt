@@ -187,7 +187,15 @@ data class DocumentOut(
 data class EvAssignIn(
     @SerialName("ev_id") val evId: String,
     @SerialName("person_id") val personId: Long? = null,
-    @SerialName("handover_date") val handoverDate: String? = null, // null = today
+    /** null = today, decided by the server.
+     *
+     *  This comment described the intent long before the server honoured it:
+     *  a null handover date was stored as NULL, and rent read NULL as "in
+     *  force for every cycle, forever" — which is how a rider ended up paying
+     *  for two EVs at once. The server dates the assignment itself now, so
+     *  null really does mean today. It is left to the server on purpose: a
+     *  phone's clock and timezone are not the office's. */
+    @SerialName("handover_date") val handoverDate: String? = null,
 )
 
 @Serializable

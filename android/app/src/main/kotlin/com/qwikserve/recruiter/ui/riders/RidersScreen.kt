@@ -90,6 +90,9 @@ class RidersViewModel @Inject constructor(
     val zone = MutableStateFlow(app.defaultZone())
 
     fun zoneChoices(): List<String> = app.zoneChoices()
+
+    /** Fenced to a single zone by the server — see AppRepository.zoneChoices. */
+    private val fenced get() = app.zoneChoices().isEmpty()
     val activity = MutableStateFlow(Activity.ALL)
     var refreshing by mutableStateOf(false)
         private set
@@ -107,7 +110,12 @@ class RidersViewModel @Inject constructor(
                 repo.search(
                     f.q,
                     mine = if (f.scope == Scope.MINE) me.orEmpty() else null,
-                    zone = if (f.scope == Scope.ALL && f.zone != "All") f.zone else null,
+                    // No client-side zone filter when the server has fenced
+                    // this recruiter: everything in the cache is already
+                    // theirs to see, and Room matches the zone exactly — so
+                    // filtering again here would throw away the stores nobody
+                    // has classified, which the server deliberately sent.
+                    zone = if (f.scope == Scope.ALL && f.zone != "All" && !fenced) f.zone else null,
                     working = f.activity.working,
                 )
             }
