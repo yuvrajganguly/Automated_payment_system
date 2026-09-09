@@ -164,9 +164,43 @@ def _txn(conn, **kw):
     )
 
 
+def _id_sharing_companies(conn, company):
+    """Companies that share a rider-id space with ``company``, either way round.
+
+    ``companies.rider_ids_shared_with`` points one way — the borrower names the
+    owner — but a shared id space is symmetric in practice: 31111 is the same
+    rider whichever of the two sent the file. So this returns the company named
+    by ``company`` (its owner) *and* every company that names ``company``
+    (its borrowers).
+    """
+    rows = conn.execute(
+        "SELECT company_name FROM companies WHERE is_active=1 AND ("
+        "  rider_ids_shared_with = ? "
+        "  OR company_name = (SELECT rider_ids_shared_with FROM companies "
+        "                     WHERE company_name = ?)"
+        ")",
+        (company, company),
+    ).fetchall()
+    return [r["company_name"] for r in rows if r["company_name"] != company]
+
+
 def _sync_hub(conn, rec, company, person, result):
     """Roster hub follows the payout file. Called for every known rider in the
-    file; a no-op when the file has no hub column or it already matches."""
+    file; a no-op when the file has no hub column or it already matches.
+
+    The hub also travels to the same rider id at any company sharing that id
+    space. Blitz sends Kaptan and Nykaa either as two files or as one, and when
+    it arrives combined the whole thing is processed under whichever name the
+    operator picked. Without this, the store learned from that file would land
+    on one brand's roster row and the sibling row would keep drifting — the
+    same rider, at the same store, filed in two places disagreeing.
+
+    It stops at the id-sharing pair. A rider's store at Shadowfax is a
+    different place from their store at Kaptan, so an unrelated company's row
+    is never touched, and the sibling row is only written when it is the same
+    **person** — a shared id space should mean that, but the guard costs
+    nothing and a wrong hub moves somebody to another recruiter's zone.
+    """
     new_hub = (rec.hub or "").strip()
     old_hub = (person.get("hub") or "").strip()
     if not new_hub or new_hub == old_hub:
@@ -179,11 +213,33 @@ def _sync_hub(conn, rec, company, person, result):
     result.hub_updates.append(
         {
             "rider_id": rec.rider_id,
+            "company": company,
             "name": person.get("name") or rec.name or "",
             "old_hub": old_hub,
             "new_hub": new_hub,
         }
     )
+    for sibling in _id_sharing_companies(conn, company):
+        row = conn.execute(
+            "SELECT hub FROM rider_master WHERE rider_id=? AND company=? AND person_id=?",
+            (rec.rider_id, sibling, person["person_id"]),
+        ).fetchone()
+        if row is None or (row["hub"] or "").strip() == new_hub:
+            continue
+        conn.execute(
+            "UPDATE rider_master SET hub=?, updated_at=datetime('now') "
+            "WHERE rider_id=? AND company=? AND person_id=?",
+            (new_hub, rec.rider_id, sibling, person["person_id"]),
+        )
+        result.hub_updates.append(
+            {
+                "rider_id": rec.rider_id,
+                "company": sibling,
+                "name": person.get("name") or rec.name or "",
+                "old_hub": (row["hub"] or "").strip(),
+                "new_hub": new_hub,
+            }
+        )
 
 
 def _warn_gap(result, rinfo, rider_id, company, cycle_start):
@@ -1127,7 +1183,8 @@ def process_cycle(
 
         if result.hub_updates:
             shown = ", ".join(
-                f"{u['rider_id']} {u['old_hub'] or '—'} → {u['new_hub']}"
+                f"{u['rider_id']}@{u.get('company', company)} "
+                f"{u['old_hub'] or '—'} → {u['new_hub']}"
                 for u in result.hub_updates[:5]
             )
             more = len(result.hub_updates) - 5
