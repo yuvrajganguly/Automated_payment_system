@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { usePersistedState } from '../state/usePersistedState'
 import { api } from '../api/client'
 import { Spinner } from '../components/Spinner'
@@ -37,14 +38,32 @@ function downloadBase64(b64: string, filename: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Process Payout, and — with `adHoc` — the surge mode beside it.
+ *
+ * One component on purpose. An ad-hoc run is the same upload, the same
+ * preview, the same commit and the same workbook; what differs is that the
+ * engine charges no rent, moves no meter, marks nobody absent and claims no
+ * cycle. Forking the page would mean two copies of the upload-and-preview
+ * flow drifting apart, and the flow is the part operators have in their hands.
+ *
+ * The mode comes from the route rather than a prop: App.tsx lazy-loads every
+ * page through a helper that erases prop types, and reading the path keeps
+ * that helper untouched.
+ */
 export function ProcessPayoutPage() {
+  const adHoc = useLocation().pathname.startsWith('/adhoc')
   const [companies, setCompanies] = useState<Company[]>([])
   // Which company you process is a sticky choice — coming back to this page
   // mid-task should not reset it. Dates deliberately stay ephemeral: they
   // re-derive from the company's next unprocessed cycle on every visit.
   const [company, setCompany] = usePersistedState('process:company', '')
-  const [cycleStart, setCycleStart] = useState(isoToday(-7))
-  const [cycleEnd, setCycleEnd] = useState(isoToday(-1))
+  // An ad-hoc run has no window — "just process what we received" — but every
+  // ledger row still needs a date, so both ends sit on today and the pickers
+  // are not shown.
+  const [cycleStart, setCycleStart] = useState(adHoc ? isoToday(0) : isoToday(-7))
+  const [cycleEnd, setCycleEnd] = useState(adHoc ? isoToday(0) : isoToday(-1))
+  const [label, setLabel] = useState('')
   const [file, setFile] = useState<File | null>(null)
   // Per-order companies: rider_id -> order count typed off their dashboard.
   const [orders, setOrders] = useState<Record<string, string>>({})
@@ -179,9 +198,14 @@ export function ProcessPayoutPage() {
       }
       const t = preview?.totals ?? {}
       const ok = window.confirm(
-        `Commit ${company} ${cycleStart} → ${cycleEnd}?\n\n` +
-        `${t.riders_paid ?? 0} riders paid · ₹${fmt(t.total_release ?? 0)} released · ` +
-        `₹${fmt(t.total_rent_charged ?? 0)} rent charged.\n\nThis writes the ledger and cannot be undone.`,
+        adHoc
+          ? `Commit an ad-hoc payout for ${company}?\n\n` +
+            `${t.riders_paid ?? 0} rider(s) paid · ₹${fmt(t.total_release ?? 0)} released.\n` +
+            `No EV rent is charged and no cycle is recorded — the normal payout ` +
+            `for this week still runs as usual.\n\nThis writes the ledger and cannot be undone.`
+          : `Commit ${company} ${cycleStart} → ${cycleEnd}?\n\n` +
+            `${t.riders_paid ?? 0} riders paid · ₹${fmt(t.total_release ?? 0)} released · ` +
+            `₹${fmt(t.total_rent_charged ?? 0)} rent charged.\n\nThis writes the ledger and cannot be undone.`,
       )
       if (!ok) return
     }
@@ -192,6 +216,10 @@ export function ProcessPayoutPage() {
       form.set('company', company)
       form.set('cycle_start', cycleStart)
       form.set('cycle_end', cycleEnd)
+      if (adHoc) {
+        form.set('ad_hoc', 'true')
+        if (label.trim()) form.set('label', label.trim())
+      }
       form.set('commit', commit ? 'true' : 'false')
       if (perOrder) {
         form.set('orders', JSON.stringify(
@@ -223,15 +251,22 @@ export function ProcessPayoutPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">Process Payout</h1>
+      <h1 className="text-2xl font-bold mb-1">{adHoc ? 'Ad-hoc Payout' : 'Process Payout'}</h1>
       <p className="text-slate-500 text-sm mb-6">
-        {perOrder
+        {adHoc
+          ? <>For money paid outside the normal cycle — a surge day or two where the company
+            took on extra riders. Upload what they sent, preview, commit.
+            <b> No EV rent is deducted</b>, the rent meter does not move and nobody is marked
+            absent, so the week's own payout still runs exactly as it would have. Anything a
+            rider already owes is still recovered.
+            <span className="text-slate-400"> No dates to set — it is booked on today.</span></>
+          : perOrder
           ? <>{company} sends no file — type each rider's order count from their dashboard; we pay ₹{rate} an order, deduct rent as usual and release the rest. Preview, then commit.</>
           : salaried
           ? <>{company} riders are salaried — mark each rider's days present and orders (or upload the sheet you keep). Pay = salary less a day's pay per day short of {selected?.salary_expected_days ?? 26}, plus ₹{selected?.incentive_per_order ?? 0} an order and ₹{selected?.incentive_per_day ?? 0} a day present; EV rent comes off as usual. Preview, then commit.</>
           : <>Upload a company payout file, preview the result, then commit when ready.
             Commit writes everything atomically and returns the styled workbook for download.</>}
-        <span className="text-slate-400"> Companies that pay riders directly are not listed — there is nothing to process for them.</span>
+        {!adHoc && <span className="text-slate-400"> Companies that pay riders directly are not listed — there is nothing to process for them.</span>}
       </p>
 
       <form onSubmit={(e) => submit(false, e)} className="panel p-6 mb-6">
@@ -248,22 +283,36 @@ export function ProcessPayoutPage() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Cycle Start</label>
-            <input
-              type="date" value={cycleStart}
-              onChange={(e) => setCycleStart(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Cycle End</label>
-            <input
-              type="date" value={cycleEnd}
-              onChange={(e) => setCycleEnd(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
+          {adHoc ? (
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">What was this for? (optional)</label>
+              <input
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="e.g. Durga Puja surge, 3 days"
+                className="w-full border rounded px-3 py-2"
+              />
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-1">Cycle Start</label>
+                <input
+                  type="date" value={cycleStart}
+                  onChange={(e) => setCycleStart(e.target.value)}
+                  className="w-full border rounded px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Cycle End</label>
+                <input
+                  type="date" value={cycleEnd}
+                  onChange={(e) => setCycleEnd(e.target.value)}
+                  className="w-full border rounded px-3 py-2"
+                />
+              </div>
+            </>
+          )}
           {perOrder ? (
             <div>
               <label className="block text-sm font-medium mb-1">Payout</label>

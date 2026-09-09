@@ -382,6 +382,23 @@ def _ever_returned_ev(conn, pid):
     return r is not None
 
 
+def _adhoc_digest(company, parsed) -> str:
+    """Identity of an ad-hoc file: who is being paid, and how much.
+
+    Deliberately not a hash of the bytes. The same payment re-exported from a
+    spreadsheet is a different file and the same money; what must not happen
+    twice is the payment, so the digest is built from the thing that would be
+    paid twice.
+    """
+    import hashlib
+
+    body = "|".join(
+        f"{r.rider_id}:{int(round(r.payout))}"
+        for r in sorted(parsed.records, key=lambda r: (r.rider_id, r.payout))
+    )
+    return hashlib.sha256(f"{company}\n{body}".encode()).hexdigest()
+
+
 def _shared_rider_source(conn, company):
     """Company whose rider ids this company reuses (companies.rider_ids_shared_with)."""
     row = conn.execute(
@@ -433,11 +450,34 @@ def process_cycle(
     commit=True,
     force=False,
     parsed=None,
+    ad_hoc=False,
+    label=None,
 ) -> CycleResult:
     """Run one company cycle. Input is either ``file_bytes`` (the company's
     payout file, read through its parser config) or a ready ``ParseResult``
     (``parsed`` — how per-order companies get in: the route builds the records
-    from typed order counts × the company's rate; there is no file)."""
+    from typed order counts × the company's rate; there is no file).
+
+    ``ad_hoc`` runs a payment that is **not** a cycle. Companies hitting a
+    surge hire riders from outside for a day or three and pay them separately;
+    the office receives a file for money already agreed and simply has to put
+    it through the books. Four things are switched off, and each one would do
+    real damage if it were not:
+
+    * **No rent.** Surge riders are not on our EVs, and a regular rider picking
+      up extra days must not be billed a second week.
+    * **No meter.** ``rent_charged_through`` does not move, so the normal cycle
+      still bills every day it should. Advancing it here would silently gift a
+      week of rent to whoever happened to appear in an ad-hoc file.
+    * **No absence pass.** This is the one that matters. A normal cycle treats
+      every EV holder missing from the file as absent and charges arrears — on
+      an ad-hoc file of five surge riders that would fall on the entire roster.
+    * **No cycle row.** ``company_cycles`` is untouched, so the week does not
+      read as paid and the next normal run behaves as if this never happened.
+
+    Arrears and prior dues are still recovered: this is real money reaching a
+    real person, and if they owe us, it settles like any other payment.
+    """
     overrides = overrides or CycleOverrides()
     if parsed is None:
         if file_bytes is None:
@@ -452,7 +492,39 @@ def process_cycle(
 
     conn = get_connection()
     try:
-        if commit:
+        if commit and ad_hoc:
+            # An ad-hoc run owns no cycle, so company_cycles cannot be the
+            # re-commit guard. Its identity is the file itself: the same
+            # company paying the same riders the same amounts is a repeat, and
+            # the unique index refuses it inside this transaction rather than
+            # after the money has gone out twice.
+            digest = _adhoc_digest(company, parsed)
+            paid = sum(r.payout for r in parsed.records)
+            if force:
+                conn.execute(
+                    "DELETE FROM adhoc_runs WHERE company=? AND file_digest=?", (company, digest)
+                )
+            try:
+                conn.execute(
+                    "INSERT INTO adhoc_runs (company, ran_on, label, file_digest, riders, "
+                    "total_paid, created_by) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        company,
+                        _iso(cycle_end),
+                        (label or "").strip() or None,
+                        digest,
+                        len(parsed.records),
+                        int(round(paid)),
+                        created_by,
+                    ),
+                )
+            except Exception as exc:  # unique index → already processed
+                raise CycleAlreadyCommitted(
+                    f"This exact ad-hoc file has already been processed for {company} "
+                    f"({len(parsed.records)} riders, {to_rupees(paid):,.0f}). Re-processing "
+                    "would pay them twice. Pass force=true to override intentionally."
+                ) from exc
+        elif commit:
             # Re-commit guard, inside THIS transaction. A committed cycle owns
             # exactly one company_cycles row; claim it first so a concurrent
             # commit of the same cycle fails on the primary key instead of both
@@ -609,7 +681,7 @@ def process_cycle(
             # main rent charge. (Older behavior: gated on deduction_company,
             # which meant a late upload from the deduction company let rent
             # silently slip.)
-            charge_here = pid not in rent_done
+            charge_here = not ad_hoc and pid not in rent_done
             if charge_here:
                 rinfo = resolve_rent(
                     conn,
@@ -999,7 +1071,13 @@ def process_cycle(
 
             _set_balance(conn, pid, final_balance, cycle_end)
             _set_pending_xc(conn, pid, new_pending_xc, new_pending_origin, new_pending_cycle_end)
-            _mark_present(conn, pid, cycle_end)
+            if not ad_hoc:
+                # last_seen drives dormancy. A surge day is not evidence that a
+                # rider who has otherwise stopped is still working, and marking
+                # them here would hide exactly the person the office is looking
+                # for. The 12-day worked rule reads the ledger, so a genuine
+                # ad-hoc earner still shows as active there.
+                _mark_present(conn, pid, cycle_end)
             if charge_here and rinfo and rinfo.has_ev:
                 advance_rent_charged_through(
                     conn,
@@ -1049,17 +1127,27 @@ def process_cycle(
         # gets logged; the company scope must come from rider_master directly,
         # otherwise the seed importer's alphabetical default contaminates the
         # INACTIVE sheet with riders from other companies.)
+        #
+        # Never on an ad-hoc run. An ad-hoc file lists the handful of people
+        # paid for a surge; everybody else is missing from it because they were
+        # not part of that arrangement, not because they were absent. Running
+        # this would charge the whole roster a week of arrears off the back of
+        # five surge riders.
         total_missed = 0.0
-        for a in conn.execute(
-            "SELECT pr.person_id, pr.display_name, pr.deduction_rider_id "
-            "FROM person_registry pr "
-            "JOIN ev_assignments ea ON ea.person_id=pr.person_id AND ea.returned_date IS NULL "
-            "WHERE EXISTS ("
-            "    SELECT 1 FROM rider_master rm "
-            "    WHERE rm.person_id = pr.person_id AND rm.company = ? AND rm.is_active = 1"
-            ")",
-            (company,),
-        ).fetchall():
+        for a in (
+            []
+            if ad_hoc
+            else conn.execute(
+                "SELECT pr.person_id, pr.display_name, pr.deduction_rider_id "
+                "FROM person_registry pr "
+                "JOIN ev_assignments ea ON ea.person_id=pr.person_id AND ea.returned_date IS NULL "
+                "WHERE EXISTS ("
+                "    SELECT 1 FROM rider_master rm "
+                "    WHERE rm.person_id = pr.person_id AND rm.company = ? AND rm.is_active = 1"
+                ")",
+                (company,),
+            ).fetchall()
+        ):
             pid = a["person_id"]
             if pid in present_person_ids:
                 continue
@@ -1220,7 +1308,13 @@ def process_cycle(
             "inactive_count": len(result.inactive_rows),
         }
         result.committed = commit
-        if commit:
+        if commit and not ad_hoc:
+            # Not on an ad-hoc run — the second half of "no cycle row". The
+            # claim at the top of this function is one write; this is the other,
+            # and it is the one that actually persists the summary. Missing it
+            # would make the surge day read as the week having been paid, and
+            # the next normal cycle would find its slot already taken.
+            #
             # Cycle tracking: write a company_cycles row so dashboards have a
             # cheap join target instead of recomputing from the transactions
             # table. week_bucket groups the four companies' runs that fall in
@@ -1277,6 +1371,11 @@ def process_cycle(
                     t["rent_missed_this_cycle"],
                 ),
             )
+        # Outside the block above on purpose. conn.commit() used to live inside
+        # it, so gating that block on `not ad_hoc` quietly took the commit with
+        # it: an ad-hoc run reported success and wrote nothing. Whether the
+        # transaction lands is a decision about `commit`, and nothing else.
+        if commit:
             conn.commit()
         else:
             conn.rollback()

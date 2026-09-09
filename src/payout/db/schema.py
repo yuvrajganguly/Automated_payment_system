@@ -446,6 +446,27 @@ CREATE TABLE IF NOT EXISTS recruiter_profiles (
     updated_at   TEXT DEFAULT (datetime('now'))
 );
 
+-- ── adhoc_runs ──────────────────────────────────────────────────────────────
+-- A payment that is not a cycle. Companies hitting a surge hire riders from
+-- outside for a day or three and pay them separately; the office receives a
+-- file for money already agreed and puts it through the books. Deliberately
+-- NOT company_cycles: an ad-hoc run must never make a week read as paid.
+-- file_digest is who was paid and how much, so the same payment cannot go out
+-- twice — the unique index refuses it inside the engine's own transaction.
+CREATE TABLE IF NOT EXISTS adhoc_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    company     TEXT NOT NULL,
+    ran_on      TEXT NOT NULL,
+    label       TEXT,
+    file_digest TEXT NOT NULL,
+    riders      INTEGER NOT NULL DEFAULT 0,
+    total_paid  INTEGER NOT NULL DEFAULT 0,   -- paise
+    created_by  TEXT,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_adhoc_digest
+    ON adhoc_runs (company, file_digest);
+
 -- ── recruiter_shifts ────────────────────────────────────────────────────────
 -- The vehicle odometer at the start and end of a recruiter's day, typed in by
 -- the recruiter with a photo of the dash each time. distance = end_km -

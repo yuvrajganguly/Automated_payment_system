@@ -77,6 +77,7 @@ export default function App() {
             <Route path="/companies/:name" element={<CompanyPage />} />
             <Route path="/hubs" element={<HubsPage />} />
             <Route path="/field" element={<FieldPage />} />
+            <Route path="/adhoc" element={<ProcessPayoutPage />} />
             <Route path="/corrections" element={<CorrectionsPage />} />
             <Route path="/ev-rent" element={<EvRentPage />} />
             <Route path="/settings" element={<SettingsPage />} />

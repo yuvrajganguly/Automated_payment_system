@@ -30,6 +30,7 @@ export const WORKSPACES: Workspace[] = [
     label: 'Operate',
     pages: [
       { to: '/', label: 'Process Payout', end: true },
+      { to: '/adhoc', label: 'Ad-hoc Payout' },
       { to: '/corrections', label: 'Corrections' },
     ],
     noRecruiter: true,

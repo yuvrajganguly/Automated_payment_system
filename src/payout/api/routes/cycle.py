@@ -355,10 +355,12 @@ async def parse_attendance_sheet(
 @router.post("/run")
 async def run_cycle(
     company: str = Form(...),
-    cycle_start: date = Form(...),
-    cycle_end: date = Form(...),
+    cycle_start: date | None = Form(None),
+    cycle_end: date | None = Form(None),
     commit: bool = Form(False),
     force: bool = Form(False),
+    ad_hoc: bool = Form(False),
+    label: str | None = Form(None),
     overrides: str | None = Form(None),
     orders: str | None = Form(None),
     attendance: str | None = Form(None),
@@ -375,7 +377,19 @@ async def run_cycle(
     - `commit=false` (default) runs as a dry-run preview; nothing is written.
     - `commit=true` writes everything atomically AND returns the styled .xlsx as
       base64 in the response so the frontend can trigger a download.
+    - `ad_hoc=true` pays a surge file that is not a cycle: no rent, no meter,
+      no absence pass, no cycle row. The dates are optional and default to
+      today, because there is no window to state — see engine.process_cycle.
     """
+    if ad_hoc:
+        # "It does not even need a time window — just process what we
+        # received." The ledger still needs a date on every row, so both ends
+        # collapse to the day it is processed.
+        today = date.today()
+        cycle_start = cycle_start or today
+        cycle_end = cycle_end or cycle_start
+    if cycle_start is None or cycle_end is None:
+        raise HTTPException(400, "A cycle needs a start and an end date.")
     if cycle_end < cycle_start:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -445,6 +459,8 @@ async def run_cycle(
             created_by=user["email"],
             commit=commit,
             force=force,
+            ad_hoc=ad_hoc,
+            label=label,
         )
     except CycleAlreadyCommitted as exc:
         # Guard lives in the engine's transaction now (was a racy pre-check here).

@@ -868,6 +868,40 @@ def _0029_handover_date_required(conn: Any) -> None:
         conn.execute("ALTER TABLE ev_assignments ALTER COLUMN handover_date SET NOT NULL")
 
 
+def _0030_adhoc_runs(conn: Any) -> None:
+    """The ledger of ad-hoc payments — surge riders paid outside any cycle.
+
+    Kept apart from ``company_cycles`` on purpose. An ad-hoc run must not make
+    a week read as paid, or the next normal cycle would find its slot taken and
+    the rent for those days would never be billed. The unique index on
+    ``(company, file_digest)`` is what stops the same surge payment going out
+    twice: there is no cycle window to guard it, so the file's own content —
+    who is paid, and how much — is the identity.
+    """
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS adhoc_runs ("
+        "  id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  company     TEXT NOT NULL,"
+        "  ran_on      TEXT NOT NULL,"
+        "  label       TEXT,"
+        "  file_digest TEXT NOT NULL,"
+        "  riders      INTEGER NOT NULL DEFAULT 0,"
+        "  total_paid  INTEGER NOT NULL DEFAULT 0,"
+        "  created_by  TEXT,"
+        "  created_at  TEXT DEFAULT (datetime('now'))"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_adhoc_digest ON adhoc_runs (company, file_digest)"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -901,6 +935,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0027_recruiter_shifts", _0027_recruiter_shifts),
     ("0028_ev_closeout_reports", _0028_ev_closeout_reports),
     ("0029_handover_date_required", _0029_handover_date_required),
+    ("0030_adhoc_runs", _0030_adhoc_runs),
 ]
 
 _TRACKING_DDL = (
