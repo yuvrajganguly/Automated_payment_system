@@ -136,7 +136,7 @@ def apply_unbilled(conn, *, person_id, ev_id, day_from, day_to, created_by="unbi
         "JOIN ev_units u ON u.ev_id = a.ev_id "
         "JOIN ev_models m ON m.model_id = u.model_id "
         "WHERE a.person_id=? AND a.ev_id=? "
-        "  AND (a.handover_date IS NULL OR a.handover_date < ?) "
+        "  AND COALESCE(a.handover_date, substr(a.created_at, 1, 10)) < ? "
         "  AND (a.returned_date IS NULL OR a.returned_date > ?) "
         "ORDER BY a.assignment_id DESC LIMIT 1",
         (person_id, ev_id, day_from, day_to),

@@ -58,6 +58,9 @@ class AssignmentLeg:
     # Days before cycle_start that were behind the meter and unaccounted for,
     # billed by this cycle (see unbilled_gap). 0 in the normal case.
     catchup_days: int = 0
+    # True when handover_date was missing and created_at stood in for it. The
+    # rent is charged, but the date is inferred, so the engine says so.
+    assumed_handover: bool = False
 
 
 @dataclass
@@ -274,13 +277,14 @@ def resolve_rent(
     rows = conn.execute(
         """
         SELECT a.assignment_id, a.person_id, a.ev_id, a.handover_date, a.returned_date,
-               a.rent_charged_through, m.provider, m.model_name, m.weekly_rate
+               a.rent_charged_through, a.created_at,
+               m.provider, m.model_name, m.weekly_rate
         FROM ev_assignments a
         JOIN ev_units  u ON u.ev_id = a.ev_id
         JOIN ev_models m ON m.model_id = u.model_id
         WHERE a.person_id = ?
           AND (a.returned_date IS NULL OR a.returned_date >= ?)
-          AND (a.handover_date IS NULL OR a.handover_date <= ?)
+          AND COALESCE(a.handover_date, substr(a.created_at, 1, 10)) <= ?
         ORDER BY COALESCE(a.handover_date, a.created_at) ASC
         """,
         (
@@ -296,7 +300,27 @@ def resolve_rent(
     # Build per-leg chargeable windows.
     legs_data = []
     for r in rows:
-        hod = _parse_date(r["handover_date"])
+        # A missing handover date falls back to the day the assignment row was
+        # written, and NEVER to "in force since the beginning of time".
+        #
+        # This is the 2026-09 double-charge. handover_date is nullable and the
+        # schema called NULL "rent the full cycle (legacy riders)", which was
+        # true when the only NULL rows were the go-live import. Once the EV
+        # screens and the importer could also write NULL, an assignment with no
+        # date had nothing to compare a cycle against, so it billed EVERY
+        # cycle, in full, at its own EV's rate — including cycles that ended
+        # before the vehicle was handed over. A rider who swapped EVs was
+        # charged for both at once, and a rider whose new EV arrived after the
+        # cycle closed was charged at the new EV's rate for a week he spent on
+        # the old one.
+        #
+        # created_at is the honest floor: we cannot have handed over a vehicle
+        # before we wrote the row saying we had. If both are missing the
+        # COALESCE in the query above is NULL, the comparison is not true, and
+        # the leg is left out entirely — an unbillable assignment takes no
+        # money rather than guessing at somebody's expense.
+        assumed = not r["handover_date"]
+        hod = _parse_date(r["handover_date"] or (r["created_at"] or "")[:10])
         ret = _parse_date(r["returned_date"])
         charged = _parse_date(r["rent_charged_through"])
         win = chargeable_window(cycle_start, cycle_end, hod, charged, ret)
@@ -334,6 +358,7 @@ def resolve_rent(
                 "maint": maint,
                 "catchup": catchup_days,
                 "orphans": orphans,
+                "assumed_handover": assumed,
             }
         )
 
@@ -381,6 +406,7 @@ def resolve_rent(
             rent_from=leg["rent_from"],
             rent_through=leg["rent_through"],
             catchup_days=leg["catchup"],
+            assumed_handover=leg["assumed_handover"],
         )
         built_legs.append(built)
         total_days += eff_days

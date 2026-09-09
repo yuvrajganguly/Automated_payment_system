@@ -9,7 +9,15 @@ def _blive(db):
     mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Blive'").fetchone()["model_id"]
     ev = f"B{pid}"
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES (?,?, 'in_use')", (ev, mid))
-    db.execute("INSERT INTO ev_assignments (person_id,ev_id) VALUES (?, ?)", (pid, ev))
+    db.execute(
+        # created_at is explicit: a row with no handover date bills from the
+        # day it was written (domain/rent.resolve_rent), so a fixture that
+        # left it at "now" while testing a cycle months back would be
+        # modelling a row written after the money moved. This is a legacy
+        # rider — carried in from before handover dates were tracked.
+        "INSERT INTO ev_assignments (person_id,ev_id,created_at) VALUES (?, ?, '2020-01-01 00:00:00')",
+        (pid, ev),
+    )
     db.commit()
     return pid
 

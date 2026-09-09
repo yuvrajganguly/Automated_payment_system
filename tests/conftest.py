@@ -109,12 +109,32 @@ def make_ev(db, ev_id: str, *, provider="Blive", model="Standard", status="spare
 
 
 def assign(
-    db, person_id: int, ev_id: str, *, handover=None, returned=None, charged_through=None
+    db,
+    person_id: int,
+    ev_id: str,
+    *,
+    handover=None,
+    returned=None,
+    charged_through=None,
+    created_at=None,
 ) -> int:
+    """An EV assignment.
+
+    ``handover=None`` models a **legacy** row — one carried in from before the
+    system tracked handover dates — so it is stamped as created long ago, which
+    is what makes it legacy. That matters: since 2026-09 a row with no handover
+    date bills from its ``created_at`` rather than from the beginning of time
+    (see domain/rent.resolve_rent), so a fixture that left created_at at "now"
+    while testing a cycle in March would be modelling something that cannot
+    exist — a row written months after the money moved. Pass ``created_at``
+    explicitly to test a dateless row that really was written recently.
+    """
+    if created_at is None:
+        created_at = "2020-01-01 00:00:00" if handover is None else str(handover) + " 00:00:00"
     aid = db.execute(
         "INSERT INTO ev_assignments (person_id, ev_id, handover_date, returned_date, "
-        "rent_charged_through) VALUES (?, ?, ?, ?, ?)",
-        (person_id, ev_id, handover, returned, charged_through),
+        "rent_charged_through, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (person_id, ev_id, handover, returned, charged_through, created_at),
     ).lastrowid
     db.execute(
         "UPDATE ev_units SET status=? WHERE ev_id=?", ("returned" if returned else "in_use", ev_id)

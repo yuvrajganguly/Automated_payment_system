@@ -42,8 +42,8 @@ def test_missed_rent_then_catchup_does_not_double_charge(db):
     ).fetchone()["model_id"]
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('EVX',?, 'in_use')", (mid,))
     db.execute(
-        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
-        "VALUES (?, 'EVX', '2026-06-13')",
+        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through,created_at) "
+        "VALUES (?, 'EVX', '2026-06-13', '2020-01-01 00:00:00')",
         (pid,),
     )
     db.commit()
@@ -108,8 +108,8 @@ def test_stuck_meter_catchup_is_capped_to_cycle(db):
     # Meter stuck at 06-14 — a full week behind the 06-22 cycle start — and
     # the missed week is on the books as RENT_MISSED (pre-fix data shape).
     db.execute(
-        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
-        "VALUES (?, 'EVS1', '2026-06-14')",
+        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through,created_at) "
+        "VALUES (?, 'EVS1', '2026-06-14', '2020-01-01 00:00:00')",
         (pid,),
     )
     db.execute(
@@ -159,8 +159,8 @@ def test_absence_missed_is_capped_when_arrears(db):
     ).fetchone()["model_id"]
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('EVT1',?, 'in_use')", (mid,))
     db.execute(
-        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through) "
-        "VALUES (?, 'EVT1', '2026-06-14')",
+        "INSERT INTO ev_assignments (person_id,ev_id,rent_charged_through,created_at) "
+        "VALUES (?, 'EVT1', '2026-06-14', '2020-01-01 00:00:00')",
         (pid,),
     )  # meter stuck a week back; that week is already RENT_MISSED
     db.execute(

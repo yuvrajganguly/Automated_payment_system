@@ -567,6 +567,13 @@ def process_cycle(
                 rent, rent_days = rinfo.rent, rinfo.days
                 ev_id, model = rinfo.ev_id, rinfo.model
                 _warn_gap(result, rinfo, rec.rider_id, company, cycle_start)
+                for leg in rinfo.legs:
+                    if leg.assumed_handover:
+                        result.warnings.append(
+                            f"{rec.rider_id}@{company}: EV {leg.ev_id} has no handover date — "
+                            f"billed from the day the assignment was created "
+                            f"({leg.handover_date}). Set the real date and re-run if it differs."
+                        )
                 # Soft cap: a catch-up window longer than 21 days almost
                 # always means a previous cycle was skipped or someone joined
                 # late and missed updates. Flag for manual review but bill it.

@@ -14,8 +14,10 @@ def _blive_rider(db, handover=None):
     mid = db.execute("SELECT model_id FROM ev_models WHERE provider='Blive'").fetchone()["model_id"]
     db.execute("INSERT INTO ev_units (ev_id,model_id,status) VALUES ('B1',?,'in_use')", (mid,))
     db.execute(
-        "INSERT INTO ev_assignments (person_id,ev_id,handover_date) VALUES (?, 'B1', ?)",
-        (pid, handover),
+        # Legacy row when no handover is given — see conftest.assign.
+        "INSERT INTO ev_assignments (person_id,ev_id,handover_date,created_at) "
+        "VALUES (?, 'B1', ?, ?)",
+        (pid, handover, (str(handover) + " 00:00:00") if handover else "2020-01-01 00:00:00"),
     )
     db.commit()
     return pid

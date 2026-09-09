@@ -299,9 +299,19 @@ def _import_ev(conn, xl, report):
             report.warnings.append(f"EV {ev}: already assigned - skipped")
             continue
         hod = _parse_date(_cell(row, c["date"]))
+        if hod is None:
+            # A blank or unreadable date used to be stored as NULL, and rent
+            # then billed that assignment for every cycle in full — see
+            # domain/rent.resolve_rent. Import day is a defensible floor and
+            # the warning tells somebody to correct it.
+            hod = date.today()
+            report.warnings.append(
+                f"EV {ev}: no readable handover date for {name} — recorded as "
+                f"{hod.isoformat()} (import day). Correct it if the real date differs."
+            )
         conn.execute(
             "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?,?,?)",
-            (person_id, ev, hod.isoformat() if hod else None),
+            (person_id, ev, hod.isoformat()),
         )
         conn.execute("UPDATE ev_units SET status='in_use' WHERE ev_id=?", (ev,))
         assigns += 1

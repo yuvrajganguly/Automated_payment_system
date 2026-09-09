@@ -278,7 +278,12 @@ def _open_assignment(
         "SELECT 1 FROM ev_assignments WHERE ev_id=? AND returned_date IS NULL", (ev_id,)
     ).fetchone():
         raise HTTPException(409, "EV already assigned to someone else")
-    hod = handover_date.isoformat() if handover_date else None
+    # Never NULL. A blank handover date used to be stored as-is, and rent then
+    # had nothing to date the assignment against: the leg billed every cycle in
+    # full, at its own rate, including cycles that closed before the vehicle
+    # left the office. Today is the only defensible default at the moment
+    # somebody taps "hand over".
+    hod = (handover_date or date.today()).isoformat()
     conn.execute(
         "INSERT INTO ev_assignments (person_id, ev_id, handover_date, assigned_by) "
         "VALUES (?,?,?,?)",
