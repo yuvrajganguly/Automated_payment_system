@@ -2,6 +2,7 @@ package com.qwikserve.recruiter.ui.profile
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +22,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -45,10 +50,12 @@ import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.Masthead
+import com.qwikserve.recruiter.ui.common.Note
+import com.qwikserve.recruiter.ui.common.NumberTile
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
-import com.qwikserve.recruiter.ui.common.Tag
-import com.qwikserve.recruiter.ui.common.formWidth
+import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.km
 import com.qwikserve.recruiter.ui.common.monthName
 import com.qwikserve.recruiter.ui.common.shortDate
@@ -60,13 +67,19 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import java.io.IOException
+import java.time.LocalDate
 import javax.inject.Inject
 
 /** The three halves of a profile, saved one at a time. */
-enum class Section(val key: String, val title: String) {
-    PERSONAL("personal", "Personal"),
-    BANK("bank", "Bank"),
-    IDENTITY("identity", "Identity"),
+enum class Section(val key: String, val title: String, val note: String) {
+    PERSONAL("personal", "Personal", "Your name as the office knows it, and how to reach you."),
+    BANK(
+        "bank",
+        "Bank",
+        "Where your own money is paid. Saved on its own, so a bad signal never costs "
+            + "you the rest of the page.",
+    ),
+    IDENTITY("identity", "Identity", "Only you and an admin ever see these numbers in full."),
 }
 
 /**
@@ -312,65 +325,307 @@ class ProfileViewModel @Inject constructor(
  * what identity is on file, a password they can change themselves, and the
  * odometer history the fuel claim is paid on.
  */
+/**
+ * The recruiter's own screen, laid out the way the rest of the app is laid
+ * out: a masthead, number tiles, a segmented control, list rows on the flat
+ * ground with hairlines between them.
+ *
+ * The order is the order of use. The odometer is twice a day, every day, so it
+ * is first — it used to sit at the bottom, under a password form, which is a
+ * strange place to put the only thing on the page anybody opens daily. The
+ * account details are filled in once and then almost never touched, so they
+ * are four quiet rows that open one at a time rather than four forms standing
+ * open forever with four Save buttons between you and the bottom of the page.
+ */
 @Composable
-fun ProfileScreen(vm: ProfileViewModel = hiltViewModel()) {
+fun ProfileScreen(vm: ProfileViewModel = hiltViewModel(), shift: ShiftViewModel = hiltViewModel()) {
     val p = vm.profile
-    Column(
-        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // Masthead: face, name, role and zone.
-        Row(Modifier.formWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 14.dp)) {
-            PhotoTile(
-                picked = null,
-                url = BuildConfig.API_BASE_URL + "recruiters/me/photo",
-                name = p?.fullName,
-                version = vm.photoVersion,
-                size = 88.dp,
-                busy = vm.photoBusy,
-                label = "Your photo",
-                onPicked = vm::setPhoto,
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    p?.fullName?.takeIf { it.isNotBlank() }
-                        ?: p?.displayName?.takeIf { it.isNotBlank() }
-                        ?: p?.email?.substringBefore('@')
-                        ?: "You",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Qwik.Ink,
+    // Which detail row is open, if any. One at a time: the rows are a list
+    // until you ask one of them a question.
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
+    val toggle: (String) -> Unit = { key -> open = if (open == key) null else key }
+
+    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
+        Masthead(
+            title = p?.fullName?.takeIf { it.isNotBlank() }
+                ?: p?.displayName?.takeIf { it.isNotBlank() }
+                ?: p?.email?.substringBefore('@')
+                ?: "You",
+            sub = listOfNotNull(p?.role, p?.zone?.let { "$it zone" }).joinToString(" · "),
+            trailing = {
+                PhotoTile(
+                    picked = null,
+                    url = BuildConfig.API_BASE_URL + "recruiters/me/photo",
+                    name = p?.fullName,
+                    version = vm.photoVersion,
+                    size = 56.dp,
+                    busy = vm.photoBusy,
+                    onPicked = vm::setPhoto,
                 )
-                Spacer(Modifier.height(6.dp))
-                Text(p?.email.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    p?.role?.let { Tag(it, outline = true) }
-                    p?.zone?.let { Tag("$it zone") }
-                }
-            }
-        }
+            },
+        )
         if (vm.photoError != null) {
-            Column(Modifier.formWidth().padding(horizontal = 20.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(vm.photoError!!, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
                 GhostAction("Retry photo", onClick = vm::retryPhoto)
             }
+            Hairline()
         }
-        Rule()
-
         if (vm.error != null) {
-            Column(Modifier.formWidth().padding(20.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Text(vm.error!!, style = MaterialTheme.typography.bodyMedium, color = Qwik.Accent700)
                 GhostAction("Try again", onClick = vm::load)
             }
+            Hairline()
         }
 
-        /* ── Personal ── */
-        SectionCard(
-            section = Section.PERSONAL,
-            vm = vm,
-            note = "Your name as the office knows it, and how to reach you.",
-        ) {
+        OdometerPanel(vm, shift)
+
+        Kicker("Your details", Modifier.padding(start = 20.dp, top = 22.dp, bottom = 10.dp))
+        Hairline()
+        Section.entries.forEach { section ->
+            DetailRow(
+                title = section.title,
+                sub = section.summary(vm, p),
+                open = open == section.key,
+                onToggle = { toggle(section.key) },
+            ) { SectionFields(section, vm) }
+        }
+        DetailRow(
+            title = "Password",
+            sub = "Changing it signs out every other session",
+            open = open == "password",
+            onToggle = { toggle("password") },
+        ) { PasswordFields(vm) }
+
+        Spacer(Modifier.height(36.dp))
+    }
+}
+
+/** What a closed detail row says about itself, so the list is readable shut. */
+private fun Section.summary(vm: ProfileViewModel, p: RecruiterProfile?): String = when (this) {
+    Section.PERSONAL -> listOfNotNull(
+        vm.fullName.takeIf { it.isNotBlank() },
+        vm.phone.takeIf { it.isNotBlank() },
+    ).joinToString(" · ").ifBlank { "Not filled in yet" }
+    Section.BANK -> listOfNotNull(
+        vm.bankName.takeIf { it.isNotBlank() },
+        p?.accountNo?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ").ifBlank { "Where your own money is paid" }
+    Section.IDENTITY -> listOfNotNull(
+        if (vm.aadhaar.isNotBlank()) "Aadhaar saved" else null,
+        if (vm.pan.isNotBlank()) "PAN saved" else null,
+    ).joinToString(" · ").ifBlank { "Aadhaar and PAN" }
+}
+
+/**
+ * The odometer, first on the page: the two figures that matter, then today's
+ * readings, then the record.
+ *
+ * [ShiftViewModel] is shared with the one-line nudge on Today — both sit under
+ * the same navigation entry — so saving a reading here changes that line
+ * without a reload.
+ */
+@Composable
+private fun OdometerPanel(vm: ProfileViewModel, shift: ShiftViewModel) {
+    val s = shift.shift
+    val thisMonth = remember { LocalDate.now().toString().take(7) }
+    val monthKm = vm.months?.months?.firstOrNull { it.month == thisMonth }?.km
+    var grain by rememberSaveable { mutableIntStateOf(0) } // 0 = day by day, 1 = by month
+
+    Kicker("Odometer", Modifier.padding(start = 20.dp, top = 18.dp, bottom = 10.dp))
+    Row(Modifier.fillMaxWidth()) {
+        NumberTile(
+            when {
+                s == null -> "—"
+                s.complete -> km(s.distanceKm)
+                s.startKm != null -> "open"
+                else -> "—"
+            },
+            "Today",
+            Modifier.weight(1f),
+            // Red only while the day is genuinely unfinished — not while it is
+            // still loading, when nobody knows yet.
+            accent = s != null && !s.complete,
+        )
+        Box(Modifier.width(1.dp).height(78.dp).background(Qwik.N400))
+        NumberTile(if (monthKm != null) km(monthKm) else "—", "This month", Modifier.weight(1f))
+        Box(Modifier.width(1.dp).height(78.dp).background(Qwik.N400))
+        NumberTile(km(vm.shifts?.totalKm), "Last 30 days", Modifier.weight(1f))
+    }
+    Rule()
+    ShiftCard()
+    Rule()
+    Segmented(
+        listOf("Day by day", "By month"),
+        selected = grain,
+        onSelect = { grain = it },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+    )
+    when {
+        vm.historyError != null -> Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+            Text(vm.historyError!!, style = MaterialTheme.typography.bodyMedium, color = Qwik.Accent700)
+            GhostAction("Try again", onClick = vm::loadHistory)
+        }
+        grain == 0 -> DayList(vm)
+        else -> MonthList(vm)
+    }
+}
+
+/** One row per day: the date, what was read, the distance. */
+@Composable
+private fun DayList(vm: ProfileViewModel) {
+    val s = vm.shifts
+    when {
+        s == null -> Note("Loading…")
+        s.days.isEmpty() -> Note(
+            "No readings yet. Open and close a shift above and the days collect here.",
+        )
+        else -> {
+            Hairline()
+            s.days.forEach { d ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        shortDate(d.day),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Qwik.Ink,
+                        modifier = Modifier.width(70.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                d.complete -> "${d.startKm} → ${d.endKm}"
+                                d.startKm != null -> "opened at ${d.startKm} — not closed"
+                                else -> "no opening reading"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (d.complete) Qwik.N800 else Qwik.Accent700,
+                        )
+                        val photos = listOfNotNull(
+                            if (d.hasStartPhoto) "start photo" else null,
+                            if (d.hasEndPhoto) "end photo" else null,
+                        ).joinToString(" · ")
+                        if (photos.isNotBlank()) {
+                            Text(photos, style = MaterialTheme.typography.bodySmall, color = Qwik.N600)
+                        }
+                    }
+                    Text(
+                        if (d.complete) km(d.distanceKm) else "open",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (d.complete) Qwik.Ink else Qwik.Accent,
+                    )
+                }
+                Hairline()
+            }
+            Text(
+                listOfNotNull(
+                    "${s.daysRecorded} day" + if (s.daysRecorded == 1) "" else "s",
+                    s.averageKm?.let { "avg ${it.toInt()} km" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N600,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+/** The months, with a bar each. This is the figure the fuel claim is paid on. */
+@Composable
+private fun MonthList(vm: ProfileViewModel) {
+    val m = vm.months
+    when {
+        m == null -> Note("Loading…")
+        m.months.isEmpty() -> Note("No month has a closed day yet.")
+        else -> {
+            Hairline()
+            val max = m.months.maxOf { it.km }.coerceAtLeast(1)
+            m.months.forEach { row ->
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 11.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            monthName(row.month),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Qwik.Ink,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(km(row.km), style = MaterialTheme.typography.titleMedium, color = Qwik.Ink)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.fillMaxWidth().height(6.dp).background(Qwik.N200)) {
+                        Box(Modifier.fillMaxWidth(row.km / max.toFloat()).height(6.dp).background(Qwik.Accent))
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "${row.daysRecorded} day" + if (row.daysRecorded == 1) "" else "s",
+                            style = MaterialTheme.typography.bodySmall, color = Qwik.N600,
+                        )
+                        if (row.daysOpen > 0) {
+                            Text(
+                                "${row.daysOpen} still open",
+                                style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700,
+                            )
+                        }
+                    }
+                }
+                Hairline()
+            }
+            Text(
+                "Only days with both readings count. A day nobody closed is flagged rather " +
+                    "than quietly leaving a month short.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N600,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+/** A list row that opens. Shut, it reads like every other row in the app. */
+@Composable
+private fun DetailRow(
+    title: String,
+    sub: String,
+    open: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 20.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, color = Qwik.Ink, maxLines = 1)
+            Text(sub, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700, maxLines = 1)
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (open) "CLOSE" else "EDIT",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+            color = Qwik.Accent,
+        )
+    }
+    if (open) {
+        Column(Modifier.fillMaxWidth().background(Qwik.N100).padding(horizontal = 20.dp, vertical = 16.dp)) {
+            content()
+        }
+    }
+    Hairline()
+}
+
+/** The fields of one section, with its own note, its own error and its own
+ *  button — PATCH writes only what it is sent, so a bad signal costs one
+ *  section rather than the whole page. */
+@Composable
+private fun SectionFields(section: Section, vm: ProfileViewModel) {
+    Text(section.note, style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+    Spacer(Modifier.height(12.dp))
+    when (section) {
+        Section.PERSONAL -> {
             Field("Full name") {
                 Input(vm.fullName, { vm.fullName = it }, "Name as on the Aadhaar", cap = KeyboardCapitalization.Words)
             }
@@ -384,13 +639,7 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel()) {
             }
             ErrorLine(vm.fieldErrors["address"])
         }
-
-        /* ── Bank ── */
-        SectionCard(
-            section = Section.BANK,
-            vm = vm,
-            note = "Where your own money is paid. Saved on its own, so a bad signal never costs you the rest of the page.",
-        ) {
+        Section.BANK -> {
             Field("Account holder") {
                 Input(vm.accountName, { vm.accountName = it }, "Name on the passbook", cap = KeyboardCapitalization.Words)
             }
@@ -408,13 +657,7 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel()) {
             }
             ErrorLine(vm.fieldErrors["bank_name"])
         }
-
-        /* ── Identity ── */
-        SectionCard(
-            section = Section.IDENTITY,
-            vm = vm,
-            note = "Only you and an admin ever see these numbers in full.",
-        ) {
+        Section.IDENTITY -> {
             Field("Aadhaar") {
                 Input(vm.aadhaar, { vm.aadhaar = it }, "Twelve digits", keyboard = KeyboardType.Number)
             }
@@ -424,200 +667,57 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel()) {
             }
             ErrorLine(vm.fieldErrors["pan_no"])
         }
-
-        /* ── Password ── */
-        Column(Modifier.formWidth().padding(horizontal = 20.dp, vertical = 18.dp)) {
-            Kicker("Change password")
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "At least eight characters. Changing it signs out every other session — " +
-                    "any other phone you are signed in on will ask for the new password, and so " +
-                    "will this one the next time it renews.",
-                style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
-            )
-            Spacer(Modifier.height(12.dp))
-            Field("Current password") { Secret(vm.currentPassword) { vm.currentPassword = it } }
-            Spacer(Modifier.height(10.dp))
-            Field("New password") { Secret(vm.newPassword) { vm.newPassword = it } }
-            Spacer(Modifier.height(10.dp))
-            Field("New password again") { Secret(vm.confirmPassword) { vm.confirmPassword = it } }
-            if (vm.passwordError != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(vm.passwordError!!, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
-            }
-            if (vm.passwordDone) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Password changed. Every other session has been signed out.",
-                    style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700,
-                )
-            }
-            Spacer(Modifier.height(14.dp))
-            BarButton(
-                if (vm.passwordBusy) "Changing…" else "Change password",
-                onClick = vm::changePassword,
-                enabled = !vm.passwordBusy,
-                primary = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Rule()
-
-        /* ── Odometer: today's two readings, then the record ── */
-        ShiftCard(Modifier.formWidth())
-        Rule()
-        OdometerHistory(vm)
-        Spacer(Modifier.height(36.dp))
     }
-}
-
-/** One savable card: a title, its fields, its own button and its own error. */
-@Composable
-private fun SectionCard(
-    section: Section,
-    vm: ProfileViewModel,
-    note: String,
-    content: @Composable () -> Unit,
-) {
-    Column(Modifier.formWidth().padding(horizontal = 20.dp, vertical = 18.dp)) {
-        Kicker(section.title)
-        Spacer(Modifier.height(6.dp))
-        Text(note, style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
-        Spacer(Modifier.height(12.dp))
-        content()
-        vm.sectionErrors[section.key]?.let {
-            Spacer(Modifier.height(4.dp))
-            Text(it, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
-        }
-        if (vm.savedSection == section.key) {
-            Spacer(Modifier.height(4.dp))
-            Text("Saved.", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
-        }
-        Spacer(Modifier.height(12.dp))
-        BarButton(
-            if (vm.saving == section) "Saving…" else "Save ${section.title.lowercase()}",
-            onClick = { vm.save(section) },
-            enabled = vm.saving == null,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-    Rule()
-}
-
-/** Day by day, then the monthly totals the claim is actually paid on. */
-@Composable
-private fun OdometerHistory(vm: ProfileViewModel) {
-    val s = vm.shifts
-    val m = vm.months
-    Column(Modifier.formWidth().padding(horizontal = 20.dp, vertical = 18.dp)) {
-        Kicker("Odometer · last 30 days")
-        Spacer(Modifier.height(8.dp))
-        when {
-            vm.historyError != null -> {
-                Text(vm.historyError!!, style = MaterialTheme.typography.bodyMedium, color = Qwik.Accent700)
-                GhostAction("Try again", onClick = vm::loadHistory)
-            }
-            s == null -> Text("Loading…", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
-            s.days.isEmpty() -> Text(
-                "No readings yet. Open and close a shift above and the days collect here, "
-                    + "one row each, with the month's total underneath.",
-                style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
-            )
-            else -> {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(km(s.totalKm), style = MaterialTheme.typography.headlineMedium, color = Qwik.Accent)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        listOfNotNull(
-                            "${s.daysRecorded} day" + if (s.daysRecorded == 1) "" else "s",
-                            s.averageKm?.let { "avg ${it.toInt()} km" },
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
-                        modifier = Modifier.padding(bottom = 3.dp),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                s.days.forEach { d ->
-                    Hairline()
-                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            shortDate(d.day),
-                            style = MaterialTheme.typography.titleMedium, color = Qwik.Ink,
-                            modifier = Modifier.width(72.dp),
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                if (d.complete) "${d.startKm} → ${d.endKm}"
-                                else if (d.startKm != null) "opened at ${d.startKm} — not closed"
-                                else "no opening reading",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (d.complete) Qwik.N800 else Qwik.Accent700,
-                            )
-                            val photos = listOfNotNull(
-                                if (d.hasStartPhoto) "start photo" else null,
-                                if (d.hasEndPhoto) "end photo" else null,
-                            ).joinToString(" · ")
-                            if (photos.isNotBlank()) {
-                                Text(photos, style = MaterialTheme.typography.bodySmall, color = Qwik.N600)
-                            }
-                        }
-                        Text(
-                            if (d.complete) km(d.distanceKm) else "open",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (d.complete) Qwik.Ink else Qwik.Accent,
-                        )
-                    }
-                }
-                Hairline()
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-        Kicker("Monthly totals · the fuel claim")
+    vm.sectionErrors[section.key]?.let {
         Spacer(Modifier.height(4.dp))
-        Text(
-            "Only days with both readings count. A day nobody closed is flagged rather than " +
-                "quietly leaving a month short.",
-            style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
-        )
-        Spacer(Modifier.height(10.dp))
-        when {
-            m == null && vm.historyError == null ->
-                Text("Loading…", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
-            m != null && m.months.isEmpty() ->
-                Text("No month has a closed day yet.", style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
-            m != null -> {
-                val max = m.months.maxOf { it.km }.coerceAtLeast(1)
-                m.months.forEach { row ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(monthName(row.month), style = MaterialTheme.typography.titleMedium, color = Qwik.Ink, modifier = Modifier.weight(1f))
-                            Text(km(row.km), style = MaterialTheme.typography.titleMedium, color = Qwik.Ink)
-                        }
-                        Spacer(Modifier.height(5.dp))
-                        Box(Modifier.fillMaxWidth().height(8.dp).background(Qwik.N200)) {
-                            Box(Modifier.fillMaxWidth(row.km / max.toFloat()).height(8.dp).background(Qwik.Accent))
-                        }
-                        Spacer(Modifier.height(5.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                "${row.daysRecorded} day" + if (row.daysRecorded == 1) "" else "s",
-                                style = MaterialTheme.typography.bodySmall, color = Qwik.N600,
-                            )
-                            if (row.daysOpen > 0) {
-                                Text(
-                                    "${row.daysOpen} still open",
-                                    style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700,
-                                )
-                            }
-                        }
-                    }
-                    Hairline()
-                }
-            }
-            else -> Unit
-        }
+        Text(it, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
     }
+    if (vm.savedSection == section.key) {
+        Spacer(Modifier.height(4.dp))
+        Text("Saved.", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+    }
+    Spacer(Modifier.height(14.dp))
+    BarButton(
+        if (vm.saving == section) "Saving…" else "Save ${section.title.lowercase()}",
+        onClick = { vm.save(section) },
+        enabled = vm.saving == null,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun PasswordFields(vm: ProfileViewModel) {
+    Text(
+        "At least eight characters. Changing it signs out every other session — any other " +
+            "phone you are signed in on will ask for the new password, and so will this one " +
+            "the next time it renews.",
+        style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
+    )
+    Spacer(Modifier.height(12.dp))
+    Field("Current password") { Secret(vm.currentPassword) { vm.currentPassword = it } }
+    Spacer(Modifier.height(10.dp))
+    Field("New password") { Secret(vm.newPassword) { vm.newPassword = it } }
+    Spacer(Modifier.height(10.dp))
+    Field("New password again") { Secret(vm.confirmPassword) { vm.confirmPassword = it } }
+    if (vm.passwordError != null) {
+        Spacer(Modifier.height(8.dp))
+        Text(vm.passwordError!!, style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
+    }
+    if (vm.passwordDone) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Password changed. Every other session has been signed out.",
+            style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700,
+        )
+    }
+    Spacer(Modifier.height(14.dp))
+    BarButton(
+        if (vm.passwordBusy) "Changing…" else "Change password",
+        onClick = vm::changePassword,
+        enabled = !vm.passwordBusy,
+        primary = false,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

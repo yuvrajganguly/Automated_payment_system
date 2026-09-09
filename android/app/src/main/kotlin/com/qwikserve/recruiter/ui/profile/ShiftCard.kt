@@ -205,15 +205,11 @@ class ShiftViewModel @Inject constructor(
 fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel()) {
     val s = vm.shift
     val day = s?.day ?: ""
-    Column(modifier.fillMaxWidth().background(Qwik.Surface).padding(horizontal = 20.dp, vertical = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Kicker("Odometer", Modifier.weight(1f))
-            if (s != null && s.complete) {
-                Text(km(s.distanceKm), style = MaterialTheme.typography.headlineSmall, color = Qwik.Accent)
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-
+    // No background and no heading of its own: OdometerPanel above it carries
+    // the label and the day's figure, and the app's ground is flat everywhere
+    // else. A grey slab here was the giveaway that this screen was assembled
+    // rather than designed.
+    Column(modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
         when {
             s == null && vm.loading -> Text(
                 "Loading today's reading…",
