@@ -117,11 +117,19 @@ fun Kicker(text: String, modifier: Modifier = Modifier, color: Color = Qwik.N700
 
 /** Screen title block: big Archivo title with a small uppercase line under it. */
 @Composable
-fun Masthead(title: String, sub: String? = null, trailing: (@Composable () -> Unit)? = null) {
+fun Masthead(
+    title: String,
+    sub: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    // Bottom by default so a small trailing action sits on the title's
+    // baseline. A tall trailing element — Profile's photo — passes
+    // CenterVertically instead, or the title floats at the top of a deep row.
+    trailingAlign: Alignment.Vertical = Alignment.Bottom,
+) {
     Column {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = trailingAlign,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
@@ -175,7 +183,13 @@ fun BarButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
     val bg = if (primary) (if (enabled) Qwik.Accent else Qwik.N400) else Color.Transparent
     val fg = if (primary) Qwik.Bg else if (enabled) Qwik.Ink else Qwik.N500
     Box(
-        modifier.height(62.dp).background(bg).clickable(enabled = enabled, onClick = onClick),
+        modifier.height(62.dp).background(bg)
+            // The secondary variant is described as outlined and never drew the
+            // outline, so it rendered as loose centred text with no edge — you
+            // could not see where the button was. 2 px ink, the same weight as
+            // the section rules.
+            .then(if (primary) Modifier else Modifier.border(2.dp, if (enabled) Qwik.Ink else Qwik.N400))
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge.copy(fontSize = 16.sp), color = fg)

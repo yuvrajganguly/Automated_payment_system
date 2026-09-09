@@ -338,7 +338,11 @@ class ProfileViewModel @Inject constructor(
  * open forever with four Save buttons between you and the bottom of the page.
  */
 @Composable
-fun ProfileScreen(vm: ProfileViewModel = hiltViewModel(), shift: ShiftViewModel = hiltViewModel()) {
+fun ProfileScreen(
+    onSignOut: () -> Unit,
+    vm: ProfileViewModel = hiltViewModel(),
+    shift: ShiftViewModel = hiltViewModel(),
+) {
     val p = vm.profile
     // Which detail row is open, if any. One at a time: the rows are a list
     // until you ask one of them a question.
@@ -358,11 +362,12 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel(), shift: ShiftViewModel 
                     url = BuildConfig.API_BASE_URL + "recruiters/me/photo",
                     name = p?.fullName,
                     version = vm.photoVersion,
-                    size = 56.dp,
+                    size = 84.dp,
                     busy = vm.photoBusy,
                     onPicked = vm::setPhoto,
                 )
             },
+            trailingAlign = Alignment.CenterVertically,
         )
         if (vm.photoError != null) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -398,6 +403,16 @@ fun ProfileScreen(vm: ProfileViewModel = hiltViewModel(), shift: ShiftViewModel 
             onToggle = { toggle("password") },
         ) { PasswordFields(vm) }
 
+        // Sign out lives here, at the foot of your own page, rather than in the
+        // app bar. It is the least frequent thing anybody does and it was
+        // sitting one mis-tap from the brand at the top of every screen.
+        Spacer(Modifier.height(28.dp))
+        BarButton(
+            "Sign out",
+            onClick = onSignOut,
+            primary = false,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        )
         Spacer(Modifier.height(36.dp))
     }
 }

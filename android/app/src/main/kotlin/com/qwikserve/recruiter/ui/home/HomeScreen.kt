@@ -59,8 +59,8 @@ import com.qwikserve.recruiter.ui.today.TodayScreen
  * PROFILE is deliberately **not** in the strip. It was once the sixth tab, and
  * on a phone the strip scrolls, so it sat just past the right edge with nothing
  * to say it was there — in practice it did not exist. It is reached instead by
- * tapping your own name in the header, which is where people look for their own
- * account, and the five that remain fit on a phone without scrolling.
+ * tapping your own face in the top right corner, which is where every app on
+ * the phone keeps your account, and the five that remain fit without scrolling.
  */
 enum class Tab(val label: String, val inStrip: Boolean = true) {
     TODAY("Today"), RIDERS("Riders"), EVS("EVs"), REQUESTS("Requests"),
@@ -68,8 +68,8 @@ enum class Tab(val label: String, val inStrip: Boolean = true) {
 }
 
 /**
- * The signed-in shell. On a phone: a slim brand line with Sign out, the tab
- * strip, the current tab underneath. On a tablet held upright: the same, with
+ * The signed-in shell. On a phone: the brand and your face, the tab strip, the
+ * current tab underneath. On a tablet held upright: the same, with
  * the page centred so lines stay readable. On a wide screen: the tabs become a
  * rail down the left and a tapped rider opens in a second pane beside the
  * list, which is what the extra width is for.
@@ -111,7 +111,7 @@ fun HomeScreen(
             Tab.EVS -> EvsScreen(onOpenPerson = open)
             Tab.REQUESTS -> RequestsScreen(onOpenPerson = open)
             Tab.STATS -> StatsScreen(onOpenPerson = open)
-            Tab.PROFILE -> ProfileScreen()
+            Tab.PROFILE -> ProfileScreen(onSignOut = onSignOut)
         }
     }
 
@@ -128,7 +128,6 @@ fun HomeScreen(
                     selected = tab,
                     onSelect = { tab = it },
                     onNewRider = onNewRider,
-                    onSignOut = onSignOut,
                 )
                 VDivider()
                 Box(
@@ -144,20 +143,28 @@ fun HomeScreen(
             }
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                // Brand on the left, your face on the right, and a gap between
+                // them. It used to be brand + name-chip + Sign out crammed into
+                // one line, which left your own account wedged between a
+                // wordmark and a destructive action — the worst seat in the
+                // app. Sign out moved to the foot of Profile, where the rest of
+                // your account already lives.
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Qwikserve", style = MaterialTheme.typography.headlineSmall, color = Qwik.Ink)
-                    Spacer(Modifier.width(10.dp))
-                    MeChip(
-                        who = who,
+                    Text(
+                        "Qwikserve",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Qwik.Ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    MeButton(
                         name = myName,
                         selected = Tab.entries[tab] == Tab.PROFILE,
                         onClick = { tab = Tab.PROFILE.ordinal },
-                        modifier = Modifier.weight(1f),
                     )
-                    GhostAction("Sign out", onClick = onSignOut)
                 }
                 TabStrip(selected = tab, onSelect = { tab = it }, layout = layout)
                 Box(Modifier.weight(1f)) {
@@ -169,41 +176,24 @@ fun HomeScreen(
 }
 
 /**
- * Your own face and name — and the only way to your profile.
+ * Your own face, top right — and the way to your profile.
  *
  * Profile carries the picture, the account and bank details, the Aadhaar and
- * PAN, the password, and the odometer with its day-by-day record. All of that
- * used to sit behind a tab nobody could see. A face beside your own name is
- * where every other app puts your account, so that is where it is now.
+ * PAN, the password, sign out, and the odometer with its day-by-day record. It
+ * used to be the sixth tab in a strip that scrolls, which on a phone put it
+ * just past the right edge; the first attempt at fixing that put a name chip in
+ * the middle of the app bar, which only moved the problem. A face in the top
+ * right corner is where every app on the phone keeps your account, so no label
+ * is needed to explain it. It takes a red ring while you are on Profile.
  */
 @Composable
-private fun MeChip(
-    who: String,
-    name: String?,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun MeButton(name: String?, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clickable(onClick = onClick)
+            .then(if (selected) Modifier.background(Qwik.Accent) else Modifier)
+            .padding(if (selected) 3.dp else 0.dp),
     ) {
-        MeAvatar(name = name)
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                who,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (selected) Qwik.Accent else Qwik.N700,
-                maxLines = 1,
-            )
-            Text(
-                "Your profile",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (selected) Qwik.Accent else Qwik.N600,
-                maxLines = 1,
-            )
-        }
+        MeAvatar(name = name, size = 36.dp)
     }
 }
 
@@ -216,20 +206,31 @@ private fun Rail(
     selected: Int,
     onSelect: (Int) -> Unit,
     onNewRider: () -> Unit,
-    onSignOut: () -> Unit,
 ) {
     Column(Modifier.width(232.dp).fillMaxHeight().padding(bottom = 16.dp)) {
         Column(Modifier.padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 18.dp)) {
             Text("Qwikserve", style = MaterialTheme.typography.headlineSmall, color = Qwik.Ink)
-            Spacer(Modifier.height(10.dp))
-            // Same rule as the phone header: your own name is the way to your
-            // own profile, so the rail does not list it as a tab either.
-            MeChip(
-                who = who,
-                name = name,
-                selected = Tab.entries[selected] == Tab.PROFILE,
-                onClick = { onSelect(Tab.PROFILE.ordinal) },
-            )
+            Spacer(Modifier.height(12.dp))
+            // Same rule as the phone header: your own face is the way to your
+            // own profile, so the rail does not list it as a tab either. There
+            // is room for your name here, so it keeps it.
+            Row(
+                Modifier.clickable { onSelect(Tab.PROFILE.ordinal) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MeButton(
+                    name = name,
+                    selected = Tab.entries[selected] == Tab.PROFILE,
+                    onClick = { onSelect(Tab.PROFILE.ordinal) },
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    who,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (Tab.entries[selected] == Tab.PROFILE) Qwik.Accent else Qwik.N700,
+                    maxLines = 2,
+                )
+            }
         }
         Tab.entries.filter { it.inStrip }.forEach { t ->
             val on = t.ordinal == selected
@@ -250,8 +251,6 @@ private fun Rail(
         Spacer(Modifier.weight(1f))
         Column(Modifier.padding(horizontal = 20.dp)) {
             BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
-            GhostAction("Sign out", onClick = onSignOut)
         }
     }
 }
