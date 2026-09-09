@@ -1,19 +1,23 @@
-"""An assignment with no handover date must not bill cycles it was not in.
+"""An EV assignment cannot exist without a handover date.
 
-Reported 2026-09 from a live payout, as two separate complaints that turned
-out to be one bug:
+Reported 2026-09 from a live payout as two separate complaints that turned out
+to be one bug:
 
   * Somnath Sardar was charged rent twice in one cycle after his EV was taken
     off him and another handed over.
   * Sahil was charged 1,295 for a cycle he spent on a 1,260 EV — the 1,295 one
     reached him only after that cycle had closed.
 
-Both are ``ev_assignments.handover_date`` being NULL. The column is nullable
+Both were ``ev_assignments.handover_date`` being NULL. The column was nullable
 and the schema described NULL as "rent the full cycle (legacy riders)", which
-was true when the only NULL rows came from the go-live import. Once the EV
-screens and the payout importer could write NULL too, an assignment with no
-date had nothing to compare a cycle against: ``resolve_rent`` billed it for
-every cycle, in full, at its own EV's rate, forever.
+held while the only NULL rows came from the go-live import. Once the EV screens
+and the payout importer could write NULL too, an assignment with no date had
+nothing to compare a cycle against: rent billed it for every cycle, in full, at
+its own EV's rate, forever.
+
+The column is NOT NULL now, so most of this file cannot test the bug directly —
+it tests that the shape is unreachable, that the migration removed the rows
+that had it, and that the arithmetic is right when the dates are real.
 """
 
 from __future__ import annotations
@@ -45,9 +49,81 @@ def _rent(db, person_id):
     return resolve_rent(db, person_id, CYCLE_START, CYCLE_END)
 
 
+def test_the_column_refuses_a_missing_handover_date(db):
+    """The shape that caused the double charge cannot be written any more."""
+    p = make_person(db, "No date")
+    make_ev(db, "EV-Z", provider="Blive", model="Standard")
+    with pytest.raises(Exception, match="(?i)not null|null value"):
+        db.execute(
+            "INSERT INTO ev_assignments (person_id, ev_id, handover_date) VALUES (?, ?, NULL)",
+            (p, "EV-Z"),
+        )
+    db.rollback()
+
+
+def test_the_migration_backfills_the_rows_that_already_had_none(monkeypatch):
+    """Existing NULLs become the day the row was written — the honest floor,
+    since we cannot have handed a vehicle over before recording that we had.
+
+    Run against a connection built with the **pre-0029** shape, because the
+    live schema will not hold a NULL any more: the only place that row can
+    still exist is a database that has not had this migration yet, which is
+    exactly what is being simulated.
+    """
+    import sqlite3
+
+    from payout.db import migrations
+    from payout.db.migrations import _0029_handover_date_required
+
+    # The probe connection is SQLite whichever backend the suite is running
+    # against, so the Postgres-only ALTER is out of scope here. What is under
+    # test is the backfill, and it is identical on both.
+    monkeypatch.setattr(migrations, "DB_URL", None)
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        "CREATE TABLE ev_assignments ("
+        "  assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  person_id INTEGER, ev_id TEXT,"
+        "  handover_date TEXT, created_at TEXT);"
+        "CREATE TABLE company_cycles (company TEXT, cycle_start TEXT);"
+    )
+    conn.execute("INSERT INTO company_cycles VALUES ('Shadowfax', '2026-05-04')")
+    conn.executemany(
+        "INSERT INTO ev_assignments (person_id, ev_id, handover_date, created_at) VALUES (?,?,?,?)",
+        [
+            (1, "EV-DATED", "2026-08-01", "2026-08-01 09:00:00"),  # already fine
+            (2, "EV-NULL", None, "2026-07-04 09:00:00"),  # backfilled from created_at
+            (3, "EV-ANCIENT", None, None),  # nothing to go on
+        ],
+    )
+
+    _0029_handover_date_required(conn)
+
+    got = {
+        r["ev_id"]: r["handover_date"]
+        for r in conn.execute("SELECT ev_id, handover_date FROM ev_assignments")
+    }
+    assert got["EV-DATED"] == "2026-08-01", "a good date must not be rewritten"
+    assert got["EV-NULL"] == "2026-07-04"
+    # No created_at either: the earliest cycle the office ever ran. Too early
+    # can only under-charge; too late takes money for days nobody can evidence.
+    assert got["EV-ANCIENT"] == "2026-05-04"
+
+    # Idempotent — a second run changes nothing.
+    _0029_handover_date_required(conn)
+    assert {
+        r["ev_id"]: r["handover_date"]
+        for r in conn.execute("SELECT ev_id, handover_date FROM ev_assignments")
+    } == got
+    conn.close()
+
+
 def test_a_clean_swap_bills_each_ev_for_its_own_days(db, rates):
-    """The control. With both dates recorded the engine was always right —
-    handover day and return day are free, so a swap costs a day, not double."""
+    """Somnath, with the dates the app now always records. The engine was
+    always right here — handover day and return day are both free, so a swap
+    costs a day rather than doubling."""
     p = make_person(db, "Somnath Sardar")
     make_ev(db, "EV-A", provider="Blive", model="Standard")
     make_ev(db, "EV-B", provider="Blive", model="Standard")
@@ -59,44 +135,18 @@ def test_a_clean_swap_bills_each_ev_for_its_own_days(db, rates):
 
     r = _rent(db, p)
     assert r.days == 6  # 24–26 on EV-A, 28–30 on EV-B; the 27th is free
-    assert r.rent == 108000  # 6 × ₹180
+    assert r.rent == 108000  # 6 × ₹180, not 14 days across two EVs
     assert [(leg.ev_id, leg.days) for leg in r.legs] == [("EV-A", 3), ("EV-B", 3)]
-
-
-def test_the_reassigned_ev_without_a_handover_date_does_not_bill_the_cycle_twice(db, rates):
-    """Somnath. The replacement EV's row was written on 3 September with no
-    handover date; before the fix it billed the whole August cycle as well."""
-    p = make_person(db, "Somnath Sardar")
-    make_ev(db, "EV-A", provider="Blive", model="Standard")
-    make_ev(db, "EV-B", provider="Blive", model="Standard")
-    assign(
-        db, p, "EV-A", handover="2026-08-01", returned="2026-09-03", charged_through="2026-08-23"
-    )
-    aid = assign(db, p, "EV-B", handover=None)
-    db.execute(
-        "UPDATE ev_assignments SET created_at='2026-09-03 10:00:00' WHERE assignment_id=?", (aid,)
-    )
-    db.commit()
-
-    r = _rent(db, p)
-    # Only the EV he actually had that week. EV-B was created after the cycle
-    # closed, so it contributes nothing to it.
-    assert [leg.ev_id for leg in r.legs] == ["EV-A"]
-    assert r.days == 7
-    assert r.rent == 126000  # ₹1,260 once, not ₹2,555
 
 
 def test_an_ev_that_arrived_after_the_cycle_does_not_set_the_cycles_rate(db, rates):
     """Sahil. The ₹1,295 EV reached him after the cycle ended; the week he
-    worked was on the ₹1,260 one, and that is what the cycle must charge."""
+    worked was on the ₹1,260 one, and that is what the cycle charges."""
     p = make_person(db, "Sahil")
     make_ev(db, "EV-OLD", provider="Blive", model="Standard")  # ₹1,260
     make_ev(db, "EV-NEW", provider="Raft", model="Regular")  # ₹1,295
     assign(db, p, "EV-OLD", handover="2026-08-01", returned="2026-09-02")
-    aid = assign(db, p, "EV-NEW", handover=None)
-    db.execute(
-        "UPDATE ev_assignments SET created_at='2026-09-02 09:30:00' WHERE assignment_id=?", (aid,)
-    )
+    assign(db, p, "EV-NEW", handover="2026-09-02")
     db.commit()
 
     r = _rent(db, p)
@@ -104,38 +154,22 @@ def test_an_ev_that_arrived_after_the_cycle_does_not_set_the_cycles_rate(db, rat
     assert r.rent == 126000, "charged at the rate of an EV he did not have that week"
 
 
-def test_a_dateless_assignment_still_bills_from_the_day_it_was_created(db, rates):
-    """The fallback is a floor, not an amnesty: once the row exists, the rent
-    runs. Only the days before it existed are out of reach."""
-    p = make_person(db, "Late paperwork")
+def test_a_handover_inside_the_cycle_bills_from_the_day_after(db, rates):
+    """The floor is a floor, not an amnesty: once the vehicle is out, rent
+    runs. Only the days before it was handed over are out of reach."""
+    p = make_person(db, "Mid-cycle")
     make_ev(db, "EV-C", provider="Blive", model="Standard")
-    aid = assign(db, p, "EV-C", handover=None)
-    db.execute(
-        "UPDATE ev_assignments SET created_at='2026-08-26 12:00:00' WHERE assignment_id=?", (aid,)
-    )
+    assign(db, p, "EV-C", handover="2026-08-26")
     db.commit()
 
     r = _rent(db, p)
-    assert r.days == 4  # created on the 26th, handover day free → 27–30
-    assert r.legs[0].assumed_handover is True
-
-
-def test_an_assignment_with_no_dates_at_all_takes_no_money(db, rates):
-    """Both columns empty: the row cannot say when it began, so it does not
-    charge. Under-charging is recoverable; taking money we cannot justify is
-    the thing that reached a rider's payslip."""
-    p = make_person(db, "No dates")
-    make_ev(db, "EV-D", provider="Blive", model="Standard")
-    aid = assign(db, p, "EV-D", handover=None)
-    db.execute("UPDATE ev_assignments SET created_at=NULL WHERE assignment_id=?", (aid,))
-    db.commit()
-
-    r = _rent(db, p)
-    assert r.rent == 0 and r.days == 0
+    assert r.days == 4  # handover day free → 27–30
+    assert r.rent == 72000
 
 
 def test_handing_over_an_ev_never_writes_a_null_handover_date(db):
-    """The route that made most of these rows now dates them itself."""
+    """The route that made most of the bad rows now dates them itself, so the
+    app can keep sending nothing and still be correct."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 

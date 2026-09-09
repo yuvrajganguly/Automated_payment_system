@@ -825,6 +825,49 @@ def _0028_ev_closeout_reports(conn: Any) -> None:
         conn.execute(ddl)
 
 
+def _0029_handover_date_required(conn: Any) -> None:
+    """Every EV assignment gets a handover date, and can never lose one again.
+
+    ``handover_date`` was nullable and the schema described NULL as "rent the
+    full cycle (legacy riders)". That held while the only NULL rows came from
+    the go-live import. Once the EV screens and the payout importer could write
+    NULL too, an assignment with no date had nothing to compare a cycle
+    against, so rent billed it for **every** cycle, in full, at its own EV's
+    rate — including cycles that closed before the vehicle was handed over. It
+    reached riders' payslips: one paid rent for two EVs in a week he had one,
+    another paid a rate belonging to a vehicle he had not yet been given.
+
+    The backfill, in order of what it can actually know:
+
+    1. ``created_at`` — we cannot have handed over a vehicle before we wrote
+       the row saying we had, so its date is the honest floor.
+    2. the earliest cycle the office has ever run, for rows old enough to
+       predate ``created_at`` defaults.
+    3. ``2020-01-01`` — before the business existed, so it charges from the
+       first cycle that sees the rider and never reaches backwards.
+
+    None of these invent a *later* date than the truth, which matters: a date
+    that is too early can only under-charge a rider, and under-charging is
+    recoverable in a way that a wrong deduction from somebody's pay is not.
+
+    The NOT NULL itself is applied on PostgreSQL only. Production is Postgres,
+    where it is one statement; SQLite would need a twelve-step rebuild of a
+    table three others reference by foreign key, which is a bigger risk than
+    the bug it closes. Fresh databases of both kinds get the constraint from
+    schema.py, so the tests run against it.
+    """
+    fallback = conn.execute("SELECT MIN(cycle_start) AS d FROM company_cycles").fetchone()
+    floor = (fallback["d"] if fallback else None) or "2020-01-01"
+    conn.execute(
+        "UPDATE ev_assignments SET handover_date = "
+        "  COALESCE(substr(created_at, 1, 10), ?) "
+        "WHERE handover_date IS NULL",
+        (floor,),
+    )
+    if DB_URL:
+        conn.execute("ALTER TABLE ev_assignments ALTER COLUMN handover_date SET NOT NULL")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -857,6 +900,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0026_ev_assignment_actor", _0026_ev_assignment_actor),
     ("0027_recruiter_shifts", _0027_recruiter_shifts),
     ("0028_ev_closeout_reports", _0028_ev_closeout_reports),
+    ("0029_handover_date_required", _0029_handover_date_required),
 ]
 
 _TRACKING_DDL = (

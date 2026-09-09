@@ -131,6 +131,11 @@ def assign(
     """
     if created_at is None:
         created_at = "2020-01-01 00:00:00" if handover is None else str(handover) + " 00:00:00"
+    if handover is None:
+        # handover_date is NOT NULL since migration 0029 — the column cannot
+        # hold the shape that caused the 2026-09 double charge. A legacy rider
+        # carries the date the backfill would have given them.
+        handover = created_at[:10]
     aid = db.execute(
         "INSERT INTO ev_assignments (person_id, ev_id, handover_date, returned_date, "
         "rent_charged_through, created_at) VALUES (?, ?, ?, ?, ?, ?)",

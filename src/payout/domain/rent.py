@@ -319,6 +319,11 @@ def resolve_rent(
         # COALESCE in the query above is NULL, the comparison is not true, and
         # the leg is left out entirely — an unbillable assignment takes no
         # money rather than guessing at somebody's expense.
+        #
+        # Since migration 0029 the column is NOT NULL and this branch should be
+        # unreachable. It stays anyway: this is the last thing standing between
+        # a malformed row and a deduction from somebody's pay, and it costs one
+        # COALESCE to keep.
         assumed = not r["handover_date"]
         hod = _parse_date(r["handover_date"] or (r["created_at"] or "")[:10])
         ret = _parse_date(r["returned_date"])

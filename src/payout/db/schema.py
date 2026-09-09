@@ -77,7 +77,13 @@ CREATE TABLE IF NOT EXISTS ev_assignments (
     assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id     INTEGER NOT NULL REFERENCES person_registry(person_id),
     ev_id         TEXT NOT NULL REFERENCES ev_units(ev_id),
-    handover_date TEXT,           -- NULL => rent the full cycle (legacy riders)
+    -- Required. It was nullable, and NULL meant "rent the full cycle", which
+    -- was true only while the sole NULL rows came from the go-live import.
+    -- Once the app and the importer could also write NULL, an assignment with
+    -- no date billed EVERY cycle in full at its own rate — including cycles
+    -- that closed before the vehicle left the office. Migration 0029 backfills
+    -- the existing NULLs from created_at and makes the column NOT NULL.
+    handover_date TEXT NOT NULL,
     returned_date TEXT,           -- NULL => currently held
     rent_charged_through TEXT,    -- last date EV rent billed through
     closeout_pending INTEGER NOT NULL DEFAULT 0, -- 1 = closed, deposit not yet settled (ev_closeouts)

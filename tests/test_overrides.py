@@ -17,7 +17,11 @@ def _blive_rider(db, handover=None):
         # Legacy row when no handover is given — see conftest.assign.
         "INSERT INTO ev_assignments (person_id,ev_id,handover_date,created_at) "
         "VALUES (?, 'B1', ?, ?)",
-        (pid, handover, (str(handover) + " 00:00:00") if handover else "2020-01-01 00:00:00"),
+        (
+            pid,
+            handover or "2020-01-01",
+            (str(handover) + " 00:00:00") if handover else "2020-01-01 00:00:00",
+        ),
     )
     db.commit()
     return pid
