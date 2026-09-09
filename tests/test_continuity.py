@@ -15,8 +15,8 @@ def _blive(db):
         # left it at "now" while testing a cycle months back would be
         # modelling a row written after the money moved. This is a legacy
         # rider — carried in from before handover dates were tracked.
-        "INSERT INTO ev_assignments (person_id,ev_id,created_at) VALUES (?, ?, '2020-01-01 00:00:00')",
-        (pid, ev),
+        "INSERT INTO ev_assignments (person_id,ev_id,created_at) VALUES (?, ?, ?)",
+        (pid, ev, "2020-01-01 00:00:00"),
     )
     db.commit()
     return pid
