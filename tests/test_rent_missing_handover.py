@@ -199,3 +199,71 @@ def test_handing_over_an_ev_never_writes_a_null_handover_date(db):
 
     row = db.execute("SELECT handover_date FROM ev_assignments WHERE ev_id='EV-E'").fetchone()
     assert row["handover_date"] == date.today().isoformat()
+
+
+def test_the_backfill_does_not_move_a_running_rent_cycle(db, rates):
+    """95 live assignments were backfilled by 0029. None of them may start
+    billing on a different day because of it.
+
+    ``rent_charged_through`` wins outright in chargeable_window — the handover
+    date is only consulted when there is no meter — so a rider whose rent was
+    already running bills exactly the days it would have billed before the
+    column was filled in. This pins that, because "the fix cannot move anyone's
+    cycle" is the whole reason the backfill was safe to run on live data.
+    """
+    early = make_person(db, "Real handover on file")
+    filled = make_person(db, "Backfilled by 0029")
+    make_ev(db, "EV-1", provider="Blive", model="Standard")
+    make_ev(db, "EV-2", provider="Blive", model="Standard")
+    # Same meter, same EV rate. The only difference is where the handover date
+    # came from: one was always recorded, the other is the created_at that
+    # migration 0029 wrote in.
+    assign(
+        db,
+        early,
+        "EV-1",
+        handover="2026-06-01",
+        charged_through="2026-08-23",
+        created_at="2026-06-01 10:00:00",
+    )
+    assign(
+        db,
+        filled,
+        "EV-2",
+        handover="2026-07-15",
+        charged_through="2026-08-23",
+        created_at="2026-07-15 10:00:00",
+    )
+    db.commit()
+
+    a, b = _rent(db, early), _rent(db, filled)
+    assert (a.days, a.rent) == (b.days, b.rent) == (7, 126000)
+    assert a.rent_from == b.rent_from == date(2026, 8, 24)
+
+
+def test_the_backfill_can_only_shrink_a_catch_up_never_grow_one(db, rates):
+    """The one place a newly-filled handover date does reach a running rider.
+
+    When the meter sits behind cycle_start, resolve_rent catches up the days no
+    cycle ever billed — and clamps that window to ``handover + 1``. Filling the
+    column in can therefore raise the floor, never lower it, so the worst a
+    backfilled date can do is bill fewer days. Wrong in the recoverable
+    direction, which is the only direction this was allowed to be wrong in.
+    """
+    p = make_person(db, "Meter behind")
+    make_ev(db, "EV-3", provider="Blive", model="Standard")
+    # Meter stopped on the 9th; the assignment row was only written on the 17th,
+    # so days before that are not ours to bill.
+    assign(
+        db,
+        p,
+        "EV-3",
+        handover="2026-08-17",
+        charged_through="2026-08-09",
+        created_at="2026-08-17 10:00:00",
+    )
+    db.commit()
+
+    r = _rent(db, p)
+    assert r.rent_from >= date(2026, 8, 18), "billed days before the row existed"
+    assert r.days <= 13
