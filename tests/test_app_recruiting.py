@@ -376,12 +376,17 @@ def test_todo_groups_store_visits_by_zone(db, client):
     assert me["zone"] == "North"
     t = client.get("/api/app/todo", headers=rec).json()
     assert t["zone"] == "North" and t["my_zone"] == "North"
-    assert [s["hub"] for s in t["stores"]] == ["Salt Lake"] and t["counts"]["total"] == 2
-    # …but a recruiter can still look at the other zone, or everything.
-    assert [
-        s["hub"] for s in client.get("/api/app/todo?zone=South", headers=rec).json()["stores"]
-    ] == ["Garia"]
-    assert client.get("/api/app/todo?zone=all", headers=rec).json()["counts"]["total"] == 4
+    # Their own zone, plus Howrah — which nobody has classified. An unzoned
+    # store belongs to everybody until it belongs to someone; fencing it off
+    # would hide it from every recruiter at once, since they are all fenced.
+    assert [s["hub"] for s in t["stores"]] == ["Salt Lake", "Howrah"]
+    # South is not theirs to look at, and asking is refused rather than
+    # quietly answered — the chip is gone from the app, and the route agrees.
+    assert client.get("/api/app/todo?zone=South", headers=rec).status_code == 403
+    # "all" collapses to what they are allowed to see, it does not widen it.
+    everything = client.get("/api/app/todo?zone=all", headers=rec).json()
+    assert everything["zone"] == "North"
+    assert [s["hub"] for s in everything["stores"]] == ["Salt Lake", "Howrah"]
     assert [
         s["hub"] for s in client.get("/api/app/todo?zone=unassigned", headers=rec).json()["stores"]
     ] == ["Howrah"]
@@ -511,3 +516,118 @@ def test_bootstrap_calls_you_by_your_name_not_your_login(db, client):
     assert me["email"] == "rec@t.test"  # still there, still the login id
     # And the console's own /auth/me agrees, so the two never disagree.
     assert client.get("/api/auth/me", headers=rec).json()["name"] == "Rahul Kumar"
+
+
+def test_a_north_recruiter_cannot_reach_south(db, client):
+    """Hiding the chip is not a fence; the route has to refuse.
+
+    Zones only mean anything if the filter cannot be typed around. Before
+    2026-09 every zone-aware route took whatever ``?zone=`` said.
+    """
+    db.execute("UPDATE users SET zone='North' WHERE email='rec@t.test'")
+    db.execute("UPDATE users SET zone='South' WHERE email='rec2@t.test'")
+    db.commit()
+    north = _hdr(client)
+    south = _hdr(client, "rec2@t.test", "Recruit-pass-2")
+    boss = _hdr(client, "boss@t.test", "Creator-pass-1")
+
+    for path in ("/api/app/todo?zone=South", "/api/riders?zone=South", "/api/evs?zone=South"):
+        assert client.get(path, headers=north).status_code == 403, path
+    for path in ("/api/app/todo?zone=North", "/api/riders?zone=North", "/api/evs?zone=North"):
+        assert client.get(path, headers=south).status_code == 403, path
+
+    # Their own zone, and "all", both answer — "all" collapsing to their own.
+    assert client.get("/api/app/todo?zone=North", headers=north).status_code == 200
+    assert client.get("/api/app/todo?zone=all", headers=north).json()["zone"] == "North"
+    # The creator is never fenced.
+    assert client.get("/api/app/todo?zone=South", headers=boss).status_code == 200
+    # Nor is a recruiter nobody has placed yet — an empty app on day one is worse.
+    db.execute("UPDATE users SET zone=NULL WHERE email='rec@t.test'")
+    db.commit()
+    ratelimit_free = _hdr(client)
+    assert client.get("/api/app/todo?zone=South", headers=ratelimit_free).status_code == 200
+
+
+def test_the_zone_list_the_app_draws_chips_from_is_fenced_too(db, client):
+    db.execute("UPDATE users SET zone='North' WHERE email='rec@t.test'")
+    db.commit()
+    boot = client.get("/api/app/bootstrap", headers=_hdr(client)).json()
+    assert boot["zones"] == ["North"]  # one choice → the app draws no filter row
+    boss = client.get("/api/app/bootstrap", headers=_hdr(client, "boss@t.test", "Creator-pass-1"))
+    assert boss.json()["zones"] == ["North", "South", "Misc"]
+
+
+def test_a_store_in_no_zone_belongs_to_everybody(db, client):
+    """An unclassified store must not vanish from the whole field at once.
+
+    Every recruiter is fenced somewhere, so a strict fence would make a store
+    an admin forgot to classify invisible to all of them — the work there just
+    stops being anybody's. It goes to everyone until it goes to someone.
+    """
+    db.execute("UPDATE users SET zone='North' WHERE email='rec@t.test'")
+    db.commit()
+    rec = _hdr(client)
+    boss = _hdr(client, "boss@t.test", "Creator-pass-1")
+    a = _onboard(client, rec, "Arjun Das", rider_id="SF-1", hub="Salt Lake")
+    _onboard(client, rec, "Bikash Roy", rider_id="SF-2", hub="Nobody Zoned This")
+    assert (
+        client.put(
+            "/api/hubs/Shadowfax/Salt Lake", json={"zone": "North"}, headers=boss
+        ).status_code
+        == 200
+    )
+    db.commit()
+
+    riders = client.get("/api/riders?zone=North", headers=rec).json()
+    assert sorted(r["rider_id"] for r in riders) == ["SF-1", "SF-2"]
+    assert a["person_id"]
+
+    # Once an admin classifies it into South, it leaves North's view.
+    assert (
+        client.put(
+            "/api/hubs/Shadowfax/Nobody Zoned This", json={"zone": "South"}, headers=boss
+        ).status_code
+        == 200
+    )
+    riders = client.get("/api/riders?zone=North", headers=rec).json()
+    assert [r["rider_id"] for r in riders] == ["SF-1"]
+
+
+def test_a_day_left_open_blocks_the_next_one_until_it_is_settled(db, client):
+    rec = _hdr(client)
+    # Monday opened and never closed.
+    assert (
+        client.post(
+            "/api/recruiters/me/shift",
+            json={"kind": "start", "km": 318500, "day": "2026-09-01"},
+            headers=rec,
+        ).status_code
+        == 200
+    )
+
+    r = client.post("/api/recruiters/me/shift", json={"kind": "start", "km": 318600}, headers=rec)
+    assert r.status_code == 400
+    assert "2026-09-01" in r.json()["detail"] and "never" in r.json()["detail"]
+
+    # The app is told which day is in the way, so it can lead with it.
+    today = client.get("/api/recruiters/me/shift/today", headers=rec).json()
+    assert today["open_before"]["day"] == "2026-09-01"
+    assert today["open_before"]["start_km"] == 318500
+    assert today["start_km"] is None
+
+    # Settle it — here, a day nobody rode: closed where it opened.
+    assert (
+        client.post(
+            "/api/recruiters/me/shift",
+            json={"kind": "end", "km": 318500, "day": "2026-09-01"},
+            headers=rec,
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/recruiters/me/shift/today", headers=rec).json()["open_before"] is None
+    assert (
+        client.post(
+            "/api/recruiters/me/shift", json={"kind": "start", "km": 318600}, headers=rec
+        ).status_code
+        == 200
+    )

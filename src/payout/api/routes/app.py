@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from payout.api.auth import get_current_user
 from payout.api.ratelimit import rate_limit
-from payout.api.routes.hubs import ZONES
+from payout.api.routes.hubs import ZONES, fenced_zone
 from payout.db import get_connection
 from payout.domain.activity import ACTIONS
 from payout.domain.naming import display_name_for
@@ -89,7 +89,10 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
         "hubs": hubs,
         "hub_zones": hub_zones,
         "company_hubs": company_hubs,
-        "zones": list(ZONES),
+        # Only the zones this caller may actually pick. A fenced recruiter
+        # gets one, so the app knows to stop drawing a filter row that offers
+        # them a single choice and a synonym for it.
+        "zones": [fenced_zone(user).title()] if fenced_zone(user) else list(ZONES),
         "ev_models": providers,
         "counts": {
             "rider_ids_active": int(riders_active),
@@ -342,12 +345,24 @@ def todo(
     zone: str | None = Query(None, description="North | South | all; default: my zone"),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """What needs a visit, grouped by store (hub), for one zone."""
+    """What needs a visit, grouped by store (hub), for one zone.
+
+    Fenced: field staff with a zone on their account get their own zone and
+    nothing else, whatever they ask for — see hubs.zone_scope. Unclassified
+    stores come along, because a store nobody has placed would otherwise be
+    invisible to every recruiter at once.
+    """
     want = (zone or "").strip().lower()
     if not want:
         want = (user.get("zone") or "all").lower()
     if want not in ("all", "unassigned") and want.title() not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}, unassigned or all")
+    fence = fenced_zone(user)
+    with_unzoned = False
+    if fence and want != "unassigned":
+        if want not in ("all", fence):
+            raise HTTPException(403, "You can only see your own zone")
+        want, with_unzoned = fence, True
     with get_connection() as conn:
         items = _todo_rows(conn)
     stores: dict[str, dict] = {}
@@ -357,7 +372,14 @@ def todo(
         hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
-        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
+        # A fenced recruiter keeps the stores nobody has classified — see
+        # hubs.zone_scope. Without that, an unzoned store is invisible to the
+        # whole field at once, because every recruiter is fenced somewhere.
+        if (
+            want not in ("all", "unassigned")
+            and (hub_zone or "").lower() != want
+            and not (with_unzoned and not hub_zone)
+        ):
             continue
         store = stores.setdefault(
             it["hub"] or "Misc",

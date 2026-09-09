@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
-from payout.api.routes.hubs import zone_filter
+from payout.api.routes.hubs import zone_scope
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -402,10 +402,18 @@ def list_riders(
     elif recruited_by:
         where.append("rm.recruited_by=?")
         params.append(recruited_by.strip().lower())
-    z = zone_filter(zone)
+    z, with_unzoned = zone_scope(user, zone)
     if z:
         if z == "unassigned":
             where.append("COALESCE(hz.zone, ru.zone) IS NULL")
+        elif with_unzoned:
+            # A fenced recruiter also sees stores nobody has classified —
+            # see zone_scope. Without this an unzoned store is invisible to
+            # the whole field at once.
+            where.append(
+                "(LOWER(COALESCE(hz.zone, ru.zone))=? OR COALESCE(hz.zone, ru.zone) IS NULL)"
+            )
+            params.append(z)
         else:
             where.append("LOWER(COALESCE(hz.zone, ru.zone))=?")
             params.append(z)

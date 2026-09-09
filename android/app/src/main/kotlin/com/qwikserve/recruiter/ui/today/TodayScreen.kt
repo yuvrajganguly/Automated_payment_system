@@ -81,6 +81,8 @@ class TodayViewModel @Inject constructor(
 
     val bootstrap get() = app.bootstrap.value
 
+    fun zoneChoices(): List<String> = app.zoneChoices()
+
     init { refresh() }
 
     fun pickZone(z: String) {
@@ -124,7 +126,13 @@ fun TodayScreen(
     val todo = vm.todo
     val boot = vm.bootstrap
     val myZone = boot?.me?.zone
-    val zoneOptions = (if (myZone != null) listOf("My zone") else emptyList()) + (boot?.zones ?: listOf("North", "South", "Misc")) + listOf("All")
+    // Empty when the server has fenced this recruiter to one zone — see
+    // AppRepository.zoneChoices. Four chips that all mean "North" is worse
+    // than no chips at all.
+    val zones = vm.zoneChoices()
+    val zoneOptions =
+        if (zones.isEmpty()) emptyList()
+        else (if (myZone != null) listOf("My zone") else emptyList()) + zones + listOf("All")
     val selected = vm.zone ?: if (myZone != null) "My zone" else "All"
     val ctx = LocalContext.current
 
@@ -141,8 +149,10 @@ fun TodayScreen(
                             SimpleDateFormat("EEE d MMM", Locale.US).format(Date()),
                         ).joinToString(" · "),
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Chips(zoneOptions, selected, onSelect = vm::pickZone)
+                    if (zoneOptions.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Chips(zoneOptions, selected, onSelect = vm::pickZone)
+                    }
                 }
                 Rule()
             }

@@ -525,6 +525,9 @@ data class RecruiterRider(
 
 @Serializable
 data class ShiftOut(
+    /** An earlier day opened and never closed. While this is set the server
+     *  refuses a new opening reading, so the app leads with it. */
+    @SerialName("open_before") val openBefore: ShiftOut? = null,
     val id: Long? = null,
     val email: String = "",
     val day: String = "",

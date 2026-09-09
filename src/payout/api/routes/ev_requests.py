@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from payout.api.auth import get_current_user, require_admin, require_recruiter
-from payout.api.routes.hubs import zone_filter
+from payout.api.routes.hubs import zone_scope
 from payout.db import get_connection
 from payout.domain.activity import record_activity
 
@@ -84,9 +84,12 @@ def list_ev_requests(
     if status:
         where.append("status=?")
         params.append(status)
-    z = zone_filter(zone)
+    z, with_unzoned = zone_scope(user, zone)
     if z == "unassigned":
         where.append("zone IS NULL")
+    elif z and with_unzoned:
+        where.append("(zone=? OR zone IS NULL)")
+        params.append(z.title())
     elif z:
         where.append("zone=?")
         params.append(z.title())

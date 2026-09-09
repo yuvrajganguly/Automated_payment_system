@@ -293,6 +293,23 @@ class ShiftIn(BaseModel):
     note: str | None = Field(None, max_length=200)
 
 
+def _open_day_before(conn, email: str, day: str):
+    """The oldest day before ``day`` that was opened and never closed.
+
+    A day left open contributes nothing to the month's total and there is no
+    honest way to reconstruct it afterwards — nobody remembers Tuesday's
+    closing reading in October. So the next opening is refused until it is
+    dealt with. It is the only block in this module, and it exists because the
+    alternative is a fuel claim that is quietly short and a recruiter who finds
+    out at the end of the month.
+    """
+    return conn.execute(
+        "SELECT * FROM recruiter_shifts WHERE email=? AND day<? "
+        "AND start_km IS NOT NULL AND end_km IS NULL ORDER BY day LIMIT 1",
+        (email, day),
+    ).fetchone()
+
+
 def _shift_out(row) -> dict:
     start, end = row["start_km"], row["end_km"]
     # max(0, …): a distance can never be negative, and a row that somehow holds
@@ -370,6 +387,14 @@ def save_shift(body: ShiftIn, user: dict = Depends(get_current_user)) -> dict:
             if not cur.rowcount:
                 raise HTTPException(400, "That reading no longer fits the day — reload and retry")
         else:
+            stale = _open_day_before(conn, email, day)
+            if stale is not None:
+                raise HTTPException(
+                    400,
+                    f"{stale['day']} was opened at {int(stale['start_km']):,} km and never "
+                    "closed. Close it first — the reading you parked on, or mark it a day "
+                    "you did not ride.",
+                )
             if row["end_km"] is not None and body.km > int(row["end_km"]):
                 raise HTTPException(
                     400,
@@ -475,15 +500,24 @@ def shift_photo(
 
 @router.get("/me/shift/today")
 def my_shift_today(user: dict = Depends(get_current_user)) -> dict:
-    """Today's row, or an empty one — what the Today screen opens on."""
+    """Today's row, plus the earlier day that is blocking it, if there is one.
+
+    ``open_before`` is the whole point of this shape: the app cannot ask a
+    recruiter to close Tuesday unless it knows Tuesday is open, and the day
+    list on Profile is not where somebody standing outside a store at 7 a.m.
+    is looking.
+    """
     email = (user["email"] or "").lower()
     day = date.today().isoformat()
     with get_connection() as conn:
+        stale = _open_day_before(conn, email, day)
+        blocking = _shift_out(stale) if stale is not None else None
         row = conn.execute(
             "SELECT * FROM recruiter_shifts WHERE email=? AND day=?", (email, day)
         ).fetchone()
         if row is None:
             return {
+                "open_before": blocking,
                 "id": None,
                 "email": email,
                 "day": day,
@@ -497,7 +531,7 @@ def my_shift_today(user: dict = Depends(get_current_user)) -> dict:
                 "note": None,
                 "complete": False,
             }
-        return _shift_out(row)
+        return {**_shift_out(row), "open_before": blocking}
 
 
 @router.get("/{email}/shifts")

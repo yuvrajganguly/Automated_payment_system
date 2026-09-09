@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.ratelimit import rate_limit
-from payout.api.routes.hubs import zone_filter
+from payout.api.routes.hubs import zone_scope
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -171,14 +171,21 @@ def list_ev_units(
             "LEFT JOIN person_registry p ON p.person_id = a.person_id "
             "ORDER BY u.ev_id"
         ).fetchall()
-    z = zone_filter(zone) or ""
+    z, with_unzoned = zone_scope(user, zone)
+    z = z or ""
     out: list[EvUnitOut] = []
     for r in rows:
         if status and r["status"] != status:
             continue
         if z == "unassigned" and (r["person_id"] is None or r["zone"]):
             continue
-        if z and z != "unassigned" and (r["zone"] or "").lower() != z:
+        # A fenced recruiter keeps the unzoned ones (see hubs.zone_scope).
+        if (
+            z
+            and z != "unassigned"
+            and (r["zone"] or "").lower() != z
+            and not (with_unzoned and not r["zone"])
+        ):
             continue
         if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue

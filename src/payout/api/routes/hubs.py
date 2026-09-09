@@ -46,6 +46,53 @@ def zone_filter(zone: str | None) -> str | None:
     raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}, unassigned or all")
 
 
+def fenced_zone(user: dict) -> str | None:
+    """The one zone this caller may look at, lowercased, or None for no fence.
+
+    Field staff are fenced to the zone on their account: a North recruiter has
+    no business in South's stores, and until now the only thing between them
+    and South was a filter chip they could simply not press. Hiding the chip
+    without this would be theatre — ``GET /riders?zone=South`` still answered.
+
+    Two deliberate exemptions. **Admins and the creator** are never fenced;
+    they run the whole board. **A recruiter with no zone set** is not fenced
+    either — an account nobody has placed yet has to be able to see the work,
+    and the alternative is a new joiner staring at an empty app on their first
+    morning.
+    """
+    if user.get("role") in ("admin", "creator"):
+        return None
+    zone = (user.get("zone") or "").strip()
+    return zone.lower() or None
+
+
+def zone_scope(user: dict, zone: str | None) -> tuple[str | None, bool]:
+    """``zone_filter`` with the caller's fence applied.
+
+    Returns the zone to filter on (None = everything) and whether rows in
+    **no zone at all** come along with it.
+
+    That second flag is the answer to a real hole. A store an admin has never
+    classified has no zone, so a fenced recruiter filtering to their own would
+    never see it — and nobody else would either, because every recruiter is
+    fenced somewhere. The work at that store would be invisible to the entire
+    field until somebody happened to notice the store existed. So an unzoned
+    store belongs to everybody until it belongs to someone.
+
+    An unfenced caller keeps today's behaviour exactly: what they ask for is
+    what they get, and "all" means all.
+    """
+    fence = fenced_zone(user)
+    asked = zone_filter(zone)
+    if fence is None:
+        return asked, False
+    if asked == "unassigned":
+        return asked, False
+    if asked is None or asked == fence:
+        return fence, True
+    raise HTTPException(403, "You can only see your own zone")
+
+
 class HubOut(BaseModel):
     company: str
     hub: str

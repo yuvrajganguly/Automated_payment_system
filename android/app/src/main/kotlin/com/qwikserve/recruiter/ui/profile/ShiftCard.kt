@@ -38,6 +38,7 @@ import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.km
+import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.login.fieldColors
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -132,24 +133,58 @@ class ShiftViewModel @Inject constructor(
         if (saved && s != null) upload(kind, uri, s.day)
     }
 
+    /** What is typed into the "close the day you forgot" field. */
+    var staleReading by mutableStateOf("")
+        private set
+
+    fun onStaleReading(text: String) { staleReading = text.filter { it.isDigit() }.take(7) }
+
+    /** Close an earlier day that was left open. Same route, with the day named. */
+    fun closeStale(km: Int? = null) {
+        val stale = shift?.openBefore ?: return
+        val value = km ?: staleReading.toIntOrNull()
+        if (value == null) {
+            error = "Type the reading you parked on, or say you did not ride that day."
+            return
+        }
+        save("end", day = stale.day, km = value, onDone = { staleReading = "" })
+    }
+
+    /** A day nobody rode: close it where it opened, so the month is honest
+     *  about the day rather than silently short by it. */
+    fun closeStaleUnridden() {
+        val stale = shift?.openBefore ?: return
+        closeStale(km = stale.startKm ?: return)
+    }
+
     /** Save one end of the shift. */
     fun save(kind: String) {
-        if (busy) return
         val typed = if (kind == "start") startReading else endReading
         val value = typed.toIntOrNull()
         if (value == null) {
             error = "Type the reading in whole kilometres — digits only."
             return
         }
+        save(kind, day = null, km = value, onDone = {
+            if (kind == "start") startReading = "" else endReading = ""
+        })
+    }
+
+    private fun save(kind: String, day: String?, km: Int, onDone: () -> Unit) {
+        if (busy) return
+        val value = km
         busy = true; error = null; warnings = emptyList()
         viewModelScope.launch {
             try {
-                val out = api.saveShift(ShiftIn(kind = kind, km = value))
-                shift = out
+                val out = api.saveShift(ShiftIn(kind = kind, km = value, day = day))
                 warnings = out.warnings
-                if (kind == "start") startReading = "" else endReading = ""
+                onDone()
+                // Closing an earlier day changes what today looks like — the
+                // block lifts — so re-read rather than trusting the row that
+                // came back for that other day.
+                shift = if (day != null) runCatching { api.shiftToday() }.getOrDefault(shift) else out
                 val pending = if (kind == "start") startPhoto else endPhoto
-                if (pending != null) upload(kind, pending, out.day)
+                if (pending != null && day == null) upload(kind, pending, out.day)
             } catch (e: HttpException) {
                 error = detail(e) ?: "The server answered ${e.code()}."
             } catch (e: IOException) {
@@ -219,6 +254,11 @@ fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel(
                 vm.error ?: "Today's odometer is not available right now.",
                 style = MaterialTheme.typography.bodyMedium, color = Qwik.Accent700,
             )
+            // An earlier day left open comes first, because the server will
+            // not take a new opening reading until it is dealt with. Leading
+            // with it is the difference between "close Tuesday" and a refusal
+            // somebody meets at 7 a.m. outside a store.
+            s.openBefore != null -> StaleDayForm(vm, s.openBefore)
             s.startKm == null -> ReadingForm(
                 title = "Start your shift",
                 hint = "The reading on the dash before you set off.",
@@ -297,6 +337,58 @@ fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel(
                 if (vm.endPhoto != null) GhostAction("Retry closing photo", onClick = { vm.retryPhoto("end") })
             }
         }
+    }
+}
+
+/**
+ * The day somebody forgot to close.
+ *
+ * Two ways out, and both are honest. Type the reading you parked on, or say
+ * you did not ride that day — which closes it where it opened, at nought
+ * kilometres. What there is no way to do is make it disappear, because a
+ * forgotten day is the one case where the month's total and the truth come
+ * apart, and it is the recruiter's own money on the other side of it.
+ */
+@Composable
+private fun StaleDayForm(vm: ShiftViewModel, stale: ShiftOut) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            "Close " + shortDate(stale.day) + " first",
+            style = MaterialTheme.typography.titleLarge, color = Qwik.Accent700,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "It was opened at ${km(stale.startKm)} and never closed, so it counts for "
+                + "nothing in that month. Today cannot start until it is settled.",
+            style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = vm.staleReading,
+                onValueChange = vm::onStaleReading,
+                placeholder = { Text("Reading you parked on", color = Qwik.N600, maxLines = 1) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = fieldColors(),
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("km", style = MaterialTheme.typography.bodyLarge, color = Qwik.N700)
+        }
+        Spacer(Modifier.height(12.dp))
+        BarButton(
+            if (vm.busy) "Closing…" else "Close " + shortDate(stale.day),
+            onClick = { vm.closeStale() },
+            enabled = !vm.busy && vm.staleReading.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(4.dp))
+        GhostAction(
+            "I did not ride that day",
+            onClick = vm::closeStaleUnridden,
+            enabled = !vm.busy,
+        )
     }
 }
 
@@ -433,7 +525,10 @@ private fun shiftPhotoUrl(day: String, kind: String): String =
 @Composable
 fun ShiftNudge(onOpen: () -> Unit, vm: ShiftViewModel = hiltViewModel()) {
     val s = vm.shift ?: return
+    val stale = s.openBefore
     val (what, then) = when {
+        stale != null ->
+            shortDate(stale.day) + " was never closed" to "Close it before today"
         s.startKm == null -> "Your shift is not open yet" to "Enter the opening reading"
         s.endKm == null -> "Open at ${km(s.startKm)}" to "Close the day when you park"
         else -> return

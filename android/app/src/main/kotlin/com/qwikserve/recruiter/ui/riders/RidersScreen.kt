@@ -88,6 +88,8 @@ class RidersViewModel @Inject constructor(
     val scope = MutableStateFlow(Scope.ALL)
     /** "North" / "South" / "All" — All riders opens on the recruiter's own zone. */
     val zone = MutableStateFlow(app.defaultZone())
+
+    fun zoneChoices(): List<String> = app.zoneChoices()
     val activity = MutableStateFlow(Activity.ALL)
     var refreshing by mutableStateOf(false)
         private set
@@ -159,11 +161,14 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 selected = if (scope == Scope.ALL) 0 else 1,
                 onSelect = { vm.scope.value = if (it == 0) Scope.ALL else Scope.MINE },
             )
-            if (scope == Scope.ALL) {
+            // No zone row for a recruiter the server has fenced to one zone:
+            // it would offer choices that all resolve to the same list.
+            val zoneChoices = vm.zoneChoices()
+            if (scope == Scope.ALL && zoneChoices.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Kicker("Zone")
                     Spacer(Modifier.width(10.dp))
-                    Chips(listOf("North", "South", "Misc", "All"), zone, onSelect = { vm.zone.value = it })
+                    Chips(zoneChoices + "All", zone, onSelect = { vm.zone.value = it })
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
