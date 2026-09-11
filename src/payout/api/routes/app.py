@@ -426,7 +426,12 @@ def _todo_rows(conn) -> list[dict]:
         "          ORDER BY rm.is_active DESC LIMIT 1) AS mob_no, "
         "       (SELECT ru.zone FROM rider_master rm JOIN users ru ON ru.email=rm.recruited_by "
         "          WHERE rm.person_id=pr.person_id AND ru.zone IS NOT NULL LIMIT 1) "
-        "          AS recruiter_zone "
+        "          AS recruiter_zone, "
+        # Distinct from recruiter_zone being NULL: that is also true of a rider
+        # credited to a recruiter nobody has placed yet, who is somebody's
+        # responsibility and not in the pool.
+        "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        "          AND rm.recruited_by IS NOT NULL) AS credited "
         "FROM person_registry pr "
         "LEFT JOIN ev_arrears ea ON ea.person_id=pr.person_id "
         "LEFT JOIN balances b ON b.person_id=pr.person_id "
@@ -518,7 +523,15 @@ def todo(
         hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
-        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
+        # A fenced caller keeps the unassigned pool — riders with no store
+        # and nobody credited, for whom no zone could ever be derived. See
+        # hubs.unassigned_pool_sql.
+        in_pool = not (it.get("hub") or "").strip() and not it.get("credited")
+        if (
+            want not in ("all", "unassigned")
+            and (hub_zone or "").lower() != want
+            and not (fence and in_pool)
+        ):
             continue
         store = stores.setdefault(
             it["hub"] or "Misc",

@@ -252,3 +252,87 @@ def test_retention_denominator_is_people(db, client):
     )
     assert (console["onboarded_all_time"], console["still_working"]) == (1, 1)
     assert console["retention_pct"] == 100.0
+
+
+# ── the unassigned pool (2026-09-11) ────────────────────────────────────────
+#
+# Tightening the fence made 75 working riders invisible to every recruiter at
+# once: no store, and nobody credited, so nothing from which a zone could be
+# derived. They are visible to everybody again — but only that population, not
+# the stores nobody has classified yet, which stay a job for an admin.
+
+
+def _pool_rider(db, name, rider_id, hub=None, recruited_by=None):
+    pid = make_person(db, name)
+    make_rider(db, pid, rider_id, "Shadowfax", name)
+    db.execute(
+        "UPDATE rider_master SET hub=?, recruited_by=? WHERE rider_id=?",
+        (hub, recruited_by, rider_id),
+    )
+    db.commit()
+    return pid
+
+
+def test_the_pool_is_seen_from_both_zones(db, client, board):
+    _pool_rider(db, "Nobody's Rider", "SF-POOL")
+    for email, pw in (("north@t.test", "Recruit-pass-1"),):
+        got = {
+            r["rider_id"] for r in client.get("/api/riders", headers=_hdr(client, email, pw)).json()
+        }
+        assert "SF-POOL" in got, "a rider nothing can place must be visible to the field"
+        assert "SF-S" not in got, "…without reopening the other zone"
+
+
+def test_a_credited_rider_with_no_hub_is_not_in_the_pool(db, client, board):
+    """Somebody is responsible for them: their recruiter's zone places them,
+    and that is not North's business."""
+    _pool_rider(db, "South's Rider", "SF-CRED", recruited_by="south@t.test")
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active, zone) "
+        "VALUES ('south@t.test','x','recruiter',1,'South')"
+    )
+    db.commit()
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    assert "SF-CRED" not in got
+
+
+def test_an_unclassified_store_is_still_not_the_pool(db, client, board):
+    """The distinction the pool is narrow for. Howrah has riders and no zone —
+    that is an admin's job in the stores panel, not a reason to show it to
+    everybody. Only 'no store at all' qualifies."""
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    assert "SF-U" not in got, "an unplaced store is a job, not a pool member"
+
+
+def test_giving_a_pool_rider_a_hub_takes_them_out_of_it(db, client, board):
+    """The pool empties itself as the data is fixed — no flag to remember."""
+    _pool_rider(db, "Was Unplaced", "SF-FIX")
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    assert "SF-FIX" in {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    db.execute("UPDATE rider_master SET hub='Garia' WHERE rider_id='SF-FIX'")
+    db.commit()
+    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    assert "SF-FIX" not in got, "Garia is South's; the pool must not keep them visible"
+
+
+def test_an_admin_naming_a_zone_does_not_get_the_pool(db, client, board):
+    """The pool is a concession to the fence. An admin who asks for North
+    wants North, and a rider with no zone is not in it."""
+    _pool_rider(db, "Nobody's Rider", "SF-POOL")
+    got = {r["rider_id"] for r in client.get("/api/riders?zone=North", headers=board).json()}
+    assert got == {"SF-N"}
+
+
+def test_the_pool_shows_on_the_todo_list(db, client, board):
+    pid = _pool_rider(db, "Owes COD", "SF-COD")
+    db.execute(
+        "INSERT INTO ev_arrears (person_id, cod_missed, cod_outstanding) VALUES (?, 5000, 5000)",
+        (pid,),
+    )
+    db.commit()
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    t = client.get("/api/app/todo", headers=north).json()
+    people = [i["name"] for s in t["stores"] for i in s["items"]]
+    assert "Owes COD" in people

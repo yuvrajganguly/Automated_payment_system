@@ -98,6 +98,36 @@ def zone_scope(user: dict, zone: str | None) -> str | None:
     raise HTTPException(403, "You can only see your own zone")
 
 
+def sees_unassigned_pool(user: dict) -> bool:
+    """Does the unassigned pool ride along with this caller's zone filter?
+
+    Only for a fenced caller. An admin who asks for North wants North; the
+    pool is a concession to the fence, not a member of every zone.
+    """
+    return fenced_zone(user) is not None
+
+
+def unassigned_pool_sql(hub_expr: str, recruiter_expr: str) -> str:
+    """SQL boolean: this rider is in the unassigned pool — visible to every
+    recruiter, in every zone.
+
+    A rider with **no store and nobody credited** has nothing from which a
+    zone could ever be derived: their hub has no zone because they have no
+    hub, and there is no recruiter whose zone could stand in. 75 riders were
+    in this state on 2026-09-11 and most of them had been paid that month, so
+    they are working riders, not dead rows — and after the fence was tightened
+    they had become invisible to every recruiter at once, which is how a rider
+    standing in front of somebody cannot be looked up.
+
+    Deliberately narrower than the rule this brings back. What was removed was
+    "anything with no derived zone comes along", which swept in stores nobody
+    had classified *yet* — a job, and one the company tab's stores panel makes
+    easy. This is only the case where no amount of classifying would help.
+    Give one of these riders a hub and they leave the pool by themselves.
+    """
+    return f"(COALESCE({hub_expr}, '') = '' AND {recruiter_expr} IS NULL)"
+
+
 class HubOut(BaseModel):
     company: str
     hub: str
