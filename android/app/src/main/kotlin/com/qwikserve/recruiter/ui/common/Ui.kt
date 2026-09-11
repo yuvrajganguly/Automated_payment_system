@@ -427,9 +427,17 @@ fun Avatar(personId: Long, name: String?, size: Dp = 44.dp, thumb: Boolean = tru
  *  profile. Same fallback as [Avatar]: their initials until they upload one.
  *  [version] busts the cache after they change the picture. */
 @Composable
-fun MeAvatar(name: String?, size: Dp = 28.dp, version: Int = 0) {
+fun MeAvatar(name: String?, email: String? = null, size: Dp = 28.dp, version: Int = 0) {
+    // The path says "me", so this URL is byte-identical for every account —
+    // and Coil keys its caches by URL. Without the account in the key the next
+    // person to sign in on this phone is served the last person's face out of
+    // the cache. A hash of the email, not the email: this string ends up in
+    // request logs and a login is nobody's business but theirs. LocalCaches
+    // also wipes on sign-out; this makes the collision impossible rather than
+    // merely unlikely.
     val url = BuildConfig.API_BASE_URL + "recruiters/me/photo" +
-        (if (version > 0) "?v=$version" else "")
+        "?u=" + (email?.lowercase()?.hashCode() ?: 0) +
+        (if (version > 0) "&v=$version" else "")
     Box(
         modifier = Modifier.size(size).background(Qwik.N200).border(1.dp, Qwik.N400),
         contentAlignment = Alignment.Center,

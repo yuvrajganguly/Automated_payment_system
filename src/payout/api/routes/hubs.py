@@ -66,18 +66,25 @@ def fenced_zone(user: dict) -> str | None:
     return zone.lower() or None
 
 
-def zone_scope(user: dict, zone: str | None) -> tuple[str | None, bool]:
-    """``zone_filter`` with the caller's fence applied.
+def zone_scope(user: dict, zone: str | None) -> str | None:
+    """``zone_filter`` with the caller's fence applied. None = everything.
 
-    Returns the zone to filter on (None = everything) and whether rows in
-    **no zone at all** come along with it.
+    A fenced caller gets their own zone and nothing else: not South's stores,
+    not the Misc ones, and not the stores nobody has classified yet.
 
-    That second flag is the answer to a real hole. A store an admin has never
-    classified has no zone, so a fenced recruiter filtering to their own would
-    never see it — and nobody else would either, because every recruiter is
-    fenced somewhere. The work at that store would be invisible to the entire
-    field until somebody happened to notice the store existed. So an unzoned
-    store belongs to everybody until it belongs to someone.
+    That last part used to be the opposite. This function returned a second
+    flag that pulled unzoned rows into a fenced recruiter's view, on the
+    reasoning that a store nobody had placed would otherwise be invisible to
+    the entire field at once — every recruiter being fenced somewhere. That
+    was true when there was no way to place a store. Since the company tab
+    grew a stores panel (2026-09-08) an admin can assign a zone in a couple of
+    taps, so the fix for an unclassified store is to classify it, not to show
+    it to everybody. Admins still find them with ``zone=unassigned``.
+
+    ``zone=unassigned`` is an admin tool — the way to find the stores that
+    still need placing. A fenced caller asking for it is refused like any
+    other zone that is not theirs; letting it through would hand back the
+    exact bucket this fence now excludes, and the fence would be theatre.
 
     An unfenced caller keeps today's behaviour exactly: what they ask for is
     what they get, and "all" means all.
@@ -85,11 +92,9 @@ def zone_scope(user: dict, zone: str | None) -> tuple[str | None, bool]:
     fence = fenced_zone(user)
     asked = zone_filter(zone)
     if fence is None:
-        return asked, False
-    if asked == "unassigned":
-        return asked, False
+        return asked
     if asked is None or asked == fence:
-        return fence, True
+        return fence
     raise HTTPException(403, "You can only see your own zone")
 
 

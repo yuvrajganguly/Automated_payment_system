@@ -34,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.SavedStateHandle
 import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.RiderIn
 import com.qwikserve.recruiter.data.db.RiderEntity
@@ -82,18 +83,30 @@ class NewRiderViewModel @Inject constructor(
     private val app: AppRepository,
     private val photos: PhotoRepository,
     private val json: Json,
+    state: SavedStateHandle,
 ) : ViewModel() {
+    /**
+     * Set when this form is adding a rider who already exists to a SECOND
+     * company, rather than onboarding somebody new. The server then attaches
+     * the new rider_master row to that person instead of minting a fresh one,
+     * skips duplicate detection (attaching is the stated intent), and copies
+     * across any bank field left blank.
+     */
+    val attachTo: Long? = state.get<Long>("personId")?.takeIf { it > 0 }
     /** Taken with the camera or picked from the gallery; uploaded once the
      *  rider exists, because the photo hangs off their person id. */
     var photo by mutableStateOf<Uri?>(null)
     var company by mutableStateOf("")
-    var name by mutableStateOf("")
+    // Handed over by the caller in attach mode; they already had it on screen.
+    var name by mutableStateOf(state.get<String>("name").orEmpty())
     var riderId by mutableStateOf("")
     var hub by mutableStateOf("")
     var phone by mutableStateOf("")
     var aadhaar by mutableStateOf("")
     var pan by mutableStateOf("")
     var account by mutableStateOf("")
+    /** Left blank means the account is in the rider's own name. */
+    var accountName by mutableStateOf("")
     var ifsc by mutableStateOf("")
     var referrer by mutableStateOf<RiderEntity?>(null)
     var allowDuplicate by mutableStateOf(false)
@@ -163,9 +176,11 @@ class NewRiderViewModel @Inject constructor(
                         hub = hub.trim().ifBlank { null },
                         mobNo = phone.filter { it.isDigit() }.ifBlank { null },
                         accountNo = account.filter { it.isDigit() }.ifBlank { null },
+                        accountName = accountName.trim().ifBlank { null },
                         ifsc = ifsc.trim().uppercase().ifBlank { null },
                         aadhaarNo = aadhaar.filter { it.isDigit() }.ifBlank { null },
                         panNo = pan.trim().uppercase().ifBlank { null },
+                        personId = attachTo,
                         allowDuplicateName = allowDuplicate,
                         referredByPersonId = referrer?.personId,
                     ),
@@ -174,7 +189,8 @@ class NewRiderViewModel @Inject constructor(
                     runCatching { photos.uploadPhoto(out.personId, uri) }.isFailure
                 } ?: false
                 val note = buildString {
-                    append(out.name ?: name.trim()); append(" added")
+                    append(out.name ?: name.trim())
+                    if (attachTo != null) append(" added to $company") else append(" added")
                     if (out.riderId.startsWith("QSPEND")) append(" with a placeholder id")
                     out.referredBy?.let { append(" · referred by $it") }
                     if (photoFailed) append(" · photo did not upload, add it from their page")
@@ -215,13 +231,28 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.formWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
-                Text("New rider", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink, modifier = Modifier.weight(1f))
+                Text(
+                    if (vm.attachTo != null) "Another id" else "New rider",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Qwik.Ink,
+                    modifier = Modifier.weight(1f),
+                )
                 GhostAction("Cancel", onClick = onBack)
             }
             Rule()
             Column(Modifier.formWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 16.dp, bottom = 24.dp)) {
                 // A dropdown, not a chip row: nothing is pre-picked, so the
                 // company a rider is signed to is always somebody's decision.
+                if (vm.attachTo != null) {
+                    Text(
+                        "Giving ${vm.name} a second rider id. Their bank account, " +
+                            "phone and identity are already on file and stay as they are — " +
+                            "this only adds the new company's id.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Qwik.N700,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                }
                 Kicker("Company")
                 Spacer(Modifier.height(8.dp))
                 Dropdown(
@@ -235,10 +266,12 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 ErrorLine(err["company"])
                 Spacer(Modifier.height(14.dp))
 
-                PhotoTile(picked = vm.photo, size = 96.dp, onPicked = { vm.photo = it })
-                Spacer(Modifier.height(16.dp))
-                Field("Full name") { Input(vm.name, { vm.name = it }, placeholder = "Name as on the Aadhaar", cap = KeyboardCapitalization.Words) }
-                ErrorLine(err["name"])
+                if (vm.attachTo == null) {
+                    PhotoTile(picked = vm.photo, size = 96.dp, onPicked = { vm.photo = it })
+                    Spacer(Modifier.height(16.dp))
+                    Field("Full name") { Input(vm.name, { vm.name = it }, placeholder = "Name as on the Aadhaar", cap = KeyboardCapitalization.Words) }
+                    ErrorLine(err["name"])
+                }
                 Field("Rider id (the company's)") { Input(vm.riderId, { vm.riderId = it }, placeholder = "Leave blank for a placeholder id", cap = KeyboardCapitalization.Characters) }
                 ErrorLine(null)
                 Field("Hub / store") {
@@ -253,23 +286,35 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 Field("Phone") { Input(vm.phone, { vm.phone = it }, placeholder = "98765 43210", keyboard = KeyboardType.Phone) }
                 ErrorLine(err["phone"])
 
-                Spacer(Modifier.height(6.dp))
-                Kicker("Identity")
-                Spacer(Modifier.height(8.dp))
-                Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
-                ErrorLine(err["aadhaar"])
-                Field("PAN") { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
-                ErrorLine(err["pan"])
+                if (vm.attachTo == null) {
+                    Spacer(Modifier.height(6.dp))
+                    Kicker("Identity")
+                    Spacer(Modifier.height(8.dp))
+                    Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
+                    ErrorLine(err["aadhaar"])
+                    Field("PAN") { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
+                    ErrorLine(err["pan"])
+                }
 
                 Spacer(Modifier.height(6.dp))
                 Kicker("Bank account")
                 Spacer(Modifier.height(8.dp))
-                Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Digits only", keyboard = KeyboardType.Number) }
+                Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = if (vm.attachTo != null) "Already on file — leave blank" else "Digits only", keyboard = KeyboardType.Number) }
                 ErrorLine(err["account"])
-                Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "HDFC0000123", cap = KeyboardCapitalization.Characters) }
+                Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = if (vm.attachTo != null) "Already on file — leave blank" else "HDFC0000123", cap = KeyboardCapitalization.Characters) }
                 ErrorLine(err["ifsc"])
-                Text("Payouts stay blocked until an account is on file; it can be added later.", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+                // The account is often in a relative's name; the bank bounces a
+                // transfer whose beneficiary name does not match. Blank means
+                // the rider's own, which is the common case and stays unstored.
+                Field("Account holder") { Input(vm.accountName, { vm.accountName = it }, placeholder = "Same as the rider", cap = KeyboardCapitalization.Words) }
+                ErrorLine(null)
+                Text(
+                    if (vm.attachTo != null) "Left blank, all three are copied from their other id."
+                    else "Payouts stay blocked until an account is on file; it can be added later.",
+                    style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
+                )
 
+                if (vm.attachTo == null) {
                 Spacer(Modifier.height(20.dp))
                 Kicker("Referred by")
                 Spacer(Modifier.height(4.dp))
@@ -309,6 +354,7 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                         Hairline()
                     }
                 }
+                } // end: referrals are for a first onboarding, not a second id
 
                 if (vm.error != null) {
                     Spacer(Modifier.height(16.dp))
@@ -324,7 +370,16 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 }
             }
             Rule()
-            BarButton(if (vm.busy) "Adding…" else "Add rider", onClick = { vm.save(onSaved) }, enabled = !vm.busy, modifier = Modifier.formWidth())
+            BarButton(
+                when {
+                    vm.busy -> "Adding…"
+                    vm.attachTo != null -> "Add the id"
+                    else -> "Add rider"
+                },
+                onClick = { vm.save(onSaved) },
+                enabled = !vm.busy,
+                modifier = Modifier.formWidth(),
+            )
         }
     }
 }

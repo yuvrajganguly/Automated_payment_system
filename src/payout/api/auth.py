@@ -110,7 +110,8 @@ def _load_user(email: str) -> dict | None:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, role, is_active, phone, zone FROM users WHERE email=?", (email,)
+            "SELECT email, role, is_active, phone, zone, is_head FROM users WHERE email=?",
+            (email,),
         ).fetchone()
     if not row:
         return None
@@ -120,6 +121,7 @@ def _load_user(email: str) -> dict | None:
         "is_active": bool(row["is_active"]),
         "phone": row["phone"],
         "zone": row["zone"],
+        "is_head": bool(row["is_head"]),
     }
 
 
@@ -153,6 +155,10 @@ def get_current_user(
         "role": user["role"],
         "phone": user.get("phone"),
         "zone": user.get("zone"),
+        # A head recruiter supervises their own zone. Deliberately NOT part of
+        # ROLE_RANK: they are a recruiter everywhere a permission is checked,
+        # including the money fence.
+        "is_head": bool(user.get("is_head")),
     }
 
 
@@ -181,6 +187,45 @@ def require_recruiter(user: dict = Depends(get_current_user)) -> dict:
             status_code=status.HTTP_403_FORBIDDEN, detail="Recruiter access required"
         )
     return user
+
+
+def heads_zone(user: dict) -> str | None:
+    """The zone this caller supervises, lowercased, or None.
+
+    A head recruiter with no zone supervises nothing — the flag is meaningless
+    without a patch, and answering "everybody" would quietly hand a recruiter
+    the whole company.
+    """
+    if not user.get("is_head"):
+        return None
+    if user.get("role") not in ("recruiter", "admin", "creator"):
+        return None
+    return ((user.get("zone") or "").strip().lower()) or None
+
+
+def supervises(user: dict, target: dict | None) -> bool:
+    """May this caller look at ``target``'s work?
+
+    True for themselves, for an admin or creator looking at anyone, and for a
+    head recruiter looking at a recruiter in their own zone. Everything that
+    used to be admin-only supervision is widened by exactly this much.
+
+    ``target`` is a users row (or dict) with ``email``, ``role`` and ``zone``.
+    """
+    if user.get("role") in ("admin", "creator"):
+        return True
+    if target is None:
+        return False
+    if (user.get("email") or "").lower() == (target.get("email") or "").lower():
+        return True
+    zone = heads_zone(user)
+    if zone is None:
+        return False
+    # Field staff in their patch — not another head's account, and not
+    # upwards. Two heads in one zone must not read each other.
+    if target.get("is_head"):
+        return False
+    return target.get("role") == "recruiter" and (target.get("zone") or "").lower() == zone
 
 
 def no_recruiter(user: dict = Depends(get_current_user)) -> dict:

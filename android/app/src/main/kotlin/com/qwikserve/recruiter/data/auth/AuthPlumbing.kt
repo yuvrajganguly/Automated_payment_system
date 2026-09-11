@@ -38,6 +38,7 @@ class TokenAuthenticator(
     private val store: TokenStore,
     private val json: Json,
     private val baseUrl: String,
+    private val caches: LocalCaches,
 ) : Authenticator {
     private val bare = OkHttpClient()
 
@@ -69,6 +70,9 @@ class TokenAuthenticator(
                             json.decodeFromString(ApiError.serializer(), text).detail
                         }.getOrNull()
                         store.clear()
+                        // The session is over, so the last user's cached
+                        // pictures and roster must go with it.
+                        caches.wipe()
                     }
                     return null
                 }

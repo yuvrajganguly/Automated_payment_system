@@ -50,6 +50,7 @@ import com.qwikserve.recruiter.ui.profile.ProfileScreen
 import com.qwikserve.recruiter.ui.requests.RequestsScreen
 import com.qwikserve.recruiter.ui.riders.RidersScreen
 import com.qwikserve.recruiter.ui.stats.StatsScreen
+import com.qwikserve.recruiter.ui.stats.ZoneScreen
 import com.qwikserve.recruiter.ui.theme.Qwik
 import com.qwikserve.recruiter.ui.today.TodayScreen
 
@@ -62,9 +63,16 @@ import com.qwikserve.recruiter.ui.today.TodayScreen
  * tapping your own face in the top right corner, which is where every app on
  * the phone keeps your account, and the five that remain fit without scrolling.
  */
-enum class Tab(val label: String, val inStrip: Boolean = true) {
+enum class Tab(
+    val label: String,
+    val inStrip: Boolean = true,
+    /** Only drawn for a head recruiter. The route behind it 403s for anyone
+     *  else, so offering the tab would be offering a dead end. */
+    val headOnly: Boolean = false,
+) {
     TODAY("Today"), RIDERS("Riders"), EVS("EVs"), REQUESTS("Requests"),
-    STATS("My numbers"), PROFILE("Profile", inStrip = false),
+    STATS("My numbers"), ZONE("My zone", headOnly = true),
+    PROFILE("Profile", inStrip = false),
 }
 
 /**
@@ -78,6 +86,7 @@ enum class Tab(val label: String, val inStrip: Boolean = true) {
 fun HomeScreen(
     onOpenPerson: (Long) -> Unit,
     onNewRider: () -> Unit,
+    onAddCompany: (Long, String) -> Unit,
     onSignOut: () -> Unit,
     vm: HomeViewModel = hiltViewModel(),
 ) {
@@ -89,6 +98,11 @@ fun HomeScreen(
     // a name gives you "YUVRAJ.GANGULY.DS26" across the top of every screen.
     val myName = boot?.me?.name?.takeIf { it.isNotBlank() }
         ?: boot?.me?.email?.substringBefore('@')
+    // Not shown anywhere — it only keys the avatar's cache, per account.
+    val myEmail = boot?.me?.email
+    // Head recruiter for their zone: draws the supervision tab. A flag, not a
+    // role — boot.me.role is still "recruiter".
+    val isHead = boot?.me?.isHead == true
     val who = listOfNotNull(myName, boot?.me?.zone?.let { "$it zone" })
         .joinToString(" · ").uppercase()
 
@@ -111,6 +125,7 @@ fun HomeScreen(
             Tab.EVS -> EvsScreen(onOpenPerson = open)
             Tab.REQUESTS -> RequestsScreen(onOpenPerson = open)
             Tab.STATS -> StatsScreen(onOpenPerson = open)
+            Tab.ZONE -> ZoneScreen()
             Tab.PROFILE -> ProfileScreen(onSignOut = onSignOut)
         }
     }
@@ -125,6 +140,8 @@ fun HomeScreen(
                 Rail(
                     who = who,
                     name = myName,
+                    email = myEmail,
+                    isHead = isHead,
                     selected = tab,
                     onSelect = { tab = it },
                     onNewRider = onNewRider,
@@ -137,7 +154,7 @@ fun HomeScreen(
                 if (splitPane) {
                     VDivider()
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        DetailPane(picked, onClose = { picked = null }, onNewRider = onNewRider)
+                        DetailPane(picked, onClose = { picked = null }, onNewRider = onNewRider, onAddCompany = onAddCompany)
                     }
                 }
             }
@@ -162,11 +179,12 @@ fun HomeScreen(
                     Spacer(Modifier.width(12.dp))
                     MeButton(
                         name = myName,
+                        email = myEmail,
                         selected = Tab.entries[tab] == Tab.PROFILE,
                         onClick = { tab = Tab.PROFILE.ordinal },
                     )
                 }
-                TabStrip(selected = tab, onSelect = { tab = it }, layout = layout)
+                TabStrip(selected = tab, onSelect = { tab = it }, layout = layout, isHead = isHead)
                 Box(Modifier.weight(1f)) {
                     PageBox(layout.contentMax) { body() }
                 }
@@ -187,13 +205,13 @@ fun HomeScreen(
  * is needed to explain it. It takes a red ring while you are on Profile.
  */
 @Composable
-private fun MeButton(name: String?, selected: Boolean, onClick: () -> Unit) {
+private fun MeButton(name: String?, email: String?, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clickable(onClick = onClick)
             .then(if (selected) Modifier.background(Qwik.Accent) else Modifier)
             .padding(if (selected) 3.dp else 0.dp),
     ) {
-        MeAvatar(name = name, size = 36.dp)
+        MeAvatar(name = name, email = email, size = 36.dp)
     }
 }
 
@@ -203,6 +221,8 @@ private fun MeButton(name: String?, selected: Boolean, onClick: () -> Unit) {
 private fun Rail(
     who: String,
     name: String?,
+    email: String?,
+    isHead: Boolean,
     selected: Int,
     onSelect: (Int) -> Unit,
     onNewRider: () -> Unit,
@@ -220,6 +240,7 @@ private fun Rail(
             ) {
                 MeButton(
                     name = name,
+                    email = email,
                     selected = Tab.entries[selected] == Tab.PROFILE,
                     onClick = { onSelect(Tab.PROFILE.ordinal) },
                 )
@@ -232,7 +253,7 @@ private fun Rail(
                 )
             }
         }
-        Tab.entries.filter { it.inStrip }.forEach { t ->
+        Tab.entries.filter { it.inStrip && (!it.headOnly || isHead) }.forEach { t ->
             val on = t.ordinal == selected
             Row(
                 Modifier.fillMaxWidth().clickable { onSelect(t.ordinal) }.padding(vertical = 11.dp),
@@ -257,7 +278,12 @@ private fun Rail(
 
 /** The right-hand pane: the rider you picked, or an invitation to pick one. */
 @Composable
-private fun DetailPane(personId: Long?, onClose: () -> Unit, onNewRider: () -> Unit) {
+private fun DetailPane(
+    personId: Long?,
+    onClose: () -> Unit,
+    onNewRider: () -> Unit,
+    onAddCompany: (Long, String) -> Unit,
+) {
     if (personId == null) {
         Column(
             Modifier.fillMaxSize().padding(40.dp),
@@ -275,12 +301,12 @@ private fun DetailPane(personId: Long?, onClose: () -> Unit, onNewRider: () -> U
             GhostAction("Onboard a new rider", onClick = onNewRider)
         }
     } else {
-        PersonScreen(personId = personId, onBack = onClose, embedded = true)
+        PersonScreen(personId = personId, onBack = onClose, embedded = true, onAddCompany = onAddCompany)
     }
 }
 
 @Composable
-private fun TabStrip(selected: Int, onSelect: (Int) -> Unit, layout: Layout) {
+private fun TabStrip(selected: Int, onSelect: (Int) -> Unit, layout: Layout, isHead: Boolean) {
     Column {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Row(
@@ -288,7 +314,7 @@ private fun TabStrip(selected: Int, onSelect: (Int) -> Unit, layout: Layout) {
                     .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp),
             ) {
-                Tab.entries.filter { it.inStrip }.forEach { t ->
+                Tab.entries.filter { it.inStrip && (!it.headOnly || isHead) }.forEach { t ->
                     val on = t.ordinal == selected
                     Column(
                         Modifier.clickable { onSelect(t.ordinal) }.padding(horizontal = 8.dp),

@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS rider_master (
     hub        TEXT,
     vehicle    TEXT,
     account_no TEXT,
+    -- Whose name the account is in. NULL means "the same as the rider" and
+    -- every read falls back to `name`, so a stored value always means the
+    -- account really is in somebody else's name (a wife, a father). See
+    -- migration 0031.
+    account_name TEXT,
     ifsc       TEXT,
     mob_no     TEXT,
     email      TEXT,
@@ -418,6 +423,11 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     INTEGER NOT NULL DEFAULT 1,
     phone         TEXT,                           -- E.164 (+91…); second login id
     zone          TEXT,                           -- North | South: the recruiter's patch (app to-do list)
+    -- Head recruiter for their zone: a flag, not a rank. They stay a
+    -- `recruiter` for every permission check in the codebase; what this adds
+    -- is sight of what the other recruiters in their zone have done. See
+    -- migration 0032.
+    is_head       INTEGER NOT NULL DEFAULT 0,
     display_name  TEXT,                           -- what the console shows instead of the email
     created_at    TEXT DEFAULT (datetime('now'))
 );

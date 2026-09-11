@@ -13,12 +13,12 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from payout.api.auth import get_current_user
+from payout.api.auth import get_current_user, heads_zone, supervises
 from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import ZONES, fenced_zone
 from payout.db import get_connection
 from payout.domain.activity import ACTIONS
-from payout.domain.naming import display_name_for
+from payout.domain.naming import display_name_for, name_from
 from payout.domain.worked import active_person_sql
 
 router = APIRouter()
@@ -84,6 +84,9 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
             "role": user["role"],
             "phone": user.get("phone"),
             "zone": user.get("zone"),
+            # Drives the head's supervision tab. The app must not draw a tab
+            # whose route would 403, so this is the flag it checks.
+            "is_head": bool(user.get("is_head")),
         },
         "companies": companies,
         "hubs": hubs,
@@ -131,22 +134,46 @@ def _recruiting_for(conn, email: str, today: date) -> dict:
     # `_wt.person_id = _wt.person_id` — always true — so the count silently
     # becomes "has anyone, anywhere, been paid recently".
     active = active_person_sql("rm.person_id")
+    # A recruiter recruits PEOPLE, not rider ids. The counts used to be one
+    # row of rider_master each, so a rider who also holds an id at a second
+    # company scored twice — and the app papered over it with a footnote
+    # ("N rider ids across M people"). Since the app grew a deliberate "add an
+    # id at another company" action (2026-09-10) that double count is
+    # something we cause, not something the data happens to contain, so the
+    # unit is the person and the footnote is gone.
+    #
+    # Everything is derived from one row per person: the day they were FIRST
+    # onboarded by this recruiter (a second id years later is not a new
+    # recruit), and whether ANY of their ids is working or on the roster.
+    per_person = (
+        "SELECT rm.person_id AS pid, "
+        "       MIN(substr(rm.created_at,1,10)) AS first_day, "
+        f"      MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS working, "  # noqa: S608 - literal
+        "       MAX(CASE WHEN rm.is_active=1 THEN 1 ELSE 0 END) AS on_roster "
+        "FROM rider_master rm WHERE rm.recruited_by=? GROUP BY rm.person_id"
+    )
     row = conn.execute(
         "SELECT COUNT(*) AS all_time, "
-        "  COUNT(DISTINCT rm.person_id) AS persons, "
-        f"  SUM(CASE WHEN {active} THEN 1 ELSE 0 END) AS active, "  # noqa: S608 - literal
-        "  SUM(CASE WHEN rm.is_active=1 THEN 1 ELSE 0 END) AS on_roster, "
-        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
-        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
-        "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
-        "FROM rider_master rm WHERE rm.recruited_by=?",
+        "  COUNT(*) AS persons, "
+        "  SUM(working) AS active, "
+        "  SUM(on_roster) AS on_roster, "
+        "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS today, "
+        "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS week, "
+        "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS month "
+        f"FROM ({per_person}) p",  # noqa: S608 - per_person is built from literals
+        # Order matters: the three date comparisons are in the SELECT list and
+        # bind before the subquery's recruited_by, which is further down the
+        # SQL string. Getting this backwards silently returns zeros.
         (starts["today"], starts["week"], starts["month"], email),
     ).fetchone()
     by_company = [
         {"company_name": r["company"], "riders": int(r["n"]), "active": int(r["a"] or 0)}
         for r in conn.execute(
-            "SELECT company, COUNT(*) AS n, "
-            "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS a "
+            # DISTINCT here too: two ids at the SAME company is unusual but
+            # legal (the placeholder id retired late, a company reissuing),
+            # and the per-company column has to add up to the total above.
+            "SELECT company, COUNT(DISTINCT person_id) AS n, "
+            "  COUNT(DISTINCT CASE WHEN is_active=1 THEN person_id END) AS a "
             "FROM rider_master WHERE recruited_by=? GROUP BY company ORDER BY n DESC, company",
             (email,),
         )
@@ -202,11 +229,120 @@ def my_recruiting(
     month / all time), split by company, with their latest onboardings."""
     target = (user["email"] or "").lower()
     if email and email.lower() != target:
-        if user["role"] not in ("admin", "creator"):
-            raise HTTPException(403, "Only admins can look at another recruiter's numbers")
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT email, role, zone, is_head FROM users WHERE email=?", (email.lower(),)
+            ).fetchone()
+        # An admin, or a head recruiter over somebody in their own zone.
+        if not supervises(user, dict(row) if row else None):
+            raise HTTPException(403, "You can only look at your own numbers")
         target = email.lower()
     with get_connection() as conn:
         return _recruiting_for(conn, target, date.today())
+
+
+@router.get("/zone-recruiting")
+def zone_recruiting(
+    zone: str | None = Query(None, description="admins may name a zone; a head cannot"),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """A head recruiter's view of their own zone: one row per recruiter in it.
+
+    The same numbers each recruiter sees on their own "My numbers" tab, side
+    by side, for the people the head is responsible for. Drilling into a row
+    is the existing ``/app/my-recruiting?email=`` — widened for heads at the
+    same time as this, so there is one implementation of those counts rather
+    than a second that can drift from it.
+
+    Deliberately not a money route. A head is a recruiter, so the money fence
+    applies to them exactly as it does to their team; what this adds is sight
+    of colleagues' work, nothing about balances.
+    """
+    asked = (zone or "").strip().lower() or None
+    if asked and asked.title() not in ZONES:
+        raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}")
+    mine = heads_zone(user)
+    if user["role"] in ("admin", "creator"):
+        # An admin supervises any zone they name, and their own if they have
+        # one. With neither there is no sensible default: "everybody" is the
+        # console's recruiter board, not this.
+        zone = asked or (user.get("zone") or "").strip().lower() or None
+        if zone is None:
+            raise HTTPException(400, "Name a zone")
+    else:
+        # A head is locked to their patch, exactly like every other zone-aware
+        # route. Either not a head, or a head nobody has given a zone to; both
+        # mean "you supervise nobody" and neither is worth distinguishing.
+        if mine is None:
+            raise HTTPException(403, "Not a head recruiter for any zone")
+        if asked and asked != mine:
+            raise HTTPException(403, "You can only see your own zone")
+        zone = mine
+    today = date.today()
+    starts = _period_starts(today)
+    active = active_person_sql("rm.person_id")
+    rows = []
+    with get_connection() as conn:
+        staff = conn.execute(
+            "SELECT u.email, u.display_name, u.is_active, p.full_name "
+            "FROM users u LEFT JOIN recruiter_profiles p ON p.email = u.email "
+            "WHERE u.role='recruiter' AND LOWER(COALESCE(u.zone,''))=? "
+            "ORDER BY u.email",
+            (zone,),
+        ).fetchall()
+        # One row per person, dated from their first id under that recruiter —
+        # the same unit as _recruiting_for, so a head's view of somebody can
+        # never disagree with that person's own screen.
+        per_person = (
+            "SELECT rm.person_id AS pid, "
+            "       MIN(substr(rm.created_at,1,10)) AS first_day, "
+            f"      MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS working, "
+            "       MAX(CASE WHEN rm.is_active=1 THEN 1 ELSE 0 END) AS on_roster "
+            "FROM rider_master rm WHERE rm.recruited_by=? GROUP BY rm.person_id"
+        )
+        for r in staff:
+            email = r["email"]
+            c = conn.execute(
+                "SELECT COUNT(*) AS all_time, SUM(working) AS active, "
+                "  SUM(on_roster) AS on_roster, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS today, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS week, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS month "
+                f"FROM ({per_person}) p",  # noqa: S608 - built from literals
+                (starts["today"], starts["week"], starts["month"], email),
+            ).fetchone()
+            evs = conn.execute(
+                "SELECT COUNT(*) AS deployed, "
+                "  COUNT(DISTINCT CASE WHEN returned_date IS NULL THEN person_id END) AS holding "
+                "FROM ev_assignments WHERE assigned_by=?",
+                (email,),
+            ).fetchone()
+            rows.append(
+                {
+                    "email": email,
+                    "name": name_from(r["full_name"], r["display_name"], email),
+                    "is_active": bool(r["is_active"]),
+                    "today": int(c["today"] or 0),
+                    "week": int(c["week"] or 0),
+                    "month": int(c["month"] or 0),
+                    "all_time": int(c["all_time"] or 0),
+                    "active": int(c["active"] or 0),
+                    "on_roster": int(c["on_roster"] or 0),
+                    "evs_deployed": int(evs["deployed"] or 0),
+                    "ev_holders": int(evs["holding"] or 0),
+                }
+            )
+    rows.sort(key=lambda x: (-x["month"], -x["all_time"], x["email"]))
+    return {
+        "zone": zone.title(),
+        "as_of": today.isoformat(),
+        "periods": starts,
+        "recruiters": rows,
+        "totals": {
+            k: sum(x[k] for x in rows)
+            for k in ("today", "week", "month", "all_time", "active", "on_roster", "ev_holders")
+        },
+    }
 
 
 @router.get("/recruiting")
@@ -231,13 +367,24 @@ def recruiting_board(user: dict = Depends(get_current_user)) -> dict:
                 "active": int(r["active"] or 0),
             }
             for r in conn.execute(
+                # People, not rider ids — the same unit as _recruiting_for and
+                # the console board. Collapse to one row per (recruiter,
+                # person) first, dated from that person's first id under them,
+                # then count the rows.
                 "SELECT recruited_by, COUNT(*) AS all_time, "
-                "  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active, "
-                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS today, "
-                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS week, "
-                "  SUM(CASE WHEN substr(created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month "
-                f"FROM rider_master WHERE {where} GROUP BY recruited_by "
+                "  SUM(on_roster) AS active, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS today, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS week, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS month "
+                "FROM ("
+                "  SELECT recruited_by, person_id, "
+                "         MIN(substr(created_at,1,10)) AS first_day, "
+                "         MAX(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS on_roster "
+                f"  FROM rider_master WHERE {where} GROUP BY recruited_by, person_id"
+                ") p GROUP BY recruited_by "
                 "ORDER BY month DESC, all_time DESC, recruited_by",
+                # The three dates are in the outer SELECT list, the WHERE
+                # params are in the subquery further down the string.
                 (starts["today"], starts["week"], starts["month"], *params),
             )
         ]
@@ -348,9 +495,8 @@ def todo(
     """What needs a visit, grouped by store (hub), for one zone.
 
     Fenced: field staff with a zone on their account get their own zone and
-    nothing else, whatever they ask for — see hubs.zone_scope. Unclassified
-    stores come along, because a store nobody has placed would otherwise be
-    invisible to every recruiter at once.
+    nothing else, whatever they ask for — not Misc, and not the stores nobody
+    has classified. See hubs.zone_scope for why those stopped riding along.
     """
     want = (zone or "").strip().lower()
     if not want:
@@ -358,11 +504,11 @@ def todo(
     if want not in ("all", "unassigned") and want.title() not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}, unassigned or all")
     fence = fenced_zone(user)
-    with_unzoned = False
-    if fence and want != "unassigned":
+    if fence:
+        # "unassigned" is not an escape hatch either — see hubs.zone_scope.
         if want not in ("all", fence):
             raise HTTPException(403, "You can only see your own zone")
-        want, with_unzoned = fence, True
+        want = fence
     with get_connection() as conn:
         items = _todo_rows(conn)
     stores: dict[str, dict] = {}
@@ -372,14 +518,7 @@ def todo(
         hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
-        # A fenced recruiter keeps the stores nobody has classified — see
-        # hubs.zone_scope. Without that, an unzoned store is invisible to the
-        # whole field at once, because every recruiter is fenced somewhere.
-        if (
-            want not in ("all", "unassigned")
-            and (hub_zone or "").lower() != want
-            and not (with_unzoned and not hub_zone)
-        ):
+        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
             continue
         store = stores.setdefault(
             it["hub"] or "Misc",

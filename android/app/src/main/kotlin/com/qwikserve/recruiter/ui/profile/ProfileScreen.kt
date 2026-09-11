@@ -359,7 +359,9 @@ fun ProfileScreen(
             trailing = {
                 PhotoTile(
                     picked = null,
-                    url = BuildConfig.API_BASE_URL + "recruiters/me/photo",
+                    // ?u= keys Coil's cache per account — see MeAvatar.
+                    url = BuildConfig.API_BASE_URL + "recruiters/me/photo" +
+                        "?u=" + (p?.email?.lowercase()?.hashCode() ?: 0),
                     name = p?.fullName,
                     version = vm.photoVersion,
                     size = 84.dp,

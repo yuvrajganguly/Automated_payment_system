@@ -236,28 +236,62 @@ def test_recruiting_numbers(db, client):
     s = client.get("/api/app/my-recruiting", headers=rec).json()
     assert s["email"] == "rec@t.test"
     c = s["counts"]
-    assert c["all_time"] == 3 and c["persons"] == 2 and c["ev_holders"] == 1
-    # "active" is the 12-day worked rule, not the roster switch: nobody here
-    # has ever been paid for a cycle, so nobody is active — while two rider
-    # ids are still on the roster. The two answer different questions and the
-    # tile in the app now asks the same one as the list behind it.
-    assert c["active"] == 0 and c["on_roster"] == 2
-    # Somebody else, at a paysheet company, paid today. It must not make this
-    # recruiter's riders active: active_person_sql correlates on person_id,
-    # and an unqualified column would bind to the subquery's own transactions
-    # row instead, turning the count into "has anyone anywhere been paid".
-    stranger = make_person(db, "Nobody Related")
+    # A recruiter recruits people, not rider ids (2026-09-10). Arjun holds two
+    # company ids and is ONE recruit; the count used to say 3 and carry a
+    # footnote in the app explaining itself away.
+    assert c["all_time"] == 2 and c["persons"] == 2 and c["ev_holders"] == 1
+    # No company has run a cycle in this fixture, so nobody is EXPECTED in a
+    # payout and nobody can be accused of missing one: under the 2026-09-11
+    # rule "we cannot tell" reads as working. Note the direction — the rule
+    # this replaced said 0 here, which meant a fresh database, or an office
+    # that had not run payouts for a fortnight, declared the whole roster
+    # idle. on_roster counts people: Arjun's two ids are one roster place, and
+    # Bikash was switched off above.
+    assert c["active"] == 2 and c["on_roster"] == 1
+
+    # Now run Kaptan and pay only Arjun's Kaptan id. Bikash becomes expectant
+    # at nothing (his only id is switched off) so he stays "cannot tell";
+    # Arjun is expectant at Kaptan and present, so he is working.
+    db.execute("UPDATE companies SET payment_model='payout_file' WHERE company_name='Kaptan'")
+    db.execute(
+        "INSERT INTO company_cycles (company, cycle_start, cycle_end, week_bucket) "
+        "VALUES ('Kaptan', date('now','-7 day'), date('now','-1 day'), '2026-W37')"
+    )
     db.execute(
         "INSERT INTO transactions "
-        "  (person_id, company, event_type, amount, balance_after, cycle_start, cycle_end) "
-        "VALUES (?, 'Shadowfax', 'PAYOUT', 100000, 100000, "
-        "        date('now','-6 day'), date('now'))",
-        (stranger,),
+        "  (person_id, rider_id, company, event_type, amount, balance_after, "
+        "   cycle_start, cycle_end) "
+        "VALUES (?, '31111', 'Kaptan', 'PAYOUT', 100000, 100000, "
+        "        date('now','-7 day'), date('now','-1 day'))",
+        (a["person_id"],),
     )
     db.commit()
+    assert client.get("/api/app/my-recruiting", headers=rec).json()["counts"]["active"] == 2
+
+    # Somebody else, at a paysheet company, paid in that same cycle. It must
+    # not make this recruiter's riders active: the rule correlates on
+    # person_id, and an unqualified column would bind to the subquery's own
+    # row instead, turning the count into "has anyone anywhere been paid".
+    stranger = make_person(db, "Nobody Related")
+    make_rider(db, stranger, "K-X", "Kaptan", "Nobody Related")
+    db.execute(
+        "INSERT INTO transactions "
+        "  (person_id, rider_id, company, event_type, amount, balance_after, "
+        "   cycle_start, cycle_end) "
+        "VALUES (?, 'K-X', 'Kaptan', 'PAYOUT', 100000, 100000, "
+        "        date('now','-7 day'), date('now','-1 day'))",
+        (stranger,),
+    )
+    # …and now take Arjun OUT of the picture: switch his Kaptan id off, leave
+    # his Shadowfax id on. Shadowfax is per_order (never reports), so he is
+    # back to "cannot tell" rather than idle.
+    db.commit()
     again = client.get("/api/app/my-recruiting", headers=rec).json()["counts"]
-    assert again["active"] == 0, "an unrelated person's payout made this recruiter's riders active"
-    assert c["today"] == 2 and c["week"] == 2 and c["month"] == 2
+    assert again["active"] == 2, "an unrelated person's payout must not move this count"
+    # Dated from the FIRST id a person got under this recruiter, so a second
+    # id years later cannot drag them into this week's cohort. Arjun counts
+    # today; Bikash's row was backdated to 2025.
+    assert c["today"] == 1 and c["week"] == 1 and c["month"] == 1
     assert [(x["company_name"], x["riders"]) for x in s["by_company"]] == [
         ("Shadowfax", 2),
         ("Kaptan", 1),
@@ -272,7 +306,7 @@ def test_recruiting_numbers(db, client):
     assert other["email"] == "rec2@t.test" and other["counts"]["all_time"] == 1
     board = client.get("/api/app/recruiting", headers=boss).json()["recruiters"]
     assert [(b["email"], b["all_time"], b["month"]) for b in board] == [
-        ("rec@t.test", 3, 2),
+        ("rec@t.test", 2, 1),
         ("rec2@t.test", 1, 1),
     ]
     board = client.get("/api/app/recruiting", headers=rec2).json()["recruiters"]
@@ -376,19 +410,24 @@ def test_todo_groups_store_visits_by_zone(db, client):
     assert me["zone"] == "North"
     t = client.get("/api/app/todo", headers=rec).json()
     assert t["zone"] == "North" and t["my_zone"] == "North"
-    # Their own zone, plus Howrah — which nobody has classified. An unzoned
-    # store belongs to everybody until it belongs to someone; fencing it off
-    # would hide it from every recruiter at once, since they are all fenced.
-    assert [s["hub"] for s in t["stores"]] == ["Salt Lake", "Howrah"]
+    # Their own zone and nothing else (2026-09-10). Howrah has no zone and no
+    # longer rides along: an unclassified store is now an admin's job to place
+    # from the company tab's stores panel, not something shown to every
+    # recruiter on the grounds that nobody had placed it.
+    assert [s["hub"] for s in t["stores"]] == ["Salt Lake"]
     # South is not theirs to look at, and asking is refused rather than
     # quietly answered — the chip is gone from the app, and the route agrees.
     assert client.get("/api/app/todo?zone=South", headers=rec).status_code == 403
     # "all" collapses to what they are allowed to see, it does not widen it.
     everything = client.get("/api/app/todo?zone=all", headers=rec).json()
     assert everything["zone"] == "North"
-    assert [s["hub"] for s in everything["stores"]] == ["Salt Lake", "Howrah"]
+    assert [s["hub"] for s in everything["stores"]] == ["Salt Lake"]
+    # "unassigned" is not a way round the fence: it would hand back exactly
+    # the bucket the fence excludes. It stays an admin tool for finding the
+    # stores that still need a zone.
+    assert client.get("/api/app/todo?zone=unassigned", headers=rec).status_code == 403
     assert [
-        s["hub"] for s in client.get("/api/app/todo?zone=unassigned", headers=rec).json()["stores"]
+        s["hub"] for s in client.get("/api/app/todo?zone=unassigned", headers=boss).json()["stores"]
     ] == ["Howrah"]
     assert client.get("/api/app/todo?zone=West", headers=rec).status_code == 400
     users = {u["email"]: u.get("zone") for u in client.get("/api/users", headers=boss).json()}

@@ -28,6 +28,9 @@ data class UserOut(
     val role: String,
     val phone: String? = null,
     val zone: String? = null,
+    /** Head recruiter for [zone]: supervises the field staff in it. A flag,
+     *  not a role — [role] stays "recruiter", and so does every permission. */
+    @SerialName("is_head") val isHead: Boolean = false,
     /** What to call them on screen. The bootstrap fills this in from their
      *  profile; endpoints that do not send it fall back to the email. */
     val name: String? = null,
@@ -80,6 +83,9 @@ data class RiderOut(
     val hub: String? = null,
     val vehicle: String? = null,
     @SerialName("account_no") val accountNo: String? = null,
+    /** Whose name the account is in. Null means the rider's own — show
+     *  [name] rather than "not set", and keep the field blank when editing. */
+    @SerialName("account_name") val accountName: String? = null,
     val ifsc: String? = null,
     @SerialName("mob_no") val mobNo: String? = null,
     @SerialName("is_active") val isActive: Boolean = true,
@@ -96,6 +102,43 @@ data class RiderOut(
 @Serializable
 data class CopiedFrom(val from: String, val fields: List<String> = emptyList())
 
+/* ── A head recruiter's view of their zone ── */
+
+@Serializable
+data class ZoneBoard(
+    val zone: String,
+    @SerialName("as_of") val asOf: String? = null,
+    val recruiters: List<ZoneRecruiter> = emptyList(),
+    val totals: ZoneTotals = ZoneTotals(),
+)
+
+@Serializable
+data class ZoneRecruiter(
+    val email: String,
+    val name: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    val today: Int = 0,
+    val week: Int = 0,
+    val month: Int = 0,
+    @SerialName("all_time") val allTime: Int = 0,
+    /** Still working, by the last-payout rule — people, not rider ids. */
+    val active: Int = 0,
+    @SerialName("on_roster") val onRoster: Int = 0,
+    @SerialName("evs_deployed") val evsDeployed: Int = 0,
+    @SerialName("ev_holders") val evHolders: Int = 0,
+)
+
+@Serializable
+data class ZoneTotals(
+    val today: Int = 0,
+    val week: Int = 0,
+    val month: Int = 0,
+    @SerialName("all_time") val allTime: Int = 0,
+    val active: Int = 0,
+    @SerialName("on_roster") val onRoster: Int = 0,
+    @SerialName("ev_holders") val evHolders: Int = 0,
+)
+
 /** Onboarding body for POST /riders. Blank strings are sent as null. */
 @Serializable
 data class RiderIn(
@@ -105,6 +148,9 @@ data class RiderIn(
     val hub: String? = null,
     @SerialName("mob_no") val mobNo: String? = null,
     @SerialName("account_no") val accountNo: String? = null,
+    /** Only when the account is in somebody else's name. Blank/null means
+     *  the rider's own, and the server stores NULL for it. */
+    @SerialName("account_name") val accountName: String? = null,
     val ifsc: String? = null,
     @SerialName("aadhaar_no") val aadhaarNo: String? = null,
     @SerialName("pan_no") val panNo: String? = null,

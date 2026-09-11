@@ -56,6 +56,9 @@ _QUERY = {
     "/api/providers/{provider}/reconciliation": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/providers/{provider}/reconciliation/export": "date_from=2026-08-10&date_to=2026-08-30",
     "/api/recruiters/{email}/shift/photo": "kind=start&day=2026-09-01",
+    # A head is locked to their own zone; an admin has to name one, because
+    # "every zone" is the console's recruiter board rather than this route.
+    "/api/app/zone-recruiting": "zone=North",
 }
 
 # GETs that legitimately answer something other than 200 with these params.

@@ -11,6 +11,7 @@ import com.qwikserve.recruiter.BuildConfig
 import com.qwikserve.recruiter.data.location.LocationHeaderInterceptor
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.AuthInterceptor
+import com.qwikserve.recruiter.data.auth.LocalCaches
 import com.qwikserve.recruiter.data.auth.TokenAuthenticator
 import com.qwikserve.recruiter.data.auth.TokenStore
 import com.qwikserve.recruiter.data.db.AppDatabase
@@ -36,8 +37,8 @@ object AppModule {
     }
 
     @Provides @Singleton
-    fun authenticator(store: TokenStore, json: Json): TokenAuthenticator =
-        TokenAuthenticator(store, json, BuildConfig.API_BASE_URL)
+    fun authenticator(store: TokenStore, json: Json, caches: LocalCaches): TokenAuthenticator =
+        TokenAuthenticator(store, json, BuildConfig.API_BASE_URL, caches)
 
     @Provides @Singleton
     fun okHttp(

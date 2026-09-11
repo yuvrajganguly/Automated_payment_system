@@ -32,6 +32,7 @@ import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.api.ShiftIn
 import com.qwikserve.recruiter.data.api.ShiftOut
+import com.qwikserve.recruiter.data.auth.TokenStore
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
@@ -68,7 +69,12 @@ class ShiftViewModel @Inject constructor(
     private val api: PayoutApi,
     private val photos: PhotoRepository,
     private val json: Json,
+    store: TokenStore,
 ) : ViewModel() {
+    /** Not displayed. It keys the dash photo's cache per account: the URL is
+     *  otherwise the same for two recruiters opening their shift on the same
+     *  day, and Coil caches by URL. See LocalCaches. */
+    val myEmail: String? = store.email
     var shift by mutableStateOf<ShiftOut?>(null)
         private set
     var loading by mutableStateOf(false)
@@ -281,6 +287,7 @@ fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel(
                     day = day,
                     kind = "start",
                     version = vm.photoVersion,
+                    email = vm.myEmail,
                     onPicked = { vm.pickPhoto("start", it) },
                 )
                 Spacer(Modifier.height(14.dp))
@@ -310,8 +317,8 @@ fun ShiftCard(modifier: Modifier = Modifier, vm: ShiftViewModel = hiltViewModel(
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ShiftPhoto("Start", day, "start", s.hasStartPhoto, vm.photoVersion) { vm.pickPhoto("start", it) }
-                    ShiftPhoto("End", day, "end", s.hasEndPhoto, vm.photoVersion) { vm.pickPhoto("end", it) }
+                    ShiftPhoto("Start", day, "start", s.hasStartPhoto, vm.photoVersion, vm.myEmail) { vm.pickPhoto("start", it) }
+                    ShiftPhoto("End", day, "end", s.hasEndPhoto, vm.photoVersion, vm.myEmail) { vm.pickPhoto("end", it) }
                 }
             }
         }
@@ -456,6 +463,7 @@ private fun Recorded(
     day: String,
     kind: String,
     version: Int,
+    email: String?,
     onPicked: (Uri) -> Unit,
 ) {
     Row(verticalAlignment = Alignment.Top) {
@@ -475,7 +483,7 @@ private fun Recorded(
         Spacer(Modifier.width(12.dp))
         PhotoTile(
             picked = null,
-            url = if (hasPhoto) shiftPhotoUrl(day, kind) else null,
+            url = if (hasPhoto) shiftPhotoUrl(day, kind, email) else null,
             size = 60.dp,
             version = version,
             label = "Dash",
@@ -491,6 +499,7 @@ private fun ShiftPhoto(
     kind: String,
     hasPhoto: Boolean,
     version: Int,
+    email: String?,
     onPicked: (Uri) -> Unit,
 ) {
     Column {
@@ -498,7 +507,7 @@ private fun ShiftPhoto(
         Spacer(Modifier.height(6.dp))
         PhotoTile(
             picked = null,
-            url = if (hasPhoto) shiftPhotoUrl(day, kind) else null,
+            url = if (hasPhoto) shiftPhotoUrl(day, kind, email) else null,
             size = 72.dp,
             version = version,
             label = "Dash photo",
@@ -507,8 +516,9 @@ private fun ShiftPhoto(
     }
 }
 
-private fun shiftPhotoUrl(day: String, kind: String): String =
-    BuildConfig.API_BASE_URL + "recruiters/me/shift/photo?kind=" + kind + "&day=" + day
+private fun shiftPhotoUrl(day: String, kind: String, email: String?): String =
+    BuildConfig.API_BASE_URL + "recruiters/me/shift/photo?kind=" + kind + "&day=" + day +
+        "&u=" + (email?.lowercase()?.hashCode() ?: 0)
 
 /**
  * The one line the odometer keeps on the Today tab.

@@ -84,12 +84,9 @@ def list_ev_requests(
     if status:
         where.append("status=?")
         params.append(status)
-    z, with_unzoned = zone_scope(user, zone)
+    z = zone_scope(user, zone)
     if z == "unassigned":
         where.append("zone IS NULL")
-    elif z and with_unzoned:
-        where.append("(zone=? OR zone IS NULL)")
-        params.append(z.title())
     elif z:
         where.append("zone=?")
         params.append(z.title())

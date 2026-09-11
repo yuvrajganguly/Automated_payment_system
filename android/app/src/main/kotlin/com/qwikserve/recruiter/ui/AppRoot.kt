@@ -1,5 +1,6 @@
 package com.qwikserve.recruiter.ui
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,7 +19,22 @@ import com.qwikserve.recruiter.ui.person.PersonScreen
 object Routes {
     const val LOGIN = "login"
     const val HOME = "home"
-    const val NEW_RIDER = "new-rider"
+
+    /**
+     * One screen, two jobs. With no arguments it onboards somebody new. With
+     * `personId` it adds an existing rider to a second company — the same
+     * form, but attached to a person who already has a ledger, so the server
+     * skips duplicate detection and copies their bank details across.
+     *
+     * The name rides along in the route rather than being fetched again: the
+     * caller already has it on screen, and a recruiter standing in a hub with
+     * one bar of signal should not need a round trip to fill in a form.
+     */
+    const val NEW_RIDER = "new-rider?personId={personId}&name={name}"
+
+    fun newRider(personId: Long? = null, name: String? = null) =
+        "new-rider?personId=${personId ?: -1L}&name=${Uri.encode(name ?: "")}"
+
     const val PERSON = "person/{personId}"
     fun person(id: Long) = "person/$id"
 }
@@ -48,14 +64,21 @@ fun AppRoot(vm: SessionViewModel = hiltViewModel()) {
         composable(Routes.HOME) {
             HomeScreen(
                 onOpenPerson = { id -> nav.navigate(Routes.person(id)) },
-                onNewRider = { nav.navigate(Routes.NEW_RIDER) },
+                onNewRider = { nav.navigate(Routes.newRider()) },
+                onAddCompany = { id, name -> nav.navigate(Routes.newRider(id, name)) },
                 onSignOut = {
                     vm.signOut()
                     nav.navigate(Routes.LOGIN) { popUpTo(0) { inclusive = true } }
                 },
             )
         }
-        composable(Routes.NEW_RIDER) {
+        composable(
+            Routes.NEW_RIDER,
+            arguments = listOf(
+                navArgument("personId") { type = NavType.LongType; defaultValue = -1L },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) {
             NewRiderScreen(
                 onBack = { nav.popBackStack() },
                 onSaved = { id, _ ->
@@ -70,6 +93,9 @@ fun AppRoot(vm: SessionViewModel = hiltViewModel()) {
             PersonScreen(
                 personId = back.arguments?.getLong("personId") ?: 0L,
                 onBack = { nav.popBackStack() },
+                onAddCompany = { id, name ->
+                    nav.navigate(Routes.newRider(personId = id, name = name))
+                },
             )
         }
     }

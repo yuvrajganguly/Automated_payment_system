@@ -178,6 +178,11 @@ interface PayoutApi {
 
     /** all | working | idle | holding. The first three are one row per rider
      *  id; `holding` is one row per person, to match the EV holder count. */
+    /** A head recruiter's zone: one row per recruiter in it. 403 for anyone
+     *  who is not a head, so the app only calls it when me.isHead. */
+    @GET("app/zone-recruiting")
+    suspend fun zoneRecruiting(): ZoneBoard
+
     @GET("recruiters/me/riders")
     suspend fun myRiders(
         @Query("status") status: String? = null,

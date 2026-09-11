@@ -143,6 +143,10 @@ class RiderIn(BaseModel):
     hub: str | None = None
     vehicle: str | None = None
     account_no: str | None = None
+    # Whose name the account is in. Leave blank when it is the rider's own —
+    # blank is stored as NULL and every read falls back to `name`, so a value
+    # here always means the account is in somebody else's name.
+    account_name: str | None = None
     ifsc: str | None = None
     mob_no: str | None = None
     # Attach this new rider_master row to an existing person, instead of
@@ -176,6 +180,8 @@ class RiderOut(BaseModel):
     hub: str | None = None
     vehicle: str | None = None
     account_no: str | None = None
+    # NULL when the account is in the rider's own name; clients show `name`.
+    account_name: str | None = None
     ifsc: str | None = None
     mob_no: str | None = None
     is_active: bool = True
@@ -203,6 +209,8 @@ class RiderPatch(BaseModel):
     hub: str | None = None
     vehicle: str | None = None
     account_no: str | None = None
+    # Send "" to clear it back to "the same as the rider".
+    account_name: str | None = None
     ifsc: str | None = None
     mob_no: str | None = None
     is_active: bool | None = None

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.qwikserve.recruiter.data.api.LogoutIn
 import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.auth.LocalCaches
 import com.qwikserve.recruiter.data.auth.Session
 import com.qwikserve.recruiter.data.auth.TokenAuthenticator
 import com.qwikserve.recruiter.data.auth.TokenStore
@@ -20,6 +21,7 @@ class SessionViewModel @Inject constructor(
     private val store: TokenStore,
     private val api: PayoutApi,
     private val authenticator: TokenAuthenticator,
+    private val caches: LocalCaches,
 ) : ViewModel() {
     val session: StateFlow<Session?> = store.session
 
@@ -37,6 +39,7 @@ class SessionViewModel @Inject constructor(
     fun signOut() {
         val refresh = store.refreshToken
         store.clear()
+        caches.wipe()
         viewModelScope.launch { runCatching { api.logout(LogoutIn(refresh)) } }
     }
 }

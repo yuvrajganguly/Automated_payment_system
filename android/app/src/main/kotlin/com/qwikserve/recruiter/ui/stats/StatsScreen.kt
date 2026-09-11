@@ -235,6 +235,9 @@ fun StatsScreen(onOpenPerson: (Long) -> Unit, vm: StatsViewModel = hiltViewModel
                 }
                 Rule()
                 Row(Modifier.fillMaxWidth()) {
+                    // People, not rider ids. Somebody with an id at two
+                    // companies is one recruit — this tile used to say 3 where
+                    // it meant 2, with a footnote underneath explaining that.
                     NumberTile(
                         (c?.allTime ?: 0).toString(), "All time", Modifier.weight(1f),
                         onClick = { vm.openDrill(Period.ALL) },
@@ -258,13 +261,6 @@ fun StatsScreen(onOpenPerson: (Long) -> Unit, vm: StatsViewModel = hiltViewModel
                     style = MaterialTheme.typography.bodySmall, color = Qwik.N600,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
-                if ((c?.persons ?: 0) != (c?.allTime ?: 0) && c != null) {
-                    Text(
-                        "${c.allTime} rider ids across ${c.persons} people — a person with two company ids counts twice.",
-                        style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
-                        modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 10.dp),
-                    )
-                }
             }
 
             /* ── week by week / month by month ── */

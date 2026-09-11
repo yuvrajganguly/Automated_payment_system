@@ -902,6 +902,42 @@ def _0030_adhoc_runs(conn: Any) -> None:
     )
 
 
+def _0031_rider_account_name(conn: Any) -> None:
+    """Whose name the bank account is in.
+
+    Riders are often paid into an account belonging to a wife, a father, a
+    brother — the money still has to reach them, and a payout file that
+    disagrees with the beneficiary name gets bounced by the bank. Until now
+    the only name on a ``rider_master`` row was the rider's own.
+
+    Left NULL, it means "the same as the rider", and every read falls back to
+    ``name``. That way correcting a rider's spelling corrects the holder name
+    with it, and a stored value always means somebody deliberately said the
+    account is in a different name. Nothing is backfilled: a copy of every
+    rider's own name would destroy exactly that distinction.
+
+    ``recruiter_profiles.account_name`` (migration 0025) is the same field for
+    staff; this is the rider side of it.
+    """
+    add_column(conn, "rider_master", "account_name", "TEXT")
+
+
+def _0032_head_recruiter(conn: Any) -> None:
+    """Head recruiter for a zone.
+
+    A flag rather than a rung on the ladder. ``ROLE_RANK`` is load-bearing in
+    the money fence (``no_recruiter``) and in who-may-act-on-whom
+    (``require_admin_over``); inserting a role between recruiter and admin
+    would mean re-reasoning every guard in the codebase, and a mistake there
+    is a privilege bug rather than a cosmetic one. As a flag it composes: a
+    head is still a ``recruiter`` everywhere, still cannot see money, and the
+    zone fence they already obey becomes the scope of what they supervise.
+
+    Nobody is a head until somebody says so, hence DEFAULT 0.
+    """
+    add_column(conn, "users", "is_head", "INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -936,6 +972,8 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0028_ev_closeout_reports", _0028_ev_closeout_reports),
     ("0029_handover_date_required", _0029_handover_date_required),
     ("0030_adhoc_runs", _0030_adhoc_runs),
+    ("0031_rider_account_name", _0031_rider_account_name),
+    ("0032_head_recruiter", _0032_head_recruiter),
 ]
 
 _TRACKING_DDL = (

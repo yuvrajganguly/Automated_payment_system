@@ -171,21 +171,14 @@ def list_ev_units(
             "LEFT JOIN person_registry p ON p.person_id = a.person_id "
             "ORDER BY u.ev_id"
         ).fetchall()
-    z, with_unzoned = zone_scope(user, zone)
-    z = z or ""
+    z = zone_scope(user, zone) or ""
     out: list[EvUnitOut] = []
     for r in rows:
         if status and r["status"] != status:
             continue
         if z == "unassigned" and (r["person_id"] is None or r["zone"]):
             continue
-        # A fenced recruiter keeps the unzoned ones (see hubs.zone_scope).
-        if (
-            z
-            and z != "unassigned"
-            and (r["zone"] or "").lower() != z
-            and not (with_unzoned and not r["zone"])
-        ):
+        if z and z != "unassigned" and (r["zone"] or "").lower() != z:
             continue
         if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue

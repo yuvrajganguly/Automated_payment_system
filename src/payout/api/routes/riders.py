@@ -126,6 +126,7 @@ def _insert_rider_into_db(
     person_id=None,
     mob_no=None,
     recruited_by=None,
+    account_name=None,
 ):
     """Shared write path used by both POST and bulk import.
     Returns (created: bool, rider_id: str, person_id: int).
@@ -180,7 +181,8 @@ def _insert_rider_into_db(
     veh = (vehicle or "").strip().upper() or "BIKE"
     conn.execute(
         "INSERT INTO rider_master (rider_id, company, person_id, name, hub, vehicle, "
-        "account_no, ifsc, mob_no, recruited_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "account_no, ifsc, mob_no, recruited_by, account_name) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (
             rider_id,
             company,
@@ -192,6 +194,10 @@ def _insert_rider_into_db(
             ifsc,
             (mob_no or "").strip() or None,
             recruited_by,
+            # Blank means "the rider's own name". Storing the rider's name
+            # here instead would lose that, and go stale the first time a
+            # spelling is corrected.
+            (account_name or "").strip() or None,
         ),
     )
     # A real id tagged to a person who was carrying a system placeholder at
@@ -308,7 +314,7 @@ def export_riders(
         rows = conn.execute(
             f"SELECT rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
+            f"       rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -402,18 +408,10 @@ def list_riders(
     elif recruited_by:
         where.append("rm.recruited_by=?")
         params.append(recruited_by.strip().lower())
-    z, with_unzoned = zone_scope(user, zone)
+    z = zone_scope(user, zone)
     if z:
         if z == "unassigned":
             where.append("COALESCE(hz.zone, ru.zone) IS NULL")
-        elif with_unzoned:
-            # A fenced recruiter also sees stores nobody has classified —
-            # see zone_scope. Without this an unzoned store is invisible to
-            # the whole field at once.
-            where.append(
-                "(LOWER(COALESCE(hz.zone, ru.zone))=? OR COALESCE(hz.zone, ru.zone) IS NULL)"
-            )
-            params.append(z)
         else:
             where.append("LOWER(COALESCE(hz.zone, ru.zone))=?")
             params.append(z)
@@ -437,7 +435,7 @@ def list_riders(
         rows = conn.execute(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
+            f"       rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
             f"       rm.recruited_by, COALESCE(hz.zone, ru.zone) AS zone, "
             f"       ({_ACTIVE}) AS working, {_LAST_WORKED} AS last_worked_on "
             f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
@@ -469,6 +467,10 @@ def update_rider(
         fields["vehicle"] = body.vehicle.strip().upper() or None
     if body.account_no is not None:
         fields["account_no"] = body.account_no.strip() or None
+    if body.account_name is not None:
+        # Sending "" clears it back to "same as the rider", which is the only
+        # way to undo a holder name that was set by mistake.
+        fields["account_name"] = body.account_name.strip() or None
     if body.ifsc is not None:
         fields["ifsc"] = body.ifsc.strip().upper() or None
     if body.mob_no is not None:
@@ -679,7 +681,8 @@ def get_rider(
 ) -> RiderOut:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, is_active "
+            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, account_name, "
+            "ifsc, is_active "
             "FROM rider_master WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()
@@ -745,10 +748,12 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         # phone are the person's, not the company's — copy whatever was left
         # blank from their latest rider row and say so in the response.
         account_no, ifsc, mob_no = body.account_no, body.ifsc, body.mob_no
+        account_name = body.account_name
         copied_from: dict | None = None
         if body.person_id is not None:
             src = conn.execute(
-                "SELECT rider_id, company, account_no, ifsc, mob_no FROM rider_master "
+                "SELECT rider_id, company, account_no, account_name, ifsc, mob_no "
+                "FROM rider_master "
                 "WHERE person_id=? ORDER BY is_active DESC, created_at DESC, rider_id DESC LIMIT 1",
                 (body.person_id,),
             ).fetchone()
@@ -760,6 +765,12 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                     ifsc, fields = src["ifsc"], [*fields, "ifsc"]
                 if not (mob_no or "").strip() and src["mob_no"]:
                     mob_no, fields = src["mob_no"], [*fields, "mob_no"]
+                # The account is the person's, so whose name it is in travels
+                # with it. Only when it was actually set on the other row: a
+                # NULL there means "the rider's own name", which is already
+                # what a NULL here means.
+                if not (account_name or "").strip() and src["account_name"]:
+                    account_name, fields = src["account_name"], [*fields, "account_name"]
                 if fields:
                     copied_from = {"from": f"{src['rider_id']}@{src['company']}", "fields": fields}
         _, rider_id, person_id = _insert_rider_into_db(
@@ -774,6 +785,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
             mob_no=mob_no,
             person_id=body.person_id,
             recruited_by=user.get("email"),
+            account_name=account_name,
         )
         if aadhaar or pan:
             conn.execute(
@@ -821,6 +833,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         hub=body.hub,
         vehicle=body.vehicle,
         account_no=account_no,
+        account_name=account_name,
         ifsc=ifsc,
         mob_no=mob_no,
         copied_from=copied_from,

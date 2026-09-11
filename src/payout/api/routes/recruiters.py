@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from payout.api.auth import get_current_user, require_admin
+from payout.api.auth import get_current_user, require_admin, supervises
 from payout.api.ratelimit import rate_limit
 from payout.api.routes.users import visible_role
 from payout.db import get_connection
@@ -115,15 +115,26 @@ def _resolve(user: dict, email: str | None) -> str:
     """Whose record is being asked for.
 
     ``me`` is an alias for the caller, so the app can use one URL shape for
-    both "my numbers" and an admin looking at somebody. Anyone may address
-    themselves; only an admin may name someone else.
+    both "my numbers" and somebody looking at a colleague. Anyone may address
+    themselves; naming someone else needs an admin, or a head recruiter whose
+    zone the target works in (2026-09-11).
+
+    This is the single gate for every ``/recruiters/{email}/...`` read —
+    profile, riders, EVs, shifts, the series behind the chart — so widening it
+    here is what gives a head their supervision tab. It is also why getting it
+    wrong here would widen all of them at once.
     """
     me = (user["email"] or "").lower()
     if not email or email.lower() in ("me", me):
         return me
-    if user["role"] not in ("admin", "creator"):
-        raise HTTPException(403, "Only admins can look at another recruiter's record")
-    return email.lower()
+    target = email.lower()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT email, role, zone, is_head FROM users WHERE email=?", (target,)
+        ).fetchone()
+    if not supervises(user, dict(row) if row else None):
+        raise HTTPException(403, "You can only look at your own record")
+    return target
 
 
 # ───────────────────────────── profile ──────────────────────────────────────
@@ -663,12 +674,24 @@ def recruiter_board(
             "WHERE u.role = 'recruiter' ORDER BY u.email"
         ):
             email = r["email"]
+            # One row per PERSON, not per rider id — see the same change in
+            # app._recruiting_for. A rider with ids at two companies is one
+            # recruit, dated from the first of them, and counts once in the
+            # retention denominator.
+            per_person = (
+                "SELECT rm.person_id AS pid, "
+                "       MIN(substr(rm.created_at,1,10)) AS first_day, "
+                f"      MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS working "
+                "FROM rider_master rm WHERE rm.recruited_by=? GROUP BY rm.person_id"
+            )
             counts = conn.execute(
                 "SELECT COUNT(*) AS all_time, "
-                "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS recent, "
-                "  SUM(CASE WHEN substr(rm.created_at,1,10) >= ? THEN 1 ELSE 0 END) AS month, "
-                f"  SUM(CASE WHEN {active} THEN 1 ELSE 0 END) AS still_working "
-                "FROM rider_master rm WHERE rm.recruited_by=?",
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS recent, "
+                "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS month, "
+                "  SUM(working) AS still_working "
+                f"FROM ({per_person}) p",  # noqa: S608 - built from literals
+                # The two date comparisons bind before the subquery's email —
+                # they appear earlier in the SQL string.
                 (since, month_start, email),
             ).fetchone()
             evs = conn.execute(
@@ -734,11 +757,15 @@ def recruiter_series(
     evs: dict[str, int] = {}
 
     with get_connection() as conn:
+        # Bucketed by the day a PERSON was first onboarded by this recruiter,
+        # so somebody who later picks up a second company id does not appear
+        # in two buckets and inflate two cohorts at once.
         for r in conn.execute(
-            "SELECT substr(rm.created_at,1,10) AS d, "
-            f"       ({active}) AS w "  # noqa: S608 - active is built from literals
+            "SELECT MIN(substr(rm.created_at,1,10)) AS d, "
+            f"       MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS w "  # noqa: S608 - literals
             "FROM rider_master rm "
-            "WHERE rm.recruited_by=? AND rm.created_at IS NOT NULL",
+            "WHERE rm.recruited_by=? AND rm.created_at IS NOT NULL "
+            "GROUP BY rm.person_id",
             (email,),
         ):
             b = _bucket_of(r["d"], grain)

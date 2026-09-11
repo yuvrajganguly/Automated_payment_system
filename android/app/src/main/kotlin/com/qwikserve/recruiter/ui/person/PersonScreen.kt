@@ -180,6 +180,10 @@ fun PersonScreen(
     personId: Long,
     onBack: () -> Unit,
     embedded: Boolean = false,
+    /** Opens the onboarding form attached to this person, to give them a
+     *  rider id at a second company. Null where there is nowhere to navigate
+     *  to, and then the action is simply not offered. */
+    onAddCompany: ((Long, String) -> Unit)? = null,
     vm: PersonViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(personId) { vm.show(personId) }
@@ -296,7 +300,7 @@ fun PersonScreen(
                 }
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
-                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy) }
+                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName) }
                     ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy) }
                 if (rows.isEmpty()) Skeleton(220.dp)
                 rows.forEach { r ->
@@ -313,12 +317,33 @@ fun PersonScreen(
                             r.account?.let { "A/c $it" + (r.ifsc?.let { i -> " · $i" } ?: "") } ?: "no account on file",
                         ).joinToString(" · ")
                         Text(detail, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700, modifier = Modifier.padding(top = 3.dp))
+                        // Only worth a line when it is somebody else's account —
+                        // a null here means the rider's own name, which the
+                        // heading already says.
+                        r.holder?.takeIf { it.isNotBlank() }?.let {
+                            Text("In the name of $it", style = MaterialTheme.typography.bodySmall, color = Qwik.Accent700)
+                        }
                         r.recruitedBy?.let {
                             Text("Onboarded by " + it.substringBefore('@'), style = MaterialTheme.typography.bodySmall, color = Qwik.N600)
                         }
                     }
                 }
                 Hairline()
+                // The backend has always accepted this (POST /riders with a
+                // person_id); until now nothing in the app asked for it, so
+                // the only route to a second company was an admin merge.
+                if (onAddCompany != null) {
+                    Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        GhostAction(
+                            "Add an id at another company",
+                            // `name` (above) already prefers the person's
+                            // display name and falls back to the cache, so
+                            // this works offline on a page opened from the list.
+                            onClick = { name?.let { onAddCompany(personId, it) } },
+                        )
+                    }
+                    Hairline()
+                }
 
                 val phone = rows.firstNotNullOfOrNull { it.phone }
                 if (phone != null) {
@@ -454,4 +479,6 @@ private fun Standing(label: String, value: String, modifier: Modifier = Modifier
 private data class RiderLine(
     val riderId: String, val company: String, val hub: String?, val phone: String?,
     val account: String?, val ifsc: String?, val active: Boolean, val recruitedBy: String?,
+    /** Whose name the account is in, only when it is not the rider's own. */
+    val holder: String? = null,
 )

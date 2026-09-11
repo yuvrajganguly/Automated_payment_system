@@ -37,6 +37,9 @@ class UserOut(BaseModel):
     is_active: bool
     phone: str | None = None
     zone: str | None = None  # North | South — the recruiter's patch
+    # Head recruiter for that zone: supervises the field staff in it. A flag,
+    # not a rank — they stay a recruiter for every permission check.
+    is_head: bool = False
     created_at: str | None = None
 
 
@@ -93,7 +96,8 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
     anyone who is not one."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT email, role, is_active, phone, zone, created_at FROM users ORDER BY email"
+            "SELECT email, role, is_active, phone, zone, is_head, created_at "
+            "FROM users ORDER BY email"
         ).fetchall()
     return [
         UserOut(
@@ -102,6 +106,7 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
             is_active=bool(r["is_active"]),
             phone=r["phone"],
             zone=r["zone"],
+            is_head=bool(r["is_head"]),
             created_at=r["created_at"],
         )
         for r in rows
@@ -177,6 +182,40 @@ def set_zone(email: str, body: ZoneIn, user: dict = Depends(require_admin)) -> d
         conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
         conn.commit()
     return {"email": target, "zone": zone}
+
+
+class HeadIn(BaseModel):
+    is_head: bool
+
+
+@router.patch("/{email}/head")
+def set_head(email: str, body: HeadIn, user: dict = Depends(require_admin)) -> dict:
+    """Make a recruiter the head of their zone, or stand them down.
+
+    Only a recruiter can hold it: on an admin it would mean nothing (they see
+    everything already) and on a plain user it would be a way to hand out
+    roster sight without the role that comes with it. A head with no zone
+    supervises nobody, so this refuses one rather than leaving a flag that
+    silently does nothing — set the zone first.
+
+    Rank-guarded like every other write here: this grants sight of colleagues'
+    work, which is not something an admin should be able to hand to an account
+    at or above their own rank.
+    """
+    target = email.strip().lower()
+    with get_connection() as conn:
+        row = conn.execute("SELECT role, zone FROM users WHERE email=?", (target,)).fetchone()
+        if not row:
+            raise HTTPException(404, "User not found")
+        require_admin_over(user, row["role"])
+        if body.is_head:
+            if row["role"] != "recruiter":
+                raise HTTPException(400, "Only a recruiter can be the head of a zone")
+            if not (row["zone"] or "").strip():
+                raise HTTPException(400, "Give them a zone first — a head with no zone sees nobody")
+        conn.execute("UPDATE users SET is_head=? WHERE email=?", (1 if body.is_head else 0, target))
+        conn.commit()
+    return {"email": target, "is_head": body.is_head, "zone": row["zone"]}
 
 
 @router.patch("/{email}/role")
