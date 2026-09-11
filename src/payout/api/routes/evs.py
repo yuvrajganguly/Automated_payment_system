@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.ratelimit import rate_limit
-from payout.api.routes.hubs import sees_unassigned_pool, zone_scope
+from payout.api.routes.hubs import zone_scope
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -172,18 +172,13 @@ def list_ev_units(
             "ORDER BY u.ev_id"
         ).fetchall()
     z = zone_scope(user, zone) or ""
-    pool = sees_unassigned_pool(user)
     out: list[EvUnitOut] = []
     for r in rows:
         if status and r["status"] != status:
             continue
         if z == "unassigned" and (r["person_id"] is None or r["zone"]):
             continue
-        # A fenced caller also keeps the unassigned pool: an EV held by a
-        # rider with no store and no recruiter would otherwise be invisible to
-        # the whole field. See hubs.unassigned_pool_sql.
-        in_pool = not (r["hub"] or "").strip() and not (r["recruited_by"] or "").strip()
-        if z and z != "unassigned" and (r["zone"] or "").lower() != z and not (pool and in_pool):
+        if z and z != "unassigned" and (r["zone"] or "").lower() != z:
             continue
         if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue

@@ -48,6 +48,12 @@ excluded from the test exactly like a switched-off one. A person who holds
 *only* such ids has no evidence either way, and reads as working rather than
 being accused of idleness by a company that never reports.
 
+A company the office has **switched off** (``is_active = 0``) is excluded the
+same way. It will never run another cycle, so its last one stays the last one
+for ever and every id there would read absent from it permanently — a company
+we stopped running would slowly turn its whole roster idle and the number
+would be measuring our own decision rather than the rider's work.
+
 The consequence worth knowing before quoting a number from this: it answers
 "were they in the last payout we ran", not "did they ride yesterday". That is
 the honest limit of what the ledger knows.
@@ -65,6 +71,14 @@ EARNING_EVENTS = ("PAYOUT",)
 
 # A company whose payout file is the evidence. See the module docstring.
 _PAYSHEET = "COALESCE(_c.payment_model, 'payout_file') = 'payout_file'"
+
+# A company the office has switched off will never run another cycle, so its
+# last one stays "the last one" for ever and every id there reads absent from
+# it permanently. Nobody expects work from a company we have stopped running,
+# so its ids drop out of the test entirely — the same treatment a switched-off
+# rider id gets. NULL means the companies row is gone rather than switched off,
+# and a deleted company must not flip its riders (see the LEFT JOIN note).
+_LIVE_COMPANY = "COALESCE(_c.is_active, 1) = 1"
 
 # That company's most recent committed run. company_cycles has one row per
 # (company, cycle) and is written only on commit, so MAX(cycle_end) is "the
@@ -102,6 +116,8 @@ def _expectant(person_col: str, extra: str = "") -> str:
         "AND _rm.is_active = 1 "
         # A company that cannot report cannot accuse.
         f"AND {_PAYSHEET} "
+        # Switched off by the office: no further cycles, so no expectation.
+        f"AND {_LIVE_COMPANY} "
         # Never run: nothing to be absent from.
         f"AND {_LAST_CYCLE_END} IS NOT NULL "
         # Created after the cycle began — could not have been in it. On the

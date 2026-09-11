@@ -68,9 +68,14 @@ interface SeriesPayload {
   totals: { onboarded: number; still_working: number; evs_deployed: number; km: number }
 }
 
+/** One row per PERSON since 2026-09-11: `companies` and `rider_ids` are all
+ *  of their ids, `rider_id` / `company_name` the earliest. Both lists are
+ *  optional so an older server still typechecks. */
 interface RiderRow {
   rider_id: string
   company_name: string | null
+  companies?: string[]
+  rider_ids?: string[]
   name: string | null
   person_id: number
   hub: string | null
@@ -660,14 +665,18 @@ function RidersTab({ email }: { email: string }) {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.rider_id + ':' + r.person_id} className="border-t border-edge-soft hover:bg-white/[0.02]">
-                <td className={cellL + ' font-mono text-xs'}>{r.rider_id}</td>
+              <tr key={r.person_id} className="border-t border-edge-soft hover:bg-white/[0.02]">
+                <td className={cellL + ' font-mono text-xs'}>
+                  {(r.rider_ids?.length ? r.rider_ids : [r.rider_id]).join(' / ')}
+                </td>
                 <td className={cellL}>
                   <Link to={'/persons/' + r.person_id} className="text-slate-900 hover:text-brand-300 font-medium">
                     {r.name ?? `#${r.person_id}`}
                   </Link>
                 </td>
-                <td className={cellL}>{r.company_name ?? '—'}</td>
+                <td className={cellL}>
+                  {(r.companies?.length ? r.companies : [r.company_name]).filter(Boolean).join(', ') || '—'}
+                </td>
                 <td className={cellL}>{r.hub ?? <span className="text-slate-500">—</span>}</td>
                 <td className={cellL + ' text-xs text-slate-600'}>{r.created_at?.slice(0, 10) ?? '—'}</td>
                 <td className={cellL + ' text-xs text-slate-600'}>

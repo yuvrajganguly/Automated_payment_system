@@ -36,11 +36,13 @@ def client(db):
         "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
         [
             ("north@t.test", hash_password("Recruit-pass-1"), "recruiter"),
-            ("nozone@t.test", hash_password("Recruit-pass-2"), "recruiter"),
+            ("south@t.test", hash_password("Recruit-pass-2"), "recruiter"),
+            ("nozone@t.test", hash_password("Recruit-pass-3"), "recruiter"),
             ("boss@t.test", hash_password("Creator-pass-1"), "creator"),
         ],
     )
     db.execute("UPDATE users SET zone='North' WHERE email='north@t.test'")
+    db.execute("UPDATE users SET zone='South' WHERE email='south@t.test'")
     db.commit()
     ratelimit.reset()
     with TestClient(app) as c:
@@ -115,7 +117,7 @@ def test_admins_still_find_the_unplaced_stores(client, board):
 
 def test_a_recruiter_with_no_zone_is_not_fenced(client, board):
     """A new joiner nobody has placed yet must not stare at an empty app."""
-    free = _hdr(client, "nozone@t.test", "Recruit-pass-2")
+    free = _hdr(client, "nozone@t.test", "Recruit-pass-3")
     got = {r["rider_id"] for r in client.get("/api/riders", headers=free).json()}
     assert got == {"SF-N", "SF-S", "SF-M", "SF-U"}
 
@@ -133,7 +135,7 @@ def test_the_bootstrap_offers_one_zone_only(client, board):
     north = _hdr(client, "north@t.test", "Recruit-pass-1")
     b = client.get("/api/app/bootstrap", headers=north).json()
     assert b["zones"] == ["North"], "no chip for a zone the route would refuse"
-    free = _hdr(client, "nozone@t.test", "Recruit-pass-2")
+    free = _hdr(client, "nozone@t.test", "Recruit-pass-3")
     assert client.get("/api/app/bootstrap", headers=free).json()["zones"] == [
         "North",
         "South",
@@ -254,15 +256,17 @@ def test_retention_denominator_is_people(db, client):
     assert console["retention_pct"] == 100.0
 
 
-# ── the unassigned pool (2026-09-11) ────────────────────────────────────────
+# ── a rider nobody has placed (2026-09-11) ──────────────────────────────────
 #
-# Tightening the fence made 75 working riders invisible to every recruiter at
-# once: no store, and nobody credited, so nothing from which a zone could be
-# derived. They are visible to everybody again — but only that population, not
-# the stores nobody has classified yet, which stay a job for an admin.
+# For half a day these rode along with every fenced recruiter's zone, so the
+# 75 riders with no store and nobody credited would not be invisible to the
+# whole field. The office decided against it: the same rider appearing in both
+# zones' lists meant two recruiters could each reasonably think he was theirs,
+# and a North recruiter's count was not a count of North. Unplaced means shown
+# to neither until placed; admins find them with zone=unassigned.
 
 
-def _pool_rider(db, name, rider_id, hub=None, recruited_by=None):
+def _unplaced(db, name, rider_id, hub=None, recruited_by=None):
     pid = make_person(db, name)
     make_rider(db, pid, rider_id, "Shadowfax", name)
     db.execute(
@@ -273,60 +277,45 @@ def _pool_rider(db, name, rider_id, hub=None, recruited_by=None):
     return pid
 
 
-def test_the_pool_is_seen_from_both_zones(db, client, board):
-    _pool_rider(db, "Nobody's Rider", "SF-POOL")
-    for email, pw in (("north@t.test", "Recruit-pass-1"),):
+def test_an_unplaced_rider_is_shown_to_neither_zone(db, client, board):
+    _unplaced(db, "Nobody's Rider", "SF-NONE")
+    for email, pw in (("north@t.test", "Recruit-pass-1"), ("south@t.test", "Recruit-pass-2")):
         got = {
             r["rider_id"] for r in client.get("/api/riders", headers=_hdr(client, email, pw)).json()
         }
-        assert "SF-POOL" in got, "a rider nothing can place must be visible to the field"
-        assert "SF-S" not in got, "…without reopening the other zone"
+        assert "SF-NONE" not in got, f"{email} was shown a rider nobody has placed"
 
 
-def test_a_credited_rider_with_no_hub_is_not_in_the_pool(db, client, board):
-    """Somebody is responsible for them: their recruiter's zone places them,
-    and that is not North's business."""
-    _pool_rider(db, "South's Rider", "SF-CRED", recruited_by="south@t.test")
-    db.execute(
-        "INSERT INTO users (email, password_hash, role, is_active, zone) "
-        "VALUES ('south@t.test','x','recruiter',1,'South')"
-    )
+def test_an_admin_still_finds_them(db, client, board):
+    """The whole reason this is safe: they are one query away from the office,
+    so "invisible to the field" is not "lost"."""
+    _unplaced(db, "Nobody's Rider", "SF-NONE")
+    got = {r["rider_id"] for r in client.get("/api/riders?zone=unassigned", headers=board).json()}
+    assert "SF-NONE" in got
+
+
+def test_placing_them_by_store_is_enough(db, client, board):
+    _unplaced(db, "Was Unplaced", "SF-FIX")
+    db.execute("UPDATE rider_master SET hub='Salt Lake' WHERE rider_id='SF-FIX'")
     db.commit()
-    north = _hdr(client, "north@t.test", "Recruit-pass-1")
-    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
-    assert "SF-CRED" not in got
-
-
-def test_an_unclassified_store_is_still_not_the_pool(db, client, board):
-    """The distinction the pool is narrow for. Howrah has riders and no zone —
-    that is an admin's job in the stores panel, not a reason to show it to
-    everybody. Only 'no store at all' qualifies."""
-    north = _hdr(client, "north@t.test", "Recruit-pass-1")
-    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
-    assert "SF-U" not in got, "an unplaced store is a job, not a pool member"
-
-
-def test_giving_a_pool_rider_a_hub_takes_them_out_of_it(db, client, board):
-    """The pool empties itself as the data is fixed — no flag to remember."""
-    _pool_rider(db, "Was Unplaced", "SF-FIX")
     north = _hdr(client, "north@t.test", "Recruit-pass-1")
     assert "SF-FIX" in {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
-    db.execute("UPDATE rider_master SET hub='Garia' WHERE rider_id='SF-FIX'")
-    db.commit()
-    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
-    assert "SF-FIX" not in got, "Garia is South's; the pool must not keep them visible"
 
 
-def test_an_admin_naming_a_zone_does_not_get_the_pool(db, client, board):
-    """The pool is a concession to the fence. An admin who asks for North
-    wants North, and a rider with no zone is not in it."""
-    _pool_rider(db, "Nobody's Rider", "SF-POOL")
-    got = {r["rider_id"] for r in client.get("/api/riders?zone=North", headers=board).json()}
-    assert got == {"SF-N"}
+def test_placing_them_by_recruiter_is_enough(db, client, board):
+    """No store, but somebody is credited — that recruiter's zone places them,
+    and they appear in exactly one zone rather than both."""
+    _unplaced(db, "North's Rider", "SF-CRED", recruited_by="north@t.test")
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    south = _hdr(client, "south@t.test", "Recruit-pass-2")
+    assert "SF-CRED" in {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    assert "SF-CRED" not in {r["rider_id"] for r in client.get("/api/riders", headers=south).json()}
 
 
-def test_the_pool_shows_on_the_todo_list(db, client, board):
-    pid = _pool_rider(db, "Owes COD", "SF-COD")
+def test_the_todo_board_hides_them_too(db, client, board):
+    """The todo board filters in Python rather than SQL, so it is its own
+    chance to disagree with the roster about who is whose."""
+    pid = _unplaced(db, "Owes COD", "SF-COD")
     db.execute(
         "INSERT INTO ev_arrears (person_id, cod_missed, cod_outstanding) VALUES (?, 5000, 5000)",
         (pid,),
@@ -335,4 +324,6 @@ def test_the_pool_shows_on_the_todo_list(db, client, board):
     north = _hdr(client, "north@t.test", "Recruit-pass-1")
     t = client.get("/api/app/todo", headers=north).json()
     people = [i["name"] for s in t["stores"] for i in s["items"]]
-    assert "Owes COD" in people
+    assert "Owes COD" not in people
+    admin = client.get("/api/app/todo?zone=unassigned", headers=board).json()
+    assert "Owes COD" in [i["name"] for s in admin["stores"] for i in s["items"]]

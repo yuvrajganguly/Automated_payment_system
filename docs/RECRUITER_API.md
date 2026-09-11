@@ -126,6 +126,61 @@ the recruiter who onboarded them (`users.zone`) — so hub-less riders (Blitz
 and co.) follow their recruiter. `?zone=unassigned` (alias `misc`) is the
 rest. In the to-do list, hub-less riders sit under a store called "Misc".
 
+A recruiter with a zone on their account is **fenced** to it: `zone=` is
+refused for any other zone, and `zone=all` means their own. A rider from whom
+no zone can be derived — no store, and nobody credited — is shown to **neither**
+zone until somebody places them, which is either giving the rider a store or
+setting a zone on the account that onboarded them. `zone=unassigned` is the
+office's list of everyone still waiting; it is refused to a fenced caller,
+since it is exactly the bucket the fence excludes.
+
+## Who sees whom
+
+Three separate things, easy to conflate:
+
+* **A recruiter with a zone is fenced to it.** North sees North; South sees
+  South. `zone=` for anybody else's zone is refused, and `zone=all` means
+  their own.
+* **A recruiter with NO zone is not fenced at all** and sees every rider. That
+  is deliberate — a new joiner nobody has placed yet would otherwise open the
+  app to an empty screen on their first morning — but it means "no zone" is
+  the widest setting, not the narrowest. Set a zone on every real account.
+* **A head recruiter is a recruiter with a flag, and always has a zone.**
+  `PATCH /users/{email}/head` refuses the flag on a non-recruiter and on a
+  recruiter with no zone, because a head with no zone supervises nobody and a
+  flag that silently does nothing is worse than a refusal. There is no such
+  thing as a head who "sees all" — that is an admin.
+
+The flag cannot outlive what it depends on. Clearing somebody's zone stands
+them down, and so does moving them off `recruiter`; the app decides whether to
+draw the supervision tab from `me.is_head` alone, so a leftover flag would be a
+tab whose own endpoint then refused it. Moving them North → South keeps it —
+they are the head of wherever they now are.
+
+What the flag adds, and only this: `GET /app/zone-recruiting` (their zone's
+recruiters side by side) and the right to name one of their own zone's
+recruiters in `/app/my-recruiting?email=` and the `/recruiters/{email}/...`
+family. It is a **flag rather than a role** because `ROLE_RANK` is load-bearing
+in the money fence — a new rung above `recruiter` would have widened what they
+can see of balances, which is the one thing this must not do.
+
+The board lists their zone's field staff plus themselves, and leaves out any
+**other** head in the zone: a peer is not somebody to supervise, and
+`supervises()` refuses a head reading another head, so listing them would put a
+row on the board that 403s when tapped. An admin naming a zone sees everybody
+in it, heads included.
+
+Tag somebody in the console: **Users → the Zone column → the "Head" box**
+beside their zone. It is live only once they are a recruiter with a zone; the
+tooltip says which of the two is missing.
+
+Lists that sit under a count are **one row per person**, because every count
+here counts people: `/app/my-recruiting`'s `recent[]` and
+`/recruiters/{email}/riders` collapse a rider's ids into one row carrying
+`companies[]` and `rider_ids[]`, with `company_name` / `rider_id` the earliest
+of them and `created_at` the day that first id was created. Somebody holding a
+Kaptan id and a Nykaa id is one recruit, in one row.
+
 To-do items are one visit each and carry `kind`:
 
 * `cod` — the rider still holds COD (`cod_outstanding`). Collect it.
@@ -423,18 +478,32 @@ report is refused.
 
 ## Working and idle riders
 
-A rider is **working** when a company that sends us a paysheet
-(`payment_model='payout_file'`) paid them for a cycle that ended within the
-last 12 days (`payout/domain/worked.py`). `GET /riders` takes
-`activity=all|working|idle` and every rider row carries `working` and
-`last_worked_on`.
+The rule, rewritten 2026-09-11 (`payout/domain/worked.py`): take every rider
+id this **person** holds that is still switched on, at a company that sends us
+a paysheet, that existed when that company's last cycle began — and ask whether
+any of them appeared in that payout. If none did, they are not working. `GET
+/riders` takes `activity=all|working|idle` and every rider row carries
+`working` and `last_worked_on`.
 
-Two things worth knowing before quoting the number. It measures the end of the
-last paid cycle, not a payment date, so a company whose cycle has not been run
-for a fortnight makes all of its riders read idle — we know when we last paid
-someone, not when they last rode. And riders at `direct` or `per_order`
-companies (Elastic, Zomato, Shadowfax, Pidge, Delhivery) are structurally never
-"working", because we never see whether they worked.
+It is keyed to each company's own last cycle rather than a rolling window,
+which is what the rule before it did: a company whose cycle had not been run
+for a fortnight used to make *all* of its riders read idle, and the office
+would ask why half the roster had gone quiet when the answer was "we have not
+run Kaptan yet".
+
+Four kinds of id are dropped from the test rather than counted against the
+rider, because their absence from a payout is expected: one the recruiter has
+**switched off** (`is_active=0` — they left that company), one created **after**
+the cycle began (they could not have been in it, and the exemption expires by
+itself when the next cycle runs), one at a `direct` / `per_order` / `salary`
+company (Elastic, Zomato, Shadowfax, Pidge, Delhivery — we never see a
+paysheet), and one at a company the office has **switched off**
+(`companies.is_active=0` — it will never run another cycle, so its last one
+would otherwise stay "the last one" for ever). A person all of whose ids are
+dropped reads as working: "we cannot tell" must not print as an accusation.
+
+The honest limit: it answers "were they in the last payout we ran", not "did
+they ride yesterday".
 
 ## A rider's timeline
 

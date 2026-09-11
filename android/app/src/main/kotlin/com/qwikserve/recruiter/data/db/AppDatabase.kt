@@ -26,7 +26,7 @@ data class RiderEntity(
     val recruitedBy: String?,
     /** North | South from the hub's zone; null when the hub is unclassified */
     val zone: String?,
-    /** A paysheet company paid them for a cycle ending in the last 12 days.
+    /** They were in the last payout their company ran.
      *  Null only for a row cached by an older server that never sent it. */
     val working: Boolean?,
     /** End date of the last cycle a company paid them for; null if never. */

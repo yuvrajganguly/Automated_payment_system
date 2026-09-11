@@ -18,6 +18,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,13 +32,13 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.Avatar
-import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.ListRow
 import com.qwikserve.recruiter.ui.common.Note
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.ScreenAction
 import com.qwikserve.recruiter.ui.common.SearchField
 import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Skeleton
@@ -62,10 +63,12 @@ import javax.inject.Inject
 enum class Scope { MINE, ALL }
 
 /**
- * Working or idle, by the server's 12-day rule: a rider is "working" when a
- * paysheet company paid them for a cycle that ended within the last twelve
- * days. The flag is cached with the rest of the roster, so this filter works
- * with no signal like the zone and Mine/All ones do.
+ * Working or idle, by the server's rule: a rider is "working" when they
+ * appeared in the last payout their company actually ran. Somebody onboarded
+ * since that payout, or whose id the recruiter has switched off, or whose
+ * company we have stopped running, is not counted against them. The flag is
+ * cached with the rest of the roster, so this filter works with no signal
+ * like the zone and Mine/All ones do.
  */
 enum class Activity(val label: String, val working: Boolean?) {
     ALL("All", null), WORKING("Working", true), IDLE("Idle", false);
@@ -76,6 +79,53 @@ enum class Activity(val label: String, val working: Boolean?) {
 }
 
 private data class Filters(val q: String, val scope: Scope, val zone: String, val activity: Activity)
+
+/**
+ * One person, however many rider ids they hold.
+ *
+ * The roster is cached one row per (rider_id, company) because that is the key
+ * everything else needs — switching an id off, renaming it, adding another.
+ * But a recruiter reads this screen as a list of people, and somebody with a
+ * Kaptan id and a Nykaa id was showing up twice, with the count in the header
+ * agreeing with neither the list nor the person-based numbers on Stats.
+ *
+ * So the grouping happens here, on the cached rows, after the filters have
+ * run. Filtering first is deliberate: the zone comes from the store, so a
+ * person with a North id and a South id genuinely belongs in both zones' lists
+ * — and in each of them, once.
+ */
+private data class PersonRow(
+    val personId: Long,
+    val name: String?,
+    val riderIds: List<String>,
+    val companies: List<String>,
+    val hub: String?,
+    val zone: String?,
+    val hasEv: Boolean,
+    val working: Boolean?,
+    val lastWorkedOn: String?,
+)
+
+private fun List<RiderEntity>.byPerson(): List<PersonRow> {
+    val order = LinkedHashMap<Long, MutableList<RiderEntity>>()
+    forEach { order.getOrPut(it.personId) { mutableListOf() }.add(it) }
+    return order.map { (pid, rows) ->
+        PersonRow(
+            personId = pid,
+            name = rows.firstNotNullOfOrNull { it.name },
+            riderIds = rows.map { it.riderId }.distinct(),
+            companies = rows.map { it.company }.distinct().sorted(),
+            hub = rows.firstNotNullOfOrNull { it.hub?.takeIf(String::isNotBlank) },
+            zone = rows.firstNotNullOfOrNull { it.zone?.takeIf(String::isNotBlank) },
+            hasEv = rows.any { it.vehicle == "EV" },
+            // Working is a property of the person on the server, so every row
+            // carries the same answer; ORed anyway so a half-synced cache
+            // cannot report somebody idle who is not.
+            working = if (rows.any { it.working == true }) true else rows.firstNotNullOfOrNull { it.working },
+            lastWorkedOn = rows.mapNotNull { it.lastWorkedOn }.maxOrNull(),
+        )
+    }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
@@ -111,10 +161,8 @@ class RidersViewModel @Inject constructor(
                     f.q,
                     mine = if (f.scope == Scope.MINE) me.orEmpty() else null,
                     // No client-side zone filter when the server has fenced
-                    // this recruiter: everything in the cache is already
-                    // theirs to see, and Room matches the zone exactly — so
-                    // filtering again here would throw away the stores nobody
-                    // has classified, which the server deliberately sent.
+                    // this recruiter: everything the server sent is already
+                    // theirs, so filtering again here can only subtract.
                     zone = if (f.scope == Scope.ALL && f.zone != "All" && !fenced) f.zone else null,
                     working = f.activity.working,
                 )
@@ -149,7 +197,10 @@ class RidersViewModel @Inject constructor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: RidersViewModel = hiltViewModel()) {
-    val riders by vm.riders.collectAsStateWithLifecycle()
+    val rows by vm.riders.collectAsStateWithLifecycle()
+    // One entry per person. remember() keys on the filtered list, so the
+    // grouping runs when the list changes and not on every recomposition.
+    val riders = remember(rows) { rows.byPerson() }
     val q by vm.query.collectAsStateWithLifecycle()
     val scope by vm.scope.collectAsStateWithLifecycle()
     val zone by vm.zone.collectAsStateWithLifecycle()
@@ -161,7 +212,11 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
             verticalAlignment = Alignment.Bottom,
         ) {
             Text("Riders", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink, modifier = Modifier.weight(1f))
-            Text("${riders.size} shown", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
+            Text(
+                if (riders.size == 1) "1 rider" else "${riders.size} riders",
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N700,
+            )
         }
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Segmented(
@@ -199,7 +254,7 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                     when {
                         q.isNotBlank() -> "No rider matches \"$q\"."
                         activity == Activity.WORKING ->
-                            "Nobody here has been paid for a cycle in the last 12 days. Try All."
+                            "Nobody here was in their company's last payout. Try All."
                         activity == Activity.IDLE ->
                             "Everybody here is working — nothing idle to chase."
                         scope == Scope.MINE -> "You haven't onboarded anyone yet. Riders you add will show here."
@@ -208,11 +263,11 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                     },
                 )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(riders, key = { it.riderId + "@" + it.company }) { r ->
+                    items(riders, key = { it.personId }) { r ->
                         ListRow(
                             title = r.name ?: "—",
                             sub = listOfNotNull(
-                                r.riderId,
+                                r.riderIds.joinToString(" / "),
                                 r.hub,
                                 r.zone?.let { "$it zone" },
                                 lastWorked(r),
@@ -221,15 +276,21 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                             leading = { Avatar(r.personId, r.name) },
                             // Company and EV on top, the working state under
                             // them — three tags side by side would run off a
-                            // 360 dp phone.
+                            // 360 dp phone. Somebody at three companies gets
+                            // the first plus a count for the same reason.
                             trailing = {
                                 Column(
                                     horizontalAlignment = Alignment.End,
                                     verticalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Tag(r.company, outline = true)
-                                        if (r.vehicle == "EV") Tag("EV", accent = true)
+                                        if (r.companies.size > 2) {
+                                            Tag(r.companies.first(), outline = true)
+                                            Tag("+${r.companies.size - 1}", outline = true)
+                                        } else {
+                                            r.companies.forEach { Tag(it, outline = true) }
+                                        }
+                                        if (r.hasEv) Tag("EV", accent = true)
                                     }
                                     Tag(if (r.working == true) "working" else "idle", accent = r.working == true)
                                 }
@@ -240,13 +301,12 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 }
             }
         }
-        Rule()
-        BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
+        ScreenAction("New rider", onClick = onNewRider)
     }
 }
 
 /** "last worked 4 Sep", or "never worked" for a rider no company ever paid. */
-private fun lastWorked(r: RiderEntity): String =
+private fun lastWorked(r: PersonRow): String =
     r.lastWorkedOn?.let { "last worked " + shortDate(it) } ?: "never worked"
 
 @Composable

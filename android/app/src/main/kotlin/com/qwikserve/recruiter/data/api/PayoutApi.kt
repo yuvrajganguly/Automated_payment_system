@@ -64,7 +64,7 @@ interface PayoutApi {
         @Query("q") q: String? = null,
         @Query("company") company: String? = null,
         @Query("active") active: Boolean? = null,
-        /** all | working | idle — the 12-day rule. The sync pulls "all" and
+        /** all | working | idle — the worked rule. The sync pulls "all" and
          *  filters in Room, so the Riders tab works with no signal. */
         @Query("activity") activity: String? = null,
         @Query("limit") limit: Int? = null,

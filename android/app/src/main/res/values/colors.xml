@@ -1,5 +1,10 @@
 <resources>
-    <!-- The Qwikserve mark (red winged Q) sits on white — launcher and splash. -->
-    <color name="ic_launcher_background">#FFFFFF</color>
-    <color name="splash_background">#FFFFFF</color>
+    <!-- The launcher tile. The winged mark is knocked out white on this red,
+         so the icon is the brand's colour rather than a white square with a
+         small picture in the middle of it; see tools/make_icons.py. Sampled
+         from the master logo, not picked by eye. -->
+    <color name="ic_launcher_background">#C22121</color>
+    <!-- The splash keeps the mark the right way round — red on the app's own
+         near-white — because the splash is the app's background, not a tile. -->
+    <color name="splash_background">#F3F2F2</color>
 </resources>

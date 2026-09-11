@@ -296,6 +296,12 @@ def test_recruiting_numbers(db, client):
         ("Shadowfax", 2),
         ("Kaptan", 1),
     ]
+    # "Latest onboardings" is people too: Arjun holds a Shadowfax and a Kaptan
+    # id and is one entry, headed by the earlier of the two.
+    assert [x["person_id"] for x in s["recent"]].count(a["person_id"]) == 1
+    assert len(s["recent"]) == s["counts"]["all_time"], "the list must match the tile"
+    mine = next(x for x in s["recent"] if x["person_id"] == a["person_id"])
+    assert mine["companies"] == ["Kaptan", "Shadowfax"]
     assert s["recent"][0]["rider_id"] in ("SF-1", "31111") and s["recent"][-1]["rider_id"] == "SF-2"
     assert "amount" not in str(s) and "balance" not in str(s)
 
@@ -510,15 +516,19 @@ def test_holding_list_is_one_row_per_person_and_matches_the_tile(db, client):
     # Whichever of the two rider ids is shown, it is one of that person's.
     assert rows[0]["rider_id"] in ("SF-1", "31111")
 
-    # And the plain list is still one row per rider id, EV badge included.
+    # Every other status counts the same way (2026-09-11). It used to be one
+    # row per rider id here, which is how somebody with a Kaptan id and a
+    # Nykaa id showed up twice under a tile that had counted them once.
     every = client.get("/api/recruiters/me/riders", headers=rec).json()
-    assert len(every) == 4
-    assert sorted((r["rider_id"], r["company_name"], r["ev_id"]) for r in every) == [
-        ("31111", "Kaptan", "EV-A"),
-        ("SF-1", "Elastic", "EV-A"),
-        ("SF-1", "Shadowfax", "EV-A"),
-        ("SF-2", "Shadowfax", None),
-    ]
+    assert len(every) == 2, "two people, four rider ids"
+    arjun = next(r for r in every if r["person_id"] == a["person_id"])
+    # The whole set travels with the row, so the app can show every company
+    # rather than picking one and dropping the others.
+    assert arjun["companies"] == ["Elastic", "Kaptan", "Shadowfax"]
+    assert arjun["rider_ids"] == ["31111", "SF-1"], "the same spelling at two companies is one id"
+    assert arjun["ev_id"] == "EV-A"
+    counts = client.get("/api/app/my-recruiting", headers=rec).json()["counts"]
+    assert len(every) == counts["all_time"], "the list and the tile must agree"
 
 
 def test_returning_the_ev_empties_the_holding_list(db, client):

@@ -238,3 +238,73 @@ def test_an_admin_may_name_any_zone(client, staff):
     assert (
         client.get("/api/app/zone-recruiting?zone=West", headers=staff["boss"]).status_code == 400
     )
+
+
+# ── the flag cannot outlive what it depends on ───────────────────────────────
+#
+# The app decides whether to draw the supervision tab from `is_head` alone, so
+# a flag left behind on an account that no longer qualifies is not cosmetic:
+# it is a tab whose own endpoint answers 403 or 400.
+
+
+def test_clearing_the_zone_stands_a_head_down(client, staff, db):
+    """set_head refuses a head with no zone; clearing the zone afterwards must
+    not walk round that check from the other side."""
+    boss = staff["boss"]
+    r = client.patch("/api/users/head-n@t.test/zone", json={"zone": None}, headers=boss)
+    assert r.status_code == 200, r.text
+    assert r.json()["is_head"] is False
+    head = _hdr(client, "head-n@t.test", "Recruit-pass-1")
+    assert client.get("/api/app/bootstrap", headers=head).json()["me"]["is_head"] is False
+    assert client.get("/api/app/zone-recruiting", headers=head).status_code == 403
+
+
+def test_a_transfer_keeps_the_flag(client, staff):
+    """North's head moved to South is South's head — that is what an office
+    means by a transfer, and re-ticking a box they never untimed would be an
+    odd thing to ask of whoever made the change."""
+    boss = staff["boss"]
+    assert (
+        client.patch("/api/users/head-n@t.test/zone", json={"zone": "South"}, headers=boss).json()[
+            "is_head"
+        ]
+        is True
+    )
+    head = _hdr(client, "head-n@t.test", "Recruit-pass-1")
+    board = client.get("/api/app/zone-recruiting", headers=head).json()
+    assert board["zone"] == "South"
+    # head-s is South's other head — a peer, not somebody to supervise.
+    assert {r["email"] for r in board["recruiters"]} == {"head-n@t.test", "rec-s@t.test"}
+
+
+def test_moving_them_off_recruiter_stands_them_down(client, staff):
+    boss = staff["boss"]
+    r = client.patch("/api/users/head-n@t.test/role", json={"role": "admin"}, headers=boss)
+    assert r.status_code == 200, r.text
+    assert client.get("/api/users", headers=boss).json()
+    users = {u["email"]: u for u in client.get("/api/users", headers=boss).json()}
+    assert users["head-n@t.test"]["is_head"] is False
+
+
+def test_promoting_within_recruiter_keeps_it(client, staff):
+    boss = staff["boss"]
+    client.patch("/api/users/head-n@t.test/role", json={"role": "recruiter"}, headers=boss)
+    users = {u["email"]: u for u in client.get("/api/users", headers=boss).json()}
+    assert users["head-n@t.test"]["is_head"] is True
+
+
+def test_the_board_leaves_out_the_other_head(client, staff):
+    """A row on the board that 403s when it is tapped is worse than no row:
+    `supervises` refuses a head reading another head, so the list must agree.
+    The caller's own row stays — they are in their own zone."""
+    client.patch("/api/users/rec-n@t.test/head", json={"is_head": True}, headers=staff["boss"])
+    _onboard(client, staff["rec_n"], "Arjun Das", "SF-1")
+    board = client.get("/api/app/zone-recruiting", headers=staff["head_n"]).json()
+    assert {r["email"] for r in board["recruiters"]} == {"head-n@t.test"}
+    assert board["totals"]["all_time"] == 0, "totals count the rows shown, nothing hidden"
+
+
+def test_an_admin_sees_the_heads_too(client, staff):
+    """An admin supervises the heads, so naming a zone lists everybody in it."""
+    r = client.get("/api/app/zone-recruiting?zone=North", headers=staff["boss"]).json()
+    assert {x["email"] for x in r["recruiters"]} == {"head-n@t.test", "rec-n@t.test"}

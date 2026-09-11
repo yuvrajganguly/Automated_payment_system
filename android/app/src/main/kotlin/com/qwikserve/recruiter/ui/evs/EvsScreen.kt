@@ -31,12 +31,12 @@ import com.qwikserve.recruiter.data.api.EvUnitOut
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.TokenStore
 import com.qwikserve.recruiter.data.repo.AppRepository
-import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.ListRow
 import com.qwikserve.recruiter.ui.common.Note
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.ScreenAction
 import com.qwikserve.recruiter.ui.common.SearchField
 import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
@@ -239,12 +239,10 @@ fun EvsScreen(
                 item(key = "tail") { Spacer(Modifier.height(24.dp)) }
             }
         }
-        Rule()
-        BarButton(
+        ScreenAction(
             "New unit",
             onClick = { note = null; addingUnit = true },
             primary = false,
-            modifier = Modifier.fillMaxWidth(),
         )
     }
 

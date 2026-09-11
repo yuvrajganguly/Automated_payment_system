@@ -277,3 +277,51 @@ def test_a_payout_at_the_wrong_company_is_not_evidence(db, client):
     db.commit()
     # The only live id is at Kaptan, which ran and did not pay them.
     assert _working(client, "K-1") is False
+
+
+# ── a company the office has switched off ────────────────────────────────────
+
+
+def test_a_switched_off_company_stops_accusing(db, client):
+    """Kaptan ran a cycle, did not pay this rider, and has since been switched
+    off. Without this the rider reads idle for ever: a dead company's last
+    cycle stays "the last cycle" permanently, so the absence never expires and
+    the number ends up measuring our own decision to stop running Kaptan."""
+    pid = make_person(db, "Company Closed")
+    _rider(db, pid, "K-1", "Kaptan")
+    _cycle(db, "Kaptan", "2026-09-01", "2026-09-07")
+    db.commit()
+    assert _working(client, "K-1") is False
+    db.execute("UPDATE companies SET is_active=0 WHERE company_name='Kaptan'")
+    db.commit()
+    assert _working(client, "K-1") is True, "nobody expects work from a company we stopped"
+
+
+def test_switching_a_company_off_does_not_hide_work_elsewhere(db, client):
+    """The exemption is per id, not per person. Kaptan off, Jiffy live and
+    silent about them → still judged by Jiffy."""
+    pid = make_person(db, "Two Companies")
+    _rider(db, pid, "K-1", "Kaptan")
+    _rider(db, pid, "J-1", "Jiffy")
+    _cycle(db, "Kaptan", "2026-09-01", "2026-09-07")
+    _cycle(db, "Jiffy", "2026-09-01", "2026-09-07")
+    _paid(db, pid, "K-1", "Kaptan", "2026-09-01", "2026-09-07")
+    db.commit()
+    assert _working(client, "J-1") is True, "Kaptan paid them, so the person is working"
+    db.execute("UPDATE companies SET is_active=0 WHERE company_name='Kaptan'")
+    db.commit()
+    # Kaptan's payout is no longer evidence for anything; Jiffy ran and did not
+    # pay them, and Jiffy is the only company still expecting them.
+    assert _working(client, "J-1") is False
+
+
+def test_switching_a_company_back_on_restores_the_test(db, client):
+    pid = make_person(db, "Reopened")
+    _rider(db, pid, "K-1", "Kaptan")
+    _cycle(db, "Kaptan", "2026-09-01", "2026-09-07")
+    db.execute("UPDATE companies SET is_active=0 WHERE company_name='Kaptan'")
+    db.commit()
+    assert _working(client, "K-1") is True
+    db.execute("UPDATE companies SET is_active=1 WHERE company_name='Kaptan'")
+    db.commit()
+    assert _working(client, "K-1") is False

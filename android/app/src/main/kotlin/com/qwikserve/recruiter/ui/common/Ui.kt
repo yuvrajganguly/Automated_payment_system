@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -177,13 +178,21 @@ fun GhostAction(text: String, onClick: () -> Unit, color: Color = Qwik.Accent, e
     )
 }
 
-/** Full-width 62 dp bar button at the foot of a screen; primary = red, secondary = outlined. */
+/** Full-width bar button; primary = red, secondary = outlined. At the foot
+ *  of a screen use ScreenAction, which clears the system navigation bar. */
 @Composable
-fun BarButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = true, enabled: Boolean = true) {
+fun BarButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = true,
+    enabled: Boolean = true,
+    height: Dp = 62.dp,
+) {
     val bg = if (primary) (if (enabled) Qwik.Accent else Qwik.N400) else Color.Transparent
     val fg = if (primary) Qwik.Bg else if (enabled) Qwik.Ink else Qwik.N500
     Box(
-        modifier.height(62.dp).background(bg)
+        modifier.height(height).background(bg)
             // The secondary variant is described as outlined and never drew the
             // outline, so it rendered as loose centred text with no edge — you
             // could not see where the button was. 2 px ink, the same weight as
@@ -193,6 +202,43 @@ fun BarButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
         contentAlignment = Alignment.Center,
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge.copy(fontSize = 16.sp), color = fg)
+    }
+}
+
+/**
+ * The action at the foot of a screen: rule, then a full-width button that
+ * clears the system navigation bar.
+ *
+ * Two things were wrong with drawing a bare BarButton at the bottom of a
+ * Column. The app is edge-to-edge with a transparent navigation bar, so the
+ * lower part of the button sat *underneath* the system bar — aim slightly low
+ * on "New rider" and you hit Home instead, which is exactly what was
+ * happening. And at 62 dp it was a small target for the one button a
+ * recruiter presses all day. So: the navigation-bar inset is real padding
+ * below the button, and the button itself is 72 dp.
+ *
+ * Only for a button that is the last thing in a screen-height Column. A
+ * button inside a sheet or a card keeps plain BarButton — it has no system
+ * bar under it, and would gain a strip of dead space.
+ */
+@Composable
+fun ScreenAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = true,
+    enabled: Boolean = true,
+) {
+    Column(modifier.fillMaxWidth().background(Qwik.Bg).navigationBarsPadding()) {
+        Rule()
+        BarButton(
+            text,
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            primary = primary,
+            enabled = enabled,
+            height = 72.dp,
+        )
     }
 }
 

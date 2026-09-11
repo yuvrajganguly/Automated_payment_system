@@ -38,6 +38,7 @@ from payout.documents import ALLOWED_CONTENT_TYPES, get_storage, make_staff_key
 from payout.domain.activity import record_activity
 from payout.domain.identity import normalize_aadhaar, normalize_pan
 from payout.domain.naming import name_from
+from payout.domain.people import by_person
 from payout.domain.worked import ACTIVE_WITHIN_DAYS, active_person_sql
 
 router = APIRouter()
@@ -823,16 +824,22 @@ def recruiter_riders(
     limit: int = Query(200, ge=1, le=2000),
     user: dict = Depends(get_current_user),
 ) -> list[dict]:
-    """The riders this recruiter onboarded, each flagged working or idle by the
-    12-day rule, newest first.
+    """The people this recruiter onboarded, each flagged working or idle by
+    the rule in ``domain/worked.py``, newest first.
 
-    ``holding`` is the odd one out: it lists the people who have an EV out
-    right now, and it returns **one row per person**, not one per rider id.
-    That is deliberate. The count it sits behind (``counts.ev_holders``) is a
-    ``COUNT(DISTINCT person_id)`` — one vehicle, one holder — so a person
-    carrying two company rider ids would otherwise appear twice under a tile
-    that said 1. A tile that disagrees with the list behind it is worse than
-    no list at all.
+    **One row per person, not per rider id.** Every count this list sits
+    behind is a count of people, so a rider holding an id at Kaptan and
+    another at Nykaa appeared twice under a tile that had counted him once.
+    ``holding`` was already one-per-person for exactly that reason — the rest
+    of the statuses had the bug the docstring there described.
+
+    The row carries the person's whole set: ``companies`` and ``rider_ids``
+    are every id of theirs this recruiter onboarded, and ``company_name`` /
+    ``rider_id`` stay as the first of them so older clients keep working.
+    ``created_at`` is the *earliest* of those ids, because that is the day
+    this recruiter recruited the person — the same MIN the today/week/month
+    counts use, so the list and the tiles cannot disagree about which week
+    somebody belongs to. A second id years later is not a new recruit.
     """
     email = _resolve(user, email)
     active = active_person_sql("rm.person_id")
@@ -840,56 +847,36 @@ def recruiter_riders(
         "EXISTS (SELECT 1 FROM ev_assignments _ha WHERE _ha.person_id = rm.person_id "
         "AND _ha.returned_date IS NULL)"
     )
-    # One row per person for `holding`: keep the first of this recruiter's
-    # rows for that person. The comparison is on the WHOLE key, (rider_id,
-    # company) — a rider id is not unique on its own. Companies that share
-    # ids (companies.rider_ids_shared_with, and _auto_link_rider) put the
-    # same id under two companies for one person, and a MIN(rider_id) test
-    # would match both of those rows and hand back the duplicate this is
-    # here to prevent.
-    one_per_person = (
-        " AND NOT EXISTS (SELECT 1 FROM rider_master _rm2 "
-        "WHERE _rm2.person_id = rm.person_id AND _rm2.recruited_by = rm.recruited_by "
-        "AND (_rm2.rider_id, _rm2.company) < (rm.rider_id, rm.company))"
-    )
     where = {
         "all": "",
         "working": f" AND {active}",
         "idle": f" AND NOT {active}",
-        "holding": f" AND {holds}{one_per_person}",
+        "holding": f" AND {holds}",
     }[status]
     from payout.domain.worked import last_worked_sql
 
+    # Collapsing happens here rather than in SQL. The predicate it replaced
+    # ("keep the row no other row of this person sorts before") could pick one
+    # row but could not carry the others, so the list showed one of a person's
+    # companies and silently dropped the rest. ``limit`` is applied to people
+    # after grouping, so "200" means two hundred people.
     with get_connection() as conn:
-        return [
-            {
-                "rider_id": r["rider_id"],
-                "company_name": r["company"],
-                "name": r["name"],
-                "person_id": int(r["person_id"]),
-                "hub": r["hub"],
-                "created_at": r["created_at"],
-                "on_roster": bool(r["is_active"]),
-                "working": bool(r["working"]),
-                "last_worked_on": r["last_worked_on"],
-                "ev_id": r["ev_id"],
-            }
-            for r in conn.execute(
-                "SELECT rm.rider_id, rm.company, rm.name, rm.person_id, rm.hub, "
-                "       rm.created_at, rm.is_active, "
-                f"      ({active}) AS working, "  # noqa: S608 - both are literals above
-                f"      {last_worked_sql('rm.person_id')} AS last_worked_on, "
-                # The EV they are holding right now, if any — shown as a badge
-                # in every list, not only the holding one.
-                "       (SELECT _ea.ev_id FROM ev_assignments _ea "
-                "        WHERE _ea.person_id = rm.person_id AND _ea.returned_date IS NULL "
-                "        ORDER BY _ea.handover_date DESC, _ea.assignment_id DESC "
-                "        LIMIT 1) AS ev_id "
-                f"FROM rider_master rm WHERE rm.recruited_by=?{where} "
-                "ORDER BY rm.created_at DESC, rm.rider_id DESC LIMIT ?",
-                (email, limit),
-            )
-        ]
+        rows = conn.execute(
+            "SELECT rm.rider_id, rm.company, rm.name, rm.person_id, rm.hub, "
+            "       rm.created_at, rm.is_active, "
+            f"      ({active}) AS working, "  # noqa: S608 - both are literals above
+            f"      {last_worked_sql('rm.person_id')} AS last_worked_on, "
+            # The EV they are holding right now, if any — shown as a badge
+            # in every list, not only the holding one.
+            "       (SELECT _ea.ev_id FROM ev_assignments _ea "
+            "        WHERE _ea.person_id = rm.person_id AND _ea.returned_date IS NULL "
+            "        ORDER BY _ea.handover_date DESC, _ea.assignment_id DESC "
+            "        LIMIT 1) AS ev_id "
+            f"FROM rider_master rm WHERE rm.recruited_by=?{where} "
+            "ORDER BY rm.created_at DESC, rm.rider_id DESC",
+            (email,),
+        ).fetchall()
+    return by_person(rows)[:limit]
 
 
 @router.get("/{email}/evs")

@@ -98,34 +98,25 @@ def zone_scope(user: dict, zone: str | None) -> str | None:
     raise HTTPException(403, "You can only see your own zone")
 
 
-def sees_unassigned_pool(user: dict) -> bool:
-    """Does the unassigned pool ride along with this caller's zone filter?
-
-    Only for a fenced caller. An admin who asks for North wants North; the
-    pool is a concession to the fence, not a member of every zone.
-    """
-    return fenced_zone(user) is not None
-
-
-def unassigned_pool_sql(hub_expr: str, recruiter_expr: str) -> str:
-    """SQL boolean: this rider is in the unassigned pool — visible to every
-    recruiter, in every zone.
-
-    A rider with **no store and nobody credited** has nothing from which a
-    zone could ever be derived: their hub has no zone because they have no
-    hub, and there is no recruiter whose zone could stand in. 75 riders were
-    in this state on 2026-09-11 and most of them had been paid that month, so
-    they are working riders, not dead rows — and after the fence was tightened
-    they had become invisible to every recruiter at once, which is how a rider
-    standing in front of somebody cannot be looked up.
-
-    Deliberately narrower than the rule this brings back. What was removed was
-    "anything with no derived zone comes along", which swept in stores nobody
-    had classified *yet* — a job, and one the company tab's stores panel makes
-    easy. This is only the case where no amount of classifying would help.
-    Give one of these riders a hub and they leave the pool by themselves.
-    """
-    return f"(COALESCE({hub_expr}, '') = '' AND {recruiter_expr} IS NULL)"
+# Deliberately absent: the unassigned pool.
+#
+# For half of 2026-09-11 there was one. Riders with no store and nobody
+# credited rode along with every fenced recruiter's zone, because tightening
+# the fence had made 75 of them — most paid that month, so working riders —
+# invisible to the entire field at once.
+#
+# The office decided against it the same day, and the reason is worth keeping:
+# the pool put the same rider in both zones' lists, so two recruiters could
+# each reasonably believe he was theirs, and the count a North recruiter read
+# off their own screen was not a count of North. A fence that leaks the same
+# rows into both sides is not a fence, it is a shared inbox.
+#
+# So an unplaced rider is shown to neither zone until somebody places them,
+# exactly like an unclassified store. Placing one is two taps and there are two
+# ways to do it: give the rider a store, or set a zone on the account that
+# onboarded them. Either way they land in exactly one zone. Until then the
+# office finds them with ``zone=unassigned`` on riders, EVs or the todo board —
+# invisible to the field is not lost.
 
 
 class HubOut(BaseModel):

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -270,8 +271,11 @@ private fun Rail(
             }
         }
         Spacer(Modifier.weight(1f))
-        Column(Modifier.padding(horizontal = 20.dp)) {
-            BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
+        // navigationBarsPadding for the same reason the phone bottom bars have
+        // it: the rail runs to the foot of an edge-to-edge window, and without
+        // it the button's lower edge is under the system bar.
+        Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
+            BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth(), height = 72.dp)
         }
     }
 }

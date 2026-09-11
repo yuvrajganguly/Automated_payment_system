@@ -169,19 +169,31 @@ def set_zone(email: str, body: ZoneIn, user: dict = Depends(require_admin)) -> d
     Rank-guarded like every other write here. Zone is not cosmetic: the rider
     list falls back to the recruiter's zone for hub-less riders, so writing it
     onto a colleague's account moves data around on their screen.
+
+    **Clearing the zone stands a head recruiter down.** ``set_head`` refuses
+    the flag on somebody with no zone precisely so it cannot mean nothing, and
+    clearing the zone afterwards would walk round that check from the other
+    side: the app reads ``is_head`` to decide whether to draw the supervision
+    tab, so the account would keep a tab whose own endpoint then refused it.
+    Moving somebody from North to South keeps the flag — they are the head of
+    wherever they now are, which is what an office means by a transfer.
     """
     target = email.strip().lower()
     zone = (body.zone or "").strip().title() or None
     if zone is not None and zone not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)} (or empty to clear)")
     with get_connection() as conn:
-        row = conn.execute("SELECT role FROM users WHERE email=?", (target,)).fetchone()
+        row = conn.execute("SELECT role, is_head FROM users WHERE email=?", (target,)).fetchone()
         if not row:
             raise HTTPException(404, "User not found")
         require_admin_over(user, row["role"])
-        conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
+        stood_down = zone is None and bool(row["is_head"])
+        if stood_down:
+            conn.execute("UPDATE users SET zone=NULL, is_head=0 WHERE email=?", (target,))
+        else:
+            conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
         conn.commit()
-    return {"email": target, "zone": zone}
+    return {"email": target, "zone": zone, "is_head": bool(row["is_head"]) and not stood_down}
 
 
 class HeadIn(BaseModel):
@@ -220,6 +232,14 @@ def set_head(email: str, body: HeadIn, user: dict = Depends(require_admin)) -> d
 
 @router.patch("/{email}/role")
 def change_role(email: str, body: RoleChangeIn, user: dict = Depends(require_creator)) -> dict:
+    """Move somebody between roles.
+
+    Moving them off ``recruiter`` also stands them down as head of a zone.
+    ``set_head`` allows the flag only on a recruiter; leaving it behind on a
+    promotion would let it outlive the check, and since the app decides whether
+    to draw the supervision tab from ``is_head`` alone, the account would carry
+    a tab that its own endpoint then refused.
+    """
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
     target = email.strip().lower()
@@ -231,7 +251,10 @@ def change_role(email: str, body: RoleChangeIn, user: dict = Depends(require_cre
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM users WHERE email=?", (target,)).fetchone():
             raise HTTPException(404, "User not found")
-        conn.execute("UPDATE users SET role=? WHERE email=?", (body.role, target))
+        if body.role == "recruiter":
+            conn.execute("UPDATE users SET role=? WHERE email=?", (body.role, target))
+        else:
+            conn.execute("UPDATE users SET role=?, is_head=0 WHERE email=?", (body.role, target))
         conn.commit()
     return {"email": target, "role": body.role}
 

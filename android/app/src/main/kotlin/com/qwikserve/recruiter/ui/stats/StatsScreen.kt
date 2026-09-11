@@ -256,7 +256,7 @@ fun StatsScreen(onOpenPerson: (Long) -> Unit, vm: StatsViewModel = hiltViewModel
                 Rule()
                 Text(
                     "Tap any count to see who is behind it. \"Still active\" is the same "
-                        + "12-day rule the Riders tab uses"
+                        + "same working rule the Riders tab uses"
                         + (c?.onRoster?.let { " — $it are still on the roster" } ?: "") + ".",
                     style = MaterialTheme.typography.bodySmall, color = Qwik.N600,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -326,14 +326,20 @@ fun StatsScreen(onOpenPerson: (Long) -> Unit, vm: StatsViewModel = hiltViewModel
             if (d != null) {
                 item { Kicker("Latest onboardings", Modifier.padding(start = 20.dp, top = 18.dp, bottom = 4.dp)) }
                 if (d.recent.isEmpty()) item { Note("Nobody yet. Riders you add show up here.") }
-                items(d.recent, key = { it.riderId + "@" + it.companyName }) { r ->
+                // Keyed on the person: one entry each, however many ids
+                // they hold. Two rows for one rider used to be possible here.
+                items(d.recent, key = { it.personId }) { r ->
                     ListRow(
                         title = r.name ?: r.riderId,
-                        sub = listOfNotNull(r.riderId, r.hub, r.createdAt?.let { shortDate(it) }).joinToString(" · "),
+                        sub = listOfNotNull(
+                            r.riderIds.ifEmpty { listOf(r.riderId) }.joinToString(" / "),
+                            r.hub,
+                            r.createdAt?.let { shortDate(it) },
+                        ).joinToString(" · "),
                         onClick = { onOpenPerson(r.personId) },
                         trailing = {
                             Row {
-                                Tag(r.companyName, outline = true)
+                                CompanyTags(r.companies, r.companyName)
                                 if (!r.isActive) { Spacer(Modifier.width(6.dp)); Tag("inactive") }
                             }
                         },
@@ -448,19 +454,19 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                 when {
                     period == Period.HOLDING -> "None of your riders has an EV out right now."
                     period == Period.ACTIVE ->
-                        "None of your riders has been paid for a cycle in the last 12 days."
+                        "None of your riders was in their company's last payout."
                     vm.drillStatus == "working" ->
-                        "Nobody from this period has been paid in the last 12 days."
+                        "Nobody from this period was in their company's last payout."
                     vm.drillStatus == "idle" -> "Everybody from this period is still working."
                     else -> "Nobody onboarded in this period."
                 },
             )
             else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
-                items(vm.drillRows, key = { it.riderId + "@" + it.companyName }) { r ->
+                items(vm.drillRows, key = { it.personId }) { r ->
                     ListRow(
                         title = r.name ?: r.riderId,
                         sub = listOfNotNull(
-                            r.riderId,
+                            r.riderIds.ifEmpty { listOf(r.riderId) }.joinToString(" / "),
                             r.hub,
                             r.createdAt?.let { "added " + shortDate(it) },
                             r.lastWorkedOn?.let { "last worked " + shortDate(it) } ?: "never worked",
@@ -471,7 +477,9 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                                 horizontalAlignment = Alignment.End,
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                Tag(r.companyName, outline = true)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    CompanyTags(r.companies, r.companyName)
+                                }
                                 // On the EV list the vehicle is the point; on
                                 // the others whether they are working is.
                                 if (period == Period.HOLDING && r.evId != null) {
@@ -484,6 +492,29 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The companies a person holds an id at, as tags.
+ *
+ * Three tags side by side run off a 360 dp phone, so past two it becomes the
+ * first plus a count — the same compromise the Riders list makes. ``fallback``
+ * is for a server older than 2026-09-11, which sent one company per row and
+ * no list.
+ */
+@Composable
+private fun CompanyTags(companies: List<String>, fallback: String) {
+    val list = companies.ifEmpty { listOf(fallback) }
+    if (list.size > 2) {
+        Tag(list.first(), outline = true)
+        Spacer(Modifier.width(6.dp))
+        Tag("+${list.size - 1}", outline = true)
+    } else {
+        list.forEachIndexed { i, c ->
+            if (i > 0) Spacer(Modifier.width(6.dp))
+            Tag(c, outline = true)
         }
     }
 }

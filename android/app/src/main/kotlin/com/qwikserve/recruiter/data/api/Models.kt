@@ -91,7 +91,7 @@ data class RiderOut(
     @SerialName("is_active") val isActive: Boolean = true,
     @SerialName("recruited_by") val recruitedBy: String? = null,
     val zone: String? = null,
-    /** A paysheet company paid them for a cycle ending in the last 12 days. */
+    /** They were in the last payout their company ran. */
     val working: Boolean? = null,
     /** End date of the last cycle a company paid them for; null if never. */
     @SerialName("last_worked_on") val lastWorkedOn: String? = null,
@@ -443,7 +443,7 @@ data class RecruitingCounts(
     val persons: Int = 0,
     val active: Int = 0,
     @SerialName("ev_holders") val evHolders: Int = 0,
-    /** Still on the roster — the switch, not the 12-day worked rule. */
+    /** Still on the roster — the switch, not the worked rule. */
     @SerialName("on_roster") val onRoster: Int = 0,
 )
 
@@ -452,8 +452,13 @@ data class RecruitingCompany(@SerialName("company_name") val companyName: String
 
 @Serializable
 data class RecruitingRecent(
+    /** The person's earliest id under this recruiter — see `companies`. */
     @SerialName("rider_id") val riderId: String,
     @SerialName("company_name") val companyName: String,
+    /** Every company this person holds an id at, so a two-id rider is one
+     *  entry rather than two. Empty only from a server older than 2026-09-11. */
+    val companies: List<String> = emptyList(),
+    @SerialName("rider_ids") val riderIds: List<String> = emptyList(),
     val name: String? = null,
     @SerialName("person_id") val personId: Long,
     val hub: String? = null,
@@ -562,6 +567,10 @@ data class RecruiterSeries(
 data class RecruiterRider(
     @SerialName("rider_id") val riderId: String,
     @SerialName("company_name") val companyName: String,
+    /** One row per PERSON, so these carry all of their ids. `riderId` and
+     *  `companyName` are the earliest of them. Empty from an older server. */
+    val companies: List<String> = emptyList(),
+    @SerialName("rider_ids") val riderIds: List<String> = emptyList(),
     val name: String? = null,
     @SerialName("person_id") val personId: Long,
     val hub: String? = null,

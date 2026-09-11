@@ -10,6 +10,10 @@ interface UserRow {
   is_active: boolean
   phone: string | null
   zone: string | null
+  /** Head recruiter for their zone: they see what the other recruiters in it
+   *  have done. A flag on a recruiter, deliberately not a role — the money
+   *  fence keys off `role`, so a new rung would have widened it. */
+  is_head: boolean
   created_at: string | null
 }
 
@@ -86,7 +90,7 @@ export function UsersPage() {
 
 function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
   { row: UserRow; isCreator: boolean; isAdmin: boolean; selfEmail: string; onChanged: () => void }) {
-  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | 'zone' | 'sessions' | null>(null)
+  const [busy, setBusy] = useState<'role' | 'active' | 'password' | 'phone' | 'zone' | 'head' | 'sessions' | null>(null)
   // The zone a recruiter works (North / South): their app opens on those stores,
   // and riders they onboard without a hub take this zone.
   async function setZone(zone: string) {
@@ -97,6 +101,19 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }
   }
+  // Head recruiter for the zone above. The server refuses the flag on anyone
+  // who is not a recruiter, and on a recruiter with no zone — a flag that
+  // silently does nothing is worse than a refusal — so the box is only live
+  // once both are true, and clearing the zone clears the flag with it.
+  async function setHead(is_head: boolean) {
+    setBusy('head'); setError(null)
+    try {
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/head', { is_head })
+      onChanged()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(null) }
+  }
+  const canBeHead = row.role === 'recruiter' && !!row.zone
   const [error, setError] = useState<string | null>(null)
   const isSelf = row.email === selfEmail
 
@@ -212,14 +229,28 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
         )}
       </Td>
       <Td>
-        {isAdmin && row.role !== 'user' ? (
-          <select value={row.zone ?? ''} onChange={(e) => setZone(e.target.value)} disabled={busy === 'zone'}
-                  className="text-xs border rounded px-2 py-0.5" title="Zone this recruiter works">
-            <option value="">—</option>
-            <option value="North">North</option>
-            <option value="South">South</option>
-          </select>
-        ) : (row.zone ?? '')}
+        <div className="flex items-center gap-2">
+          {isAdmin && row.role !== 'user' ? (
+            <select value={row.zone ?? ''} onChange={(e) => setZone(e.target.value)} disabled={busy === 'zone'}
+                    className="text-xs border rounded px-2 py-0.5" title="Zone this recruiter works">
+              <option value="">—</option>
+              <option value="North">North</option>
+              <option value="South">South</option>
+            </select>
+          ) : (row.zone ?? '')}
+          {isAdmin && (row.role === 'recruiter' || row.is_head) && (
+            <label className={'text-xs flex items-center gap-1 ' + (canBeHead ? 'text-slate-600' : 'text-slate-400')}
+                   title={canBeHead
+                     ? 'Head recruiter: adds a tab to their app showing what every recruiter in this zone has done — recruits, actives, EVs. Read-only, and it does not widen what they can see of the money.'
+                     : row.role !== 'recruiter'
+                     ? 'Only a recruiter can be a head.'
+                     : 'Give them a zone first — a head supervises one zone.'}>
+              <input type="checkbox" checked={row.is_head} disabled={!canBeHead || busy === 'head'}
+                     onChange={(e) => setHead(e.target.checked)} className="accent-brand" />
+              Head
+            </label>
+          )}
+        </div>
       </Td>
       <Td>
         <span className={'text-xs px-1.5 py-0.5 rounded ' +

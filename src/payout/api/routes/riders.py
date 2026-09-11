@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
-from payout.api.routes.hubs import sees_unassigned_pool, unassigned_pool_sql, zone_scope
+from payout.api.routes.hubs import zone_scope
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -412,13 +412,10 @@ def list_riders(
     if z:
         if z == "unassigned":
             where.append("COALESCE(hz.zone, ru.zone) IS NULL")
-        elif sees_unassigned_pool(user):
-            # Their zone, plus the riders no zone could ever be derived for —
-            # see hubs.unassigned_pool_sql.
-            pool = unassigned_pool_sql("rm.hub", "rm.recruited_by")
-            where.append(f"(LOWER(COALESCE(hz.zone, ru.zone))=? OR {pool})")
-            params.append(z)
         else:
+            # Their zone and only their zone. A rider no zone can be derived
+            # for belongs to neither until somebody places them — see
+            # hubs.unzoned_is_hidden_from_the_field.
             where.append("LOWER(COALESCE(hz.zone, ru.zone))=?")
             params.append(z)
     page = ""

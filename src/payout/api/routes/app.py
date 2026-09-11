@@ -19,6 +19,7 @@ from payout.api.routes.hubs import ZONES, fenced_zone
 from payout.db import get_connection
 from payout.domain.activity import ACTIONS
 from payout.domain.naming import display_name_for, name_from
+from payout.domain.people import by_person
 from payout.domain.worked import active_person_sql
 
 router = APIRouter()
@@ -184,23 +185,27 @@ def _recruiting_for(conn, email: str, today: date) -> dict:
         "  (SELECT person_id FROM rider_master WHERE recruited_by=?)",
         (email,),
     ).fetchone()[0]
-    recent = [
-        {
-            "rider_id": r["rider_id"],
-            "company_name": r["company"],
-            "name": r["name"],
-            "person_id": r["person_id"],
-            "hub": r["hub"],
-            "created_at": r["created_at"],
-            "is_active": bool(r["is_active"]),
-        }
-        for r in conn.execute(
-            "SELECT rider_id, company, name, person_id, hub, created_at, is_active "
+    # "Latest onboardings" — people, not rider ids, for the same reason the
+    # counts above are. Somebody holding an id at Kaptan and another at Nykaa
+    # was two entries in a list headed by a tile that had counted them once.
+    # by_person also fixes the date: a person is dated by their FIRST id, so
+    # adding a second id years later does not shuffle them back to the top of
+    # "latest".
+    recent = by_person(
+        conn.execute(
+            "SELECT rider_id, company, name, person_id, hub, created_at, is_active, "
+            "       0 AS working, NULL AS last_worked_on, NULL AS ev_id "
             "FROM rider_master WHERE recruited_by=? "
-            "ORDER BY created_at DESC, rider_id DESC LIMIT 20",
+            "ORDER BY created_at DESC, rider_id DESC",
             (email,),
-        )
-    ]
+        ).fetchall()
+    )[:20]
+    for p in recent:
+        # This list has always spoken of the roster switch, not the worked
+        # rule; keep its own key rather than inheriting by_person's.
+        p["is_active"] = p.pop("on_roster")
+        for k in ("working", "last_worked_on", "ev_id"):
+            p.pop(k, None)
     return {
         "email": email,
         "as_of": today.isoformat(),
@@ -283,12 +288,22 @@ def zone_recruiting(
     active = active_person_sql("rm.person_id")
     rows = []
     with get_connection() as conn:
+        # Field staff, plus the caller themselves. Another head in the same
+        # zone is a peer rather than somebody to supervise: `supervises()`
+        # refuses a head reading another head's record, so listing them here
+        # would put a row on the board that 403s when it is tapped. An admin
+        # looking at a zone sees everybody in it, heads included — they
+        # supervise the heads too.
+        peer_heads = (
+            "" if user["role"] in ("admin", "creator") else " AND (u.is_head=0 OR u.email=?)"
+        )
+        params: tuple = (zone,) if not peer_heads else (zone, (user["email"] or "").lower())
         staff = conn.execute(
             "SELECT u.email, u.display_name, u.is_active, p.full_name "
             "FROM users u LEFT JOIN recruiter_profiles p ON p.email = u.email "
-            "WHERE u.role='recruiter' AND LOWER(COALESCE(u.zone,''))=? "
+            f"WHERE u.role='recruiter' AND LOWER(COALESCE(u.zone,''))=?{peer_heads} "
             "ORDER BY u.email",
-            (zone,),
+            params,
         ).fetchall()
         # One row per person, dated from their first id under that recruiter —
         # the same unit as _recruiting_for, so a head's view of somebody can
@@ -523,15 +538,7 @@ def todo(
         hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
-        # A fenced caller keeps the unassigned pool — riders with no store
-        # and nobody credited, for whom no zone could ever be derived. See
-        # hubs.unassigned_pool_sql.
-        in_pool = not (it.get("hub") or "").strip() and not it.get("credited")
-        if (
-            want not in ("all", "unassigned")
-            and (hub_zone or "").lower() != want
-            and not (fence and in_pool)
-        ):
+        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
             continue
         store = stores.setdefault(
             it["hub"] or "Misc",

@@ -37,7 +37,6 @@ import com.qwikserve.recruiter.data.api.Todo
 import com.qwikserve.recruiter.data.api.TodoItem
 import com.qwikserve.recruiter.data.api.TodoStore
 import com.qwikserve.recruiter.data.repo.AppRepository
-import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
@@ -45,6 +44,7 @@ import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.Note
 import com.qwikserve.recruiter.ui.common.NumberTile
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.ScreenAction
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
@@ -265,8 +265,7 @@ fun TodayScreen(
             item { Spacer(Modifier.height(28.dp)) }
         }
     }
-    Rule()
-    BarButton("New rider", onClick = onNewRider, modifier = Modifier.fillMaxWidth())
+    ScreenAction("New rider", onClick = onNewRider)
     }
 }
 
