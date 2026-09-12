@@ -424,3 +424,44 @@ def test_the_pool_reaches_the_todo_board(db, client, board):
     north = _hdr(client, "north@t.test", "Recruit-pass-1")
     t = client.get("/api/app/todo", headers=north).json()
     assert "Owes COD" in [i["name"] for s in t["stores"] for i in s["items"]]
+
+
+# ── the free pool is not in a zone ───────────────────────────────────────────
+
+
+def test_a_fenced_recruiter_sees_the_idle_units(client, board, db):
+    """A spare or returned EV is what a recruiter hands out. Its zone comes
+    from its holder, and it has none, so the fence used to drop every one of
+    them: the pool was invisible to exactly the people whose job is to give it
+    away. Nobody holds it, so it is in nobody's zone, so it is in everybody's.
+    """
+    from tests.conftest import assign, make_ev, make_person, make_rider
+
+    make_ev(db, "POOL-SPARE", status="spare")
+    make_ev(db, "POOL-BACK", status="returned")
+    # and one held by a South rider, which must stay hidden from North
+    pid = make_person(db, "South Holder")
+    make_rider(db, pid, "SF-S2", "Shadowfax", "South Holder")
+    db.execute("UPDATE rider_master SET hub='Garia' WHERE rider_id='SF-S2'")
+    make_ev(db, "SOUTH-HELD", status="in_use")
+    assign(db, pid, "SOUTH-HELD", handover="2026-09-01")
+    db.commit()
+
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    got = {r["ev_id"] for r in client.get("/api/evs", headers=north).json()}
+    assert {"POOL-SPARE", "POOL-BACK"} <= got, "the idle pool must reach the field"
+    assert "SOUTH-HELD" not in got, "the fence still holds for units in someone's hands"
+
+
+def test_the_pool_shows_under_a_state_filter_too(client, board, db):
+    """The app asks for one state at a time, so the pool has to survive that."""
+    from tests.conftest import make_ev
+
+    make_ev(db, "POOL-SPARE", status="spare")
+    make_ev(db, "POOL-BACK", status="returned")
+    db.commit()
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    spare = {r["ev_id"] for r in client.get("/api/evs?status=spare", headers=north).json()}
+    back = {r["ev_id"] for r in client.get("/api/evs?status=returned", headers=north).json()}
+    assert spare == {"POOL-SPARE"}
+    assert back == {"POOL-BACK"}

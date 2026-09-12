@@ -143,7 +143,18 @@ def list_ev_units(
 ) -> list[EvUnitOut]:
     """Fleet list. ``zone`` (North | South | unassigned) goes by the holder's
     hub; ``mine`` keeps units held by riders the caller onboarded. Both only
-    make sense for units in someone's hands — spare units have no hub."""
+    make sense for units in someone's hands — spare units have no hub.
+
+    Which is why the *fence* does not hide a unit nobody holds. A spare or
+    returned unit derives its zone from its holder, and it has none, so the
+    fence dropped every one of them for a fenced recruiter: the free pool was
+    invisible to exactly the people whose job is to hand it out. The pool
+    belongs to no zone, so it belongs to all of them.
+
+    An explicit ``zone=`` is different and still strict. Somebody who asks for
+    North is asking which units are out in North, and a vehicle in the yard is
+    not an answer to that.
+    """
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT u.ev_id, u.status, u.notes, m.provider, m.model_name, m.weekly_rate, "
@@ -184,7 +195,14 @@ def list_ev_units(
         # placeholder id with no zone — getting the real id is the job, and
         # the vehicle is the reason it matters. See hubs.placeholder_pool_sql.
         in_pool = is_placeholder(r["rider_id"]) and not r["zone"]
-        if z and z != "unassigned" and (r["zone"] or "").lower() != z and not (pool and in_pool):
+        held = r["person_id"] is not None
+        if (
+            z
+            and z != "unassigned"
+            and (held or zone is not None)
+            and (r["zone"] or "").lower() != z
+            and not (pool and in_pool)
+        ):
             continue
         if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue

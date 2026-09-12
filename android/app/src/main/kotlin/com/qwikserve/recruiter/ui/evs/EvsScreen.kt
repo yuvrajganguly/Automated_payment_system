@@ -100,10 +100,15 @@ class EvsViewModel @Inject constructor(
      *  again, one layer further down. */
     private val fenced get() = app.zoneChoices().isEmpty()
 
-    /** Units in the chosen scope before the state filter (for the state counts). */
+    /** Units in the chosen scope before the state filter (for the state counts).
+     *
+     *  A unit nobody holds has no zone to be in — it is the pool anyone can
+     *  hand out, so a zone chip must not hide it. Without that, Spare and
+     *  Returned read as empty for a recruiter who had picked their own zone. */
     fun scoped(): List<EvUnitOut> = all.filter { u ->
         (if (mine) me.isNotEmpty() && (u.recruitedBy ?: "").split(",").contains(me) else true) &&
-            (mine || zone == "All" || u.zone == zone || (fenced && u.zone == null))
+            (mine || zone == "All" || u.zone == zone || u.currentPersonId == null ||
+                (fenced && u.zone == null))
     }
 
     fun shown(): List<EvUnitOut> {
