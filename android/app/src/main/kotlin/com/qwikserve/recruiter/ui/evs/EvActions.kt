@@ -1,5 +1,6 @@
 package com.qwikserve.recruiter.ui.evs
 
+import android.net.Uri
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,11 +46,13 @@ import com.qwikserve.recruiter.data.api.MaintenanceIn
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
+import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.ListRow
 import com.qwikserve.recruiter.ui.common.SearchField
 import com.qwikserve.recruiter.ui.common.Segmented
@@ -90,6 +93,7 @@ class EvActionsViewModel @Inject constructor(
     private val api: PayoutApi,
     private val riders: RiderRepository,
     private val app: AppRepository,
+    private val photos: PhotoRepository,
     private val json: Json,
 ) : ViewModel() {
     /** Provider + model rate card, for a unit that is not in the system yet. */
@@ -127,7 +131,7 @@ class EvActionsViewModel @Inject constructor(
     var promptNote by mutableStateOf("")
         private set
 
-    fun clear() { error = null; prompt = null }
+    fun clear() { error = null; prompt = null; photoNote = null }
 
     /** Leave the question unanswered — the vehicle stays on the pending list. */
     fun dismissPrompt() { prompt = null }
@@ -182,23 +186,67 @@ class EvActionsViewModel @Inject constructor(
     fun toSpare(evId: String, onDone: (String) -> Unit) =
         takeBack("$evId is now a spare", onDone) { api.evToSpare(EvReturnIn(evId = evId)) }
 
-    fun sendToMaintenance(evId: String, reason: String, onDone: (String) -> Unit) =
+    /**
+     * Send a vehicle to the workshop, with an optional photo of the fault.
+     *
+     * The fault is logged first and the picture follows it. That ordering is
+     * the whole reason the photo can be optional: if the upload fails on a
+     * store's signal the vehicle is still off the road and the fault is still
+     * on the record, and the recruiter is told which of the two happened
+     * rather than being left guessing whether to do it again.
+     */
+    fun sendToMaintenance(evId: String, reason: String, photo: Uri?, onDone: (String) -> Unit) =
         act("$evId sent for repair", onDone) {
-            api.openMaintenance(
+            val row = api.openMaintenance(
                 MaintenanceIn(
                     evId = evId,
                     fromDate = LocalDate.now().toString(),
                     reason = reason.trim().ifBlank { null },
                 ),
             )
+            if (photo != null) attachPhoto(row.id, "out", photo)
         }
 
-    fun backFromMaintenance(evId: String, onDone: (String) -> Unit) =
+    /**
+     * Back in service, with an optional photo of what came back — the answer
+     * to "was the thing we asked for actually done", and to what the next
+     * rider is being handed.
+     */
+    fun backFromMaintenance(evId: String, photo: Uri?, onDone: (String) -> Unit) =
         act("$evId is back in service", onDone) {
             val open = api.maintenance(evId).firstOrNull { it.toDate == null }
                 ?: throw IllegalStateException("That unit has no open repair to close.")
             api.closeMaintenance(open.id, MaintenanceClose())
+            // After the close, deliberately: the vehicle being back in service
+            // is the fact that matters, and the row keeps its id either way.
+            if (photo != null) attachPhoto(open.id, "in", photo)
         }
+
+    /** Set when the action worked but its picture did not, so the sheet can
+     *  say exactly that instead of reporting a flat success or a flat error. */
+    var photoNote by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Upload one maintenance photo, swallowing its failure on purpose.
+     *
+     * A throw here would roll the caller into the error branch and tell a
+     * recruiter the repair was not logged, which would be a lie — it was. The
+     * photo is the optional half, so a failure is a sentence, not a failure of
+     * the action.
+     */
+    private suspend fun attachPhoto(maintId: Long, kind: String, uri: Uri) {
+        photoNote = null
+        try {
+            photos.uploadMaintenancePhoto(maintId, kind, uri)
+        } catch (e: HttpException) {
+            photoNote = e.readable("the photo did not go up (${e.code()})")
+        } catch (e: IOException) {
+            photoNote = "the photo did not go up — no signal"
+        } catch (e: Exception) {
+            photoNote = e.message ?: "the photo did not go up"
+        }
+    }
 
     /**
      * The two ways a vehicle comes back. Same shape as [act], except that the
@@ -240,7 +288,10 @@ class EvActionsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 call()
-                onDone(success)
+                // attachPhoto sets photoNote when the action worked but its
+                // picture did not. Saying both in one sentence is the honest
+                // report: the vehicle moved, the evidence did not.
+                onDone(photoNote?.let { "$success — but $it" } ?: success)
             } catch (e: HttpException) {
                 error = e.readable("The server answered ${e.code()}")
             } catch (e: IOException) {
@@ -276,6 +327,11 @@ fun EvUnitSheet(
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var mode by remember { mutableStateOf("") } // "" | give | repair
     var reason by remember { mutableStateOf("") }
+    // A picture of the fault, or of what came back. Held in the sheet rather
+    // than in the view model because it belongs to this one action and must
+    // not survive into the next unit's sheet.
+    var faultPhoto by remember(unit.evId) { mutableStateOf<Uri?>(null) }
+    var backPhoto by remember(unit.evId) { mutableStateOf<Uri?>(null) }
     // Set the moment this sheet asks for the vehicle back, so that on a tablet
     // — where this list and a rider's page share one EvActionsViewModel — the
     // deposit question is answered where it was raised and nowhere else.
@@ -380,9 +436,20 @@ fun EvUnitSheet(
                     Spacer(Modifier.height(8.dp))
                     SearchField(reason, onChange = { reason = it }, placeholder = "e.g. battery not charging")
                     Spacer(Modifier.height(14.dp))
+                    // Optional on purpose. A photo makes the argument with the
+                    // provider much easier, but a recruiter on a dying phone
+                    // must still be able to get the vehicle off the road — a
+                    // fault nobody logged is worse than one with no picture.
+                    PhotoTile(
+                        picked = faultPhoto,
+                        size = 88.dp,
+                        label = if (faultPhoto == null) "Photo of the fault — optional" else "Tap to retake",
+                        onPicked = { faultPhoto = it },
+                    )
+                    Spacer(Modifier.height(14.dp))
                     BarButton(
                         if (vm.busy) "Sending…" else "Send for repair",
-                        onClick = { vm.sendToMaintenance(unit.evId, reason, onDone) },
+                        onClick = { vm.sendToMaintenance(unit.evId, reason, faultPhoto, onDone) },
                         enabled = !vm.busy,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -406,9 +473,22 @@ fun EvUnitSheet(
                             GhostAction("Send for repair", onClick = { mode = "repair" })
                         }
                         "maintenance" -> {
+                            Kicker("What came back")
+                            Text(
+                                "A picture of the repaired vehicle, if you have signal for it. " +
+                                    "It is how the office knows the work was actually done.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Qwik.N700,
+                            )
+                            PhotoTile(
+                                picked = backPhoto,
+                                size = 88.dp,
+                                label = if (backPhoto == null) "Optional" else "Tap to retake",
+                                onPicked = { backPhoto = it },
+                            )
                             BarButton(
                                 "Back in service",
-                                onClick = { vm.backFromMaintenance(unit.evId, onDone) },
+                                onClick = { vm.backFromMaintenance(unit.evId, backPhoto, onDone) },
                                 enabled = !vm.busy,
                                 modifier = Modifier.fillMaxWidth(),
                             )

@@ -132,12 +132,7 @@ class NewRiderViewModel @Inject constructor(
     }
 
     /** Stores of the chosen company (Admin → Hubs), falling back to every hub known. */
-    val hubs: List<String>
-        get() {
-            val b = app.bootstrap.value ?: return emptyList()
-            val own = b.companyHubs.filter { it.company == company }.map { it.hub }
-            return own.ifEmpty { b.hubs }
-        }
+    val hubs: List<String> get() = app.hubsFor(company)
 
     /** Referrer picker: the cached roster filtered as you type. */
     val referrerQuery = MutableStateFlow("")

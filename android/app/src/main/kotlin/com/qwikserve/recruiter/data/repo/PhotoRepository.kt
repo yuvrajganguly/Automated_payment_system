@@ -55,6 +55,16 @@ class PhotoRepository @Inject constructor(
         api.uploadCloseoutPhoto(assignmentId, part(uri, "damage-$assignmentId.jpg"))
     }
 
+    /**
+     * The vehicle going to the workshop, or coming back. ``kind`` is "out" or
+     * "in"; the maintenance row is saved first, so this only ever attaches
+     * evidence to a fault that already exists.
+     */
+    suspend fun uploadMaintenancePhoto(maintId: Long, kind: String, uri: Uri) =
+        withContext(Dispatchers.IO) {
+            api.uploadMaintenancePhoto(maintId, kind, part(uri, "maintenance-$kind-$maintId.jpg"))
+        }
+
     /** One picture off the phone, shrunk, as a `file` part. */
     private fun part(uri: Uri, filename: String): MultipartBody.Part {
         val jpeg = readAndShrink(uri) ?: error("That picture could not be read.")

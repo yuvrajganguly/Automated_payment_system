@@ -5,12 +5,12 @@ from __future__ import annotations
 import contextlib
 from datetime import date
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
 from payout.api.ratelimit import rate_limit
-from payout.api.routes.hubs import zone_scope
+from payout.api.routes.hubs import sees_placeholder_pool, zone_scope
 from payout.api.schemas import (
     BackrentIn,
     EvAmendReturnIn,
@@ -39,6 +39,7 @@ from payout.domain.closeout import (
     report_for,
     save_report,
 )
+from payout.domain.placeholders import is_placeholder
 from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
 from payout.money import to_paise
@@ -172,13 +173,18 @@ def list_ev_units(
             "ORDER BY u.ev_id"
         ).fetchall()
     z = zone_scope(user, zone) or ""
+    pool = sees_placeholder_pool(user)
     out: list[EvUnitOut] = []
     for r in rows:
         if status and r["status"] != status:
             continue
         if z == "unassigned" and (r["person_id"] is None or r["zone"]):
             continue
-        if z and z != "unassigned" and (r["zone"] or "").lower() != z:
+        # A fenced caller also sees an EV held by a rider still on a
+        # placeholder id with no zone — getting the real id is the job, and
+        # the vehicle is the reason it matters. See hubs.placeholder_pool_sql.
+        in_pool = is_placeholder(r["rider_id"]) and not r["zone"]
+        if z and z != "unassigned" and (r["zone"] or "").lower() != z and not (pool and in_pool):
             continue
         if mine and user["email"] not in (r["recruited_by"] or "").split(","):
             continue
@@ -1029,6 +1035,27 @@ def apply_backrent_ep(body: BackrentIn, user: dict = Depends(require_admin)) -> 
     return res
 
 
+# Maintenance photos live in the same document store as rider photos and
+# close-out damage photos; the row keeps only the key. Two of them, because
+# they answer different arguments: the outgoing picture is what was wrong (the
+# evidence for the bill, and for saying the fault was not the rider's), the
+# incoming one is whether the repair was actually done.
+MAINTENANCE_PHOTO_KINDS = ("out", "in")
+
+
+def _maintenance_out(row) -> MaintenanceOut:
+    """One row → the wire model, with the photo keys turned into flags.
+
+    The keys never leave the server: a client that could read them could read
+    any object in the store by guessing. It gets "there is a picture", and the
+    picture itself from its own endpoint.
+    """
+    d = dict(row)
+    d["has_out_photo"] = bool(d.pop("out_photo_key", None))
+    d["has_in_photo"] = bool(d.pop("in_photo_key", None))
+    return MaintenanceOut(**d)
+
+
 @router.get("/maintenance", response_model=list[MaintenanceOut])
 def list_maintenance(
     ev_id: str | None = None, _: dict = Depends(get_current_user)
@@ -1039,11 +1066,12 @@ def list_maintenance(
         params = (ev_id,)
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT id, ev_id, from_date, to_date, reason, created_by, created_at "
+            f"SELECT id, ev_id, from_date, to_date, reason, created_by, created_at, "
+            f"       out_photo_key, in_photo_key "
             f"FROM ev_maintenance {where} ORDER BY from_date DESC",
             params,
         ).fetchall()
-    return [MaintenanceOut(**dict(r)) for r in rows]
+    return [_maintenance_out(r) for r in rows]
 
 
 @router.post("/maintenance", response_model=MaintenanceOut, status_code=201)
@@ -1086,11 +1114,12 @@ def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_recruiter)
         )
         conn.commit()
         row = conn.execute(
-            "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at "
+            "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at, "
+            "       out_photo_key, in_photo_key "
             "FROM ev_maintenance WHERE id=?",
             (row_id,),
         ).fetchone()
-    return MaintenanceOut(**dict(row))
+    return _maintenance_out(row)
 
 
 @router.patch("/maintenance/{maint_id}", response_model=MaintenanceOut)
@@ -1137,11 +1166,12 @@ def close_maintenance(
         )
         conn.commit()
         out = conn.execute(
-            "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at "
+            "SELECT id, ev_id, from_date, to_date, reason, created_by, created_at, "
+            "       out_photo_key, in_photo_key "
             "FROM ev_maintenance WHERE id=?",
             (maint_id,),
         ).fetchone()
-    return MaintenanceOut(**dict(out))
+    return _maintenance_out(out)
 
 
 @router.get("/{ev_id}/profile")
@@ -1177,3 +1207,96 @@ def ev_profile(ev_id: str, _: dict = Depends(get_current_user)) -> dict:
         "assignments": [dict(a) for a in assignments],
         "maintenance": [dict(m) for m in maint],
     }
+
+
+def _maintenance_photo_column(kind: str) -> str:
+    if kind not in MAINTENANCE_PHOTO_KINDS:
+        raise HTTPException(400, "kind must be 'out' (going for repair) or 'in' (coming back)")
+    return f"{kind}_photo_key"
+
+
+@router.post("/maintenance/{maint_id}/photo")
+def upload_maintenance_photo(
+    maint_id: int,
+    kind: str = Query("out", description="out = what was wrong; in = what came back"),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_recruiter),
+    _: None = Depends(rate_limit("staff-photo", 40, 3600)),
+) -> dict:
+    """The vehicle, photographed on its way to the workshop or on its way back.
+
+    **Optional by decision** (2026-09-12). A photo makes the argument with the
+    provider much easier, but requiring one would mean a recruiter with a dying
+    phone at a store cannot log a fault at all — and a fault nobody logged is
+    worse than one logged without a picture.
+
+    Same ordering as the close-out photo and everything else in the app: the
+    record saves first and the picture follows, so a failed upload on a hub's
+    signal costs the photo and not the report. Re-uploading replaces the
+    previous image and deletes it from the store.
+    """
+    column = _maintenance_photo_column(kind)
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if ctype not in ALLOWED_CONTENT_TYPES or ctype == "application/pdf":
+        raise HTTPException(415, "Send a JPEG, PNG or WebP image")
+    data = file.file.read(MAX_CLOSEOUT_PHOTO_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "The file was empty")
+    if len(data) > MAX_CLOSEOUT_PHOTO_BYTES:
+        raise HTTPException(413, "That image is too large — the app should shrink it first")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT ev_id, {column} AS key FROM ev_maintenance WHERE id=?",  # noqa: S608
+            (maint_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Send the vehicle for repair first")
+        key = make_staff_key(user["email"], f"ev_maintenance_{kind}", ctype)
+        get_storage().put(key, data, ctype)
+        conn.execute(
+            f"UPDATE ev_maintenance SET {column}=? WHERE id=?",  # noqa: S608 - literal above
+            (key, maint_id),
+        )
+        record_activity(
+            conn,
+            user,
+            "ev.maintenance_photo",
+            entity_type="ev",
+            entity_id=row["ev_id"],
+            details={"maintenance_id": maint_id, "kind": kind},
+        )
+        conn.commit()
+        old = row["key"]
+    if old and old != key:
+        with contextlib.suppress(Exception):
+            get_storage().delete(old)
+    return {"ok": True, "kind": kind}
+
+
+@router.get("/maintenance/{maint_id}/photo")
+def maintenance_photo(
+    maint_id: int,
+    kind: str = Query("out"),
+    user: dict = Depends(get_current_user),
+) -> Response:
+    """The picture. Any signed-in member of staff — the office has to see what
+    it is being billed for, and the recruiter has to be able to check what
+    they sent."""
+    column = _maintenance_photo_column(kind)
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT {column} AS key FROM ev_maintenance WHERE id=?",  # noqa: S608
+            (maint_id,),
+        ).fetchone()
+    if not row or not row["key"]:
+        raise HTTPException(404, "No photo")
+    try:
+        data = get_storage().get(row["key"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "No photo") from exc
+    ext = row["key"].rsplit(".", 1)[-1]
+    ctype = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+    return Response(
+        content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=300"}
+    )

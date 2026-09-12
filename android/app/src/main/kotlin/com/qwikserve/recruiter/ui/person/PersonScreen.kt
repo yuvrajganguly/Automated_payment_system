@@ -12,13 +12,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,18 +37,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.PayoutApi
+import com.qwikserve.recruiter.data.api.MoneyRequestIn
 import com.qwikserve.recruiter.data.api.PersonOut
+import com.qwikserve.recruiter.data.api.RiderPatchBody
 import com.qwikserve.recruiter.data.api.TimelineEvent
 import com.qwikserve.recruiter.data.db.RiderEntity
+import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
+import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.evs.CloseoutSheet
 import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
@@ -50,11 +64,14 @@ import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Skeleton
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
 import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.common.shortStamp
+import com.qwikserve.recruiter.ui.login.Field
+import com.qwikserve.recruiter.ui.login.fieldColors
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -65,6 +82,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 import java.io.IOException
 import javax.inject.Inject
 @HiltViewModel
@@ -73,6 +92,8 @@ class PersonViewModel @Inject constructor(
     private val repo: RiderRepository,
     private val photos: PhotoRepository,
     private val api: PayoutApi,
+    private val json: Json,
+    private val app: AppRepository,
 ) : ViewModel() {
     /** Which rider this screen is showing. It arrives as a navigation argument
      *  on a phone, and as a selection in the second pane on a tablet — where
@@ -118,6 +139,122 @@ class PersonViewModel @Inject constructor(
                 .onSuccess { if (_personId.value == id) photoVersion++ }
                 .onFailure { error = "The photo did not upload. Try again when the signal is better." }
             uploadingPhoto = false
+        }
+    }
+
+    /* ── editing one rider id ───────────────────────────────────────────── */
+
+    /** Which (rider_id, company) the edit sheet is open on, or null. */
+    var editing by mutableStateOf<Pair<String, String>?>(null)
+        private set
+    var savingRider by mutableStateOf(false)
+        private set
+    var riderError by mutableStateOf<String?>(null)
+        private set
+
+    fun edit(riderId: String, company: String) {
+        editing = riderId to company
+        riderError = null
+    }
+
+    fun closeEdit() {
+        editing = null
+        riderError = null
+    }
+
+    /** Store suggestions for the sheet, from the same list onboarding uses. */
+    fun hubChoices(company: String): List<String> = app.hubsFor(company)
+
+    /* ── asking the office to move money ────────────────────────────────── */
+
+    var askingMoney by mutableStateOf(false)
+        private set
+    var moneyBusy by mutableStateOf(false)
+        private set
+    var moneyError by mutableStateOf<String?>(null)
+        private set
+    /** Set once a request is filed, so the page can say so without a reload. */
+    var moneyNote by mutableStateOf<String?>(null)
+        private set
+
+    fun askMoney() {
+        askingMoney = true
+        moneyError = null
+    }
+
+    fun closeMoney() {
+        askingMoney = false
+        moneyError = null
+    }
+
+    /**
+     * File a money request against this rider. It does NOT move money — it
+     * sits open until an admin approves it, and that is the whole design: a
+     * recruiter knows things the office does not ("he paid ₹500 cash for the
+     * helmet") but may not post to the ledger themselves.
+     */
+    fun sendMoneyRequest(direction: String, rupees: Double, reason: String) {
+        if (moneyBusy) return
+        val id = _personId.value
+        moneyBusy = true
+        moneyError = null
+        viewModelScope.launch {
+            try {
+                api.createRequest(MoneyRequestIn(id, direction, rupees, reason.trim()))
+                askingMoney = false
+                moneyNote = "Request sent to the office. It shows here once they decide."
+                loadTimeline()
+            } catch (e: IOException) {
+                moneyError = "No signal — the request was not sent."
+            } catch (e: HttpException) {
+                moneyError = runCatching {
+                    json.decodeFromString(
+                        ApiError.serializer(),
+                        e.response()?.errorBody()?.string().orEmpty(),
+                    ).detail
+                }.getOrNull() ?: "The server answered ${e.code()}."
+            } catch (e: Exception) {
+                moneyError = e.message ?: "Could not send the request"
+            } finally {
+                moneyBusy = false
+            }
+        }
+    }
+
+    /**
+     * Save one rider id. Only the fields that changed are sent, so a recruiter
+     * correcting an account number cannot blank the phone by opening the sheet.
+     *
+     * The 409 the server answers when the account number already belongs to
+     * somebody else is shown as-is: it names the other rider, which is the
+     * whole point of it, and is far more useful than "could not save".
+     */
+    fun saveRider(riderId: String, company: String, body: RiderPatchBody, onDone: () -> Unit) {
+        if (savingRider) return
+        savingRider = true
+        riderError = null
+        viewModelScope.launch {
+            try {
+                repo.update(riderId, company, body)
+                load()
+                onDone()
+            } catch (e: IOException) {
+                riderError = "No signal — this one needs the server."
+            } catch (e: HttpException) {
+                // The server's own sentence. The 409 on a duplicate account
+                // number names the other rider, which is the entire value of
+                // it and far more use than "could not save".
+                riderError = runCatching {
+                    json.decodeFromString(
+                        ApiError.serializer(),
+                        e.response()?.errorBody()?.string().orEmpty(),
+                    ).detail
+                }.getOrNull() ?: "The server answered ${e.code()}."
+            } catch (e: Exception) {
+                riderError = e.message ?: "Could not save"
+            } finally {
+                savingRider = false
+            }
         }
     }
 
@@ -301,7 +438,9 @@ fun PersonScreen(
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
                 val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName) }
-                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy) }
+                    // The cache carries the holder name too since it became a column
+                    // on RiderEntity, so the offline row says the same as the live one.
+                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName) }
                 if (rows.isEmpty()) Skeleton(220.dp)
                 rows.forEach { r ->
                     Hairline()
@@ -326,6 +465,9 @@ fun PersonScreen(
                         r.recruitedBy?.let {
                             Text("Onboarded by " + it.substringBefore('@'), style = MaterialTheme.typography.bodySmall, color = Qwik.N600)
                         }
+                        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            GhostAction("Edit details", onClick = { vm.edit(r.riderId, r.company) })
+                        }
                     }
                 }
                 Hairline()
@@ -346,12 +488,22 @@ fun PersonScreen(
                 }
 
                 val phone = rows.firstNotNullOfOrNull { it.phone }
-                if (phone != null) {
-                    Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    if (phone != null) {
                         GhostAction("Call $phone", onClick = {
                             ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { it.isDigit() || it == '+' })))
                         })
                     }
+                    // The only thing a recruiter may do about money: ask.
+                    GhostAction("Ask the office for money", onClick = vm::askMoney)
+                }
+                vm.moneyNote?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Qwik.N700,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
                 }
 
                 Timeline(
@@ -363,6 +515,37 @@ fun PersonScreen(
                 Spacer(Modifier.height(32.dp))
             }
         }
+    }
+
+    // Editing one rider id. `rows` is the same list the section above draws,
+    // so the sheet opens on what is on screen rather than re-fetching.
+    vm.editing?.let { (rid, co) ->
+        val line = (
+            vm.person?.riders?.firstOrNull { it.riderId == rid && it.company == co }?.let {
+                RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName)
+            } ?: cached.firstOrNull { it.riderId == rid && it.company == co }?.let {
+                RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName)
+            }
+            )
+        if (line == null) vm.closeEdit() else EditRiderSheet(
+            line = line,
+            riderName = name,
+            hubs = vm.hubChoices(line.company),
+            saving = vm.savingRider,
+            error = vm.riderError,
+            onSave = { body -> vm.saveRider(rid, co, body) { vm.closeEdit() } },
+            onDismiss = vm::closeEdit,
+        )
+    }
+
+    if (vm.askingMoney) {
+        AskMoneySheet(
+            riderName = name,
+            busy = vm.moneyBusy,
+            error = vm.moneyError,
+            onSend = vm::sendMoneyRequest,
+            onDismiss = vm::closeMoney,
+        )
     }
 
     if (giving) {
@@ -476,9 +659,307 @@ private fun Standing(label: String, value: String, modifier: Modifier = Modifier
     }
 }
 
+/**
+ * Edit one rider id: the store, the phone and the bank account.
+ *
+ * The server has always accepted these from a recruiter — `PATCH /riders/{id}`
+ * takes `require_recruiter` and only fences off salary and re-crediting — but
+ * nothing in the app ever asked for them, so a wrong account number meant a
+ * message to the office and a wait. This is that form.
+ *
+ * Only what changed is sent. Opening the sheet and saving without touching a
+ * field writes nothing, which matters because a half-filled form must not be
+ * able to blank a phone number somebody else entered.
+ *
+ * Two fields need a word:
+ *
+ *  * **Account holder** is left empty when the account is in the rider's own
+ *    name, and the placeholder says so. Clearing a name that was entered by
+ *    mistake sends "" rather than null, which is how the server tells "leave
+ *    it alone" from "put it back to the rider's own name".
+ *  * **On the roster** is the switch the inactive rule reads. Turning it off
+ *    says "they left this company", and their absence from that company's
+ *    payout stops counting against them — see domain/worked.py. It is not a
+ *    delete: the ledger and the id both stay.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditRiderSheet(
+    line: RiderLine,
+    riderName: String?,
+    hubs: List<String>,
+    saving: Boolean,
+    error: String?,
+    onSave: (RiderPatchBody) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var hub by remember(line) { mutableStateOf(line.hub.orEmpty()) }
+    var phone by remember(line) { mutableStateOf(line.phone.orEmpty()) }
+    var account by remember(line) { mutableStateOf(line.account.orEmpty()) }
+    var ifsc by remember(line) { mutableStateOf(line.ifsc.orEmpty()) }
+    var holder by remember(line) { mutableStateOf(line.holder.orEmpty()) }
+    var active by remember(line) { mutableStateOf(line.active) }
+
+    // Null means "not sent". Trimmed on both sides so re-saving the same value
+    // with a stray space is still a no-change.
+    fun changed(now: String, before: String?): String? =
+        now.trim().takeIf { it != (before ?: "").trim() }
+
+    val body = RiderPatchBody(
+        hub = changed(hub, line.hub),
+        mobNo = changed(phone, line.phone),
+        accountNo = changed(account, line.account),
+        ifsc = changed(ifsc.uppercase(), line.ifsc),
+        accountName = changed(holder, line.holder),
+        isActive = active.takeIf { it != line.active },
+    )
+    val dirty = listOf(body.hub, body.mobNo, body.accountNo, body.ifsc, body.accountName)
+        .any { it != null } || body.isActive != null
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Qwik.Bg) {
+        Column(
+            Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+        ) {
+            Text("Edit rider id", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+            Spacer(Modifier.height(6.dp))
+            Kicker(line.riderId + " · " + line.company)
+            Spacer(Modifier.height(14.dp))
+
+            Field("Store") {
+                Input(hub, { hub = it }, placeholder = "Salt Lake", cap = KeyboardCapitalization.Words)
+            }
+            val suggestions = hubs.filter {
+                hub.isNotBlank() && it.contains(hub, ignoreCase = true) && !it.equals(hub, ignoreCase = true)
+            }.take(4)
+            if (suggestions.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    suggestions.forEach { h ->
+                        Text(
+                            h,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Qwik.Accent700,
+                            modifier = Modifier.clickable { hub = h }.padding(4.dp),
+                        )
+                    }
+                }
+            }
+            Field("Phone") {
+                Input(phone, { phone = it.filter { c -> c.isDigit() } }, placeholder = "9800011122", keyboard = KeyboardType.Phone)
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Kicker("Bank account")
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Where this company's payout goes. Get it wrong and the payment bounces, " +
+                    "so check the digits against the passbook rather than a photo of it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N700,
+            )
+            Field("Account number") {
+                Input(account, { account = it.filter { c -> c.isDigit() } }, placeholder = "0123456789", keyboard = KeyboardType.Number)
+            }
+            Field("IFSC") {
+                Input(ifsc, { ifsc = it.uppercase() }, placeholder = "SBIN0001234", cap = KeyboardCapitalization.Characters)
+            }
+            Field("Account holder") {
+                Input(holder, { holder = it }, placeholder = riderName ?: "The rider's own name", cap = KeyboardCapitalization.Words)
+            }
+            Text(
+                if (holder.isBlank()) {
+                    "Empty means the account is in the rider's own name."
+                } else {
+                    "The payout will name $holder, not the rider."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (holder.isBlank()) Qwik.N600 else Qwik.Accent700,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Hairline()
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("On the roster", style = MaterialTheme.typography.titleMedium, color = Qwik.Ink)
+                    Text(
+                        if (active) {
+                            "They still work ${line.company}."
+                        } else {
+                            "They have left ${line.company}. This id stops counting against them."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Qwik.N700,
+                    )
+                }
+                Switch(checked = active, onCheckedChange = { active = it })
+            }
+            Hairline()
+
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(error, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(16.dp))
+            BarButton(
+                if (saving) "Saving…" else "Save",
+                onClick = { onSave(body) },
+                enabled = !saving && dirty,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                GhostAction("Cancel", onClick = onDismiss, color = Qwik.N700, enabled = !saving)
+            }
+        }
+    }
+}
+
+/**
+ * Ask the office to credit or debit this rider.
+ *
+ * This does not move money, and the wording says so twice — once as the
+ * heading's note and once on the button — because a recruiter who believes
+ * they have just paid somebody will not chase it, and the rider will be back
+ * tomorrow asking where it is.
+ *
+ * Direction is a two-way switch rather than a signed amount. "He owes us 500"
+ * and "we owe him 500" are the two things anybody actually means, and a minus
+ * sign typed into a number field is the easiest mistake in the app to make.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AskMoneySheet(
+    riderName: String?,
+    busy: Boolean,
+    error: String?,
+    onSend: (String, Double, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var credit by remember { mutableStateOf(true) }
+    var amount by remember { mutableStateOf("") }
+    var reason by remember { mutableStateOf("") }
+    // Not named `rupees`: that is the formatter imported from ui.common, and
+    // shadowing it here would make rupees(...) below a call on a Double.
+    val amountRs = amount.toDoubleOrNull() ?: 0.0
+    // The server's own floor: 3 characters, because "ok" explains nothing to
+    // the admin who has to decide.
+    val ready = amountRs > 0 && reason.trim().length >= 3
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Qwik.Bg) {
+        Column(
+            Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+        ) {
+            Text("Ask the office", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+            Spacer(Modifier.height(6.dp))
+            Kicker(riderName ?: "This rider")
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "This does not move any money. It goes to the office as a request, " +
+                    "and an admin decides — so tell the rider it is pending, not done.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Qwik.N700,
+            )
+            Spacer(Modifier.height(14.dp))
+            Segmented(
+                listOf("We owe him", "He owes us"),
+                selected = if (credit) 0 else 1,
+                onSelect = { credit = it == 0 },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (credit) {
+                    "A credit: his balance goes up by this much."
+                } else {
+                    "A debit: it comes off his next payout."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N600,
+            )
+            Spacer(Modifier.height(12.dp))
+            Field("Amount (₹)") {
+                Input(
+                    amount,
+                    { amount = it.filter { c -> c.isDigit() || c == '.' } },
+                    placeholder = "500",
+                    keyboard = KeyboardType.Decimal,
+                )
+            }
+            Field("Why") {
+                Input(
+                    reason,
+                    { reason = it },
+                    placeholder = "Paid ₹500 cash for the helmet",
+                    cap = KeyboardCapitalization.Sentences,
+                )
+            }
+            Text(
+                "The admin sees only this sentence, so write what you would say on " +
+                    "the phone.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N600,
+            )
+
+            if (error != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(error, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(16.dp))
+            BarButton(
+                when {
+                    busy -> "Sending…"
+                    amountRs > 0 -> "Send request for " + rupees(amountRs)
+                    else -> "Send request"
+                },
+                onClick = { onSend(if (credit) "credit" else "debit", amountRs, reason) },
+                enabled = !busy && ready,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                GhostAction("Cancel", onClick = onDismiss, color = Qwik.N700, enabled = !busy)
+            }
+        }
+    }
+}
+
 private data class RiderLine(
     val riderId: String, val company: String, val hub: String?, val phone: String?,
     val account: String?, val ifsc: String?, val active: Boolean, val recruitedBy: String?,
     /** Whose name the account is in, only when it is not the rider's own. */
     val holder: String? = null,
 )
+
+/**
+ * A form field in the app's style.
+ *
+ * The third copy of this in the app — ProfileScreen and NewRiderScreen have
+ * their own private ones. It is twelve lines and it belongs in ui.common with
+ * `Field` and `fieldColors`, which live in ui.login for the same historical
+ * reason. Deliberately not moved here: that is a refactor across four files
+ * and this change is a fix somebody is waiting on.
+ */
+@Composable
+private fun Input(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    keyboard: KeyboardType = KeyboardType.Text,
+    cap: KeyboardCapitalization = KeyboardCapitalization.None,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text(placeholder, color = Qwik.N600, maxLines = 1) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard, capitalization = cap),
+        colors = fieldColors(),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}

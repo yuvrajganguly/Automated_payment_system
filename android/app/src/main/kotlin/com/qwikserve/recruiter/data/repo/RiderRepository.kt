@@ -3,6 +3,7 @@ package com.qwikserve.recruiter.data.repo
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.api.PersonOut
 import com.qwikserve.recruiter.data.api.RiderIn
+import com.qwikserve.recruiter.data.api.RiderPatchBody
 import com.qwikserve.recruiter.data.api.RiderOut
 import androidx.room.withTransaction
 import com.qwikserve.recruiter.data.db.AppDatabase
@@ -54,6 +55,20 @@ class RiderRepository @Inject constructor(
         return out
     }
 
+    /**
+     * Edit one rider id (online only), then fold the answer into the cache so
+     * the list and the rider's page show the new value without a full re-sync.
+     *
+     * The server's response is used rather than the values that were typed:
+     * it has normalised them (IFSC uppercased, blanks turned to null) and it
+     * is the row that actually exists now.
+     */
+    suspend fun update(riderId: String, company: String, body: RiderPatchBody): RiderOut {
+        val out = api.patchRider(riderId, company, body)
+        dao.upsertAll(listOf(out.toEntity()))
+        return out
+    }
+
     private fun RiderOut.toEntity() = RiderEntity(
         riderId = riderId,
         company = company,
@@ -63,6 +78,7 @@ class RiderRepository @Inject constructor(
         vehicle = vehicle,
         mobNo = mobNo,
         accountNo = accountNo,
+        accountName = accountName,
         ifsc = ifsc,
         isActive = isActive,
         recruitedBy = recruitedBy,

@@ -20,6 +20,8 @@ data class RiderEntity(
     val vehicle: String?,
     val mobNo: String?,
     val accountNo: String?,
+    /** Whose name the account is in, null when it is the rider's own. */
+    val accountName: String?,
     val ifsc: String?,
     val isActive: Boolean,
     /** users.email of the recruiter who onboarded this id (for "My riders") */
@@ -70,7 +72,7 @@ interface RiderDao {
 // v3 added working / lastWorkedOn. The database is a cache and the builder
 // uses fallbackToDestructiveMigration(), so a bump simply rebuilds it from the
 // next sync — there is nothing here the server is not the truth for.
-@Database(entities = [RiderEntity::class], version = 3, exportSchema = true)
+@Database(entities = [RiderEntity::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun riderDao(): RiderDao
 }

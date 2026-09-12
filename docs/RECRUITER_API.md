@@ -91,8 +91,9 @@ POST  /riders                             {"company","name","rider_id"?,"hub"?,"
                                            "aadhaar_no"?,"pan_no"?,"person_id"?,"allow_duplicate_name"?,"referred_by_person_id"?}
                                           rider_id blank → placeholder QSPEND<NNNN>; person_id → attach to an existing person (2nd company);
                                           referred_by_person_id → records a referral (response carries "referred_by": the referrer's name)
-PATCH /riders/{rider_id}?company=         any of {"name","hub","vehicle","account_no","ifsc","mob_no","is_active","new_rider_id","new_company"}
-                                          ("recruited_by" and "salary" are admin-only)
+PATCH /riders/{rider_id}?company=         any of {"name","hub","vehicle","account_no","account_name","ifsc","mob_no","is_active","new_rider_id","new_company"}
+                                          ("recruited_by" and "salary" are admin-only); account_name:"" clears it back to the rider's own name
+                                          a recruiter may send all of the rest — the app's "Edit details" on a rider id is this call
 POST  /riders/rename-rider-id             {"person_id","company","new_rider_id","current_rider_id"?}  — tag the real id; the QSPEND placeholder is retired
 GET   /persons/{person_id}                person: display_name, riders[], ev (open), ev_history[]
 GET   /companies                          company list (for the company picker)
@@ -247,6 +248,8 @@ POST  /evs/to-spare                           same body — take back into the p
 GET   /evs/maintenance                        log
 POST  /evs/maintenance                        {"ev_id","from_date","to_date"?,"reason"?}   → unit status 'maintenance'
 PATCH /evs/maintenance/{id}                   {"to_date"?}  — close the window; unit goes back to in_use / spare
+POST  /evs/maintenance/{id}/photo?kind=out    multipart file — the vehicle going to the workshop (kind=out) or coming back (kind=in)
+GET   /evs/maintenance/{id}/photo?kind=out    the image itself; 404 when there is none, which is a normal answer
 ```
 
 `amend-return`, `backrent` and everything that changes money stay admin-only.
@@ -356,7 +359,7 @@ GET /activity/actions       {action: label}
 
 Actions: `rider.create rider.update rider.rename rider.link rider.delete
 person.merge ev.create ev.assign ev.return ev.spare ev.maintenance_open
-ev.maintenance_close document.upload document.delete request.create
+ev.maintenance_close ev.maintenance_photo document.upload document.delete request.create
 request.approve request.reject ev_request.create ev_request.fulfil
 ev_request.reject ev_request.cancel ev.amend_return ev.closeout
 ev.suspected_return.dismiss ev.suspected_return.undismiss person.identity
@@ -475,6 +478,28 @@ an answer rather than inventing one about a vehicle nobody there has seen.
 deposit went back whole, or it was kept and damage is owed against it.
 Re-reporting corrects the previous answer; once the office has settled, a
 report is refused.
+
+## Maintenance photos
+
+A maintenance row can carry two pictures: `out` — the vehicle on its way to the
+workshop, which is what was wrong — and `in`, what came back. They answer
+different arguments (the repair bill and whether the fault was the rider's; then
+whether the work was actually done and what the next rider is handed), which is
+why they are two columns and not one.
+
+**Both are optional, by decision (2026-09-12).** A photo makes the argument with
+the provider much easier, but requiring one would mean a recruiter with a dying
+phone at a store cannot log a fault at all — and a fault nobody logged is worse
+than one logged without a picture. So `GET` answering 404 is a normal state, and
+`MaintenanceOut` carries `has_out_photo` / `has_in_photo` rather than keys: the
+storage key never leaves the server, and a client gets "there is a picture" plus
+its own endpoint to fetch it.
+
+The record always comes before the picture — the maintenance row is created
+first, and a photo posted against an id that does not exist is a 404. In the app
+the fault is logged, then the upload follows; if the upload fails the recruiter
+is told the vehicle is off the road *and* that the photo did not go up, rather
+than being left to guess whether to repeat the whole thing.
 
 ## Working and idle riders
 

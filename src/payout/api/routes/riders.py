@@ -8,7 +8,7 @@ import pandas as pd
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 
 from payout.api.auth import get_current_user, no_recruiter, require_admin, require_recruiter
-from payout.api.routes.hubs import zone_scope
+from payout.api.routes.hubs import placeholder_pool_sql, sees_placeholder_pool, zone_scope
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
@@ -412,10 +412,14 @@ def list_riders(
     if z:
         if z == "unassigned":
             where.append("COALESCE(hz.zone, ru.zone) IS NULL")
+        elif sees_placeholder_pool(user):
+            # Their zone, plus the riders still carrying a placeholder id with
+            # no zone to derive — see hubs.placeholder_pool_sql. Somebody has
+            # to go and get the company's real id, and that job is not zoned.
+            pool = placeholder_pool_sql("rm.rider_id", "COALESCE(hz.zone, ru.zone)")
+            where.append(f"(LOWER(COALESCE(hz.zone, ru.zone))=? OR {pool})")
+            params.append(z)
         else:
-            # Their zone and only their zone. A rider no zone can be derived
-            # for belongs to neither until somebody places them — see
-            # hubs.unzoned_is_hidden_from_the_field.
             where.append("LOWER(COALESCE(hz.zone, ru.zone))=?")
             params.append(z)
     page = ""
@@ -564,8 +568,12 @@ def update_rider(
                 rider_id, company = target_rid, target_co  # for the SELECT below
 
         row = conn.execute(
-            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, "
-            " mob_no, is_active, salary, recruited_by FROM rider_master "
+            # account_name was missing here while being perfectly writable
+            # above, so saving any field answered with the holder name blanked
+            # and a client that trusts the response — the app does, it folds it
+            # straight into its cache — showed the account as the rider's own.
+            "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, account_name, "
+            " ifsc, mob_no, is_active, salary, recruited_by FROM rider_master "
             "WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()

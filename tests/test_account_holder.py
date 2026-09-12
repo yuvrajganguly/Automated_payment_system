@@ -251,3 +251,114 @@ def test_holder_survives_the_migration_on_an_existing_row(db):
     make_rider(db, pid, "L1", "Kaptan", "Legacy Rider")
     db.commit()
     assert _holder(db, "L1", "Kaptan") is None
+
+
+def test_saving_a_rider_keeps_the_holder_name_in_the_response(client, db):
+    """PATCH used to answer with account_name blanked — it was writable but
+    missing from the SELECT that builds the response. The app folds that
+    response straight into its cache, so editing a phone number silently made
+    the account look like the rider's own."""
+    r = client.post(
+        "/api/riders",
+        json={
+            "company": "Shadowfax",
+            "name": "Arjun Das",
+            "rider_id": "SF-1",
+            "account_no": "123456789",
+            "account_name": "Sita Das",
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["account_name"] == "Sita Das"
+
+    # Change something else entirely.
+    r = client.patch("/api/riders/SF-1?company=Shadowfax", json={"mob_no": "9800011122"})
+    assert r.status_code == 200, r.text
+    assert r.json()["account_name"] == "Sita Das", "the holder name must survive an unrelated edit"
+    assert _holder(db, "SF-1", "Shadowfax") == "Sita Das"
+
+    # And clearing it still works, both in the row and in the answer.
+    r = client.patch("/api/riders/SF-1?company=Shadowfax", json={"account_name": ""})
+    assert r.status_code == 200 and r.json()["account_name"] is None
+    assert _holder(db, "SF-1", "Shadowfax") is None
+
+
+def test_a_recruiter_may_edit_the_bank_details(client, db):
+    """What the app could not do until 2026-09-11 — not because the server
+    refused, but because nothing in the app asked. These are the four fields
+    the edit sheet sends; if any of them ever becomes admin-only, the sheet
+    goes quiet and this fails."""
+    from payout.auth import hash_password
+
+    db.execute(
+        "INSERT INTO users (email, password_hash, role, is_active) VALUES (?,?,?,1)",
+        ("rec@t.test", hash_password("Recruit-pass-1"), "recruiter"),
+    )
+    db.commit()
+    r = client.post(
+        "/api/auth/login", data={"username": "rec@t.test", "password": "Recruit-pass-1"}
+    )
+    assert r.status_code == 200, r.text
+    hdr = {"Authorization": "Bearer " + r.json()["access_token"]}
+
+    client.post(
+        "/api/riders", json={"company": "Shadowfax", "name": "Arjun Das", "rider_id": "SF-1"}
+    )
+    r = client.patch(
+        "/api/riders/SF-1?company=Shadowfax",
+        json={
+            "account_no": "445566778899",
+            "ifsc": "sbin0001234",
+            "account_name": "Sita Das",
+            "mob_no": "9800011122",
+            "hub": "Salt Lake",
+        },
+        headers=hdr,
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["account_no"] == "445566778899"
+    assert out["ifsc"] == "SBIN0001234", "IFSC is uppercased for them"
+    assert out["account_name"] == "Sita Das"
+    assert out["mob_no"] == "9800011122"
+    assert out["hub"] == "Salt Lake"
+
+    # The roster switch the inactive rule reads is theirs too.
+    r = client.patch("/api/riders/SF-1?company=Shadowfax", json={"is_active": False}, headers=hdr)
+    assert r.status_code == 200 and r.json()["is_active"] is False
+
+    # …and the two that are not: salary and re-crediting stay with an admin.
+    assert (
+        client.patch(
+            "/api/riders/SF-1?company=Shadowfax", json={"salary": 20000}, headers=hdr
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            "/api/riders/SF-1?company=Shadowfax",
+            json={"recruited_by": "someone@else.test"},
+            headers=hdr,
+        ).status_code
+        == 403
+    )
+
+
+def test_an_account_already_on_somebody_else_is_refused_by_name(client, db):
+    """The 409 names the other rider. The app shows that sentence as-is, which
+    is the difference between "could not save" and "that is Bikash's account"."""
+    client.post(
+        "/api/riders",
+        json={
+            "company": "Shadowfax",
+            "name": "Arjun Das",
+            "rider_id": "SF-1",
+            "account_no": "111222333",
+        },
+    )
+    client.post(
+        "/api/riders", json={"company": "Shadowfax", "name": "Bikash Roy", "rider_id": "SF-2"}
+    )
+    r = client.patch("/api/riders/SF-2?company=Shadowfax", json={"account_no": "111222333"})
+    assert r.status_code == 409
+    assert "Arjun Das" in r.json()["detail"]

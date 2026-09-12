@@ -15,6 +15,18 @@ class AppRepository @Inject constructor(private val api: PayoutApi) {
 
     suspend fun refreshBootstrap(): Bootstrap = api.bootstrap().also { _bootstrap.value = it }
 
+    /**
+     * The stores of one company, for a picker — falling back to every store
+     * known when that company has none classified yet.
+     *
+     * The onboarding form worked this out for itself; the rider-edit sheet
+     * needs the same answer, and two copies of it would drift.
+     */
+    fun hubsFor(company: String): List<String> {
+        val b = _bootstrap.value ?: return emptyList()
+        return b.companyHubs.filter { it.company == company }.map { it.hub }.ifEmpty { b.hubs }
+    }
+
     /** The zone a list should open on: the recruiter's own, else "All". */
     fun defaultZone(): String = _bootstrap.value?.me?.zone ?: "All"
 

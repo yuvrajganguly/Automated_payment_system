@@ -25,6 +25,10 @@ interface MaintRow {
   reason: string | null
   created_by: string | null
   created_at: string | null
+  /** Whether a picture exists — the image itself is a separate request.
+   *  Optional so a server older than 2026-09-12 still typechecks. */
+  has_out_photo?: boolean
+  has_in_photo?: boolean
 }
 interface Profile {
   unit: { ev_id: string; status: string; notes: string | null;
@@ -141,7 +145,7 @@ export function EvProfilePage() {
       <Section title={`Maintenance Log (${profile.maintenance.length})`}>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
-            <tr><Th>ID</Th><Th>From</Th><Th>To</Th><Th>Reason</Th><Th>Logged by</Th><Th>When</Th></tr>
+            <tr><Th>ID</Th><Th>From</Th><Th>To</Th><Th>Reason</Th><Th>Photos</Th><Th>Logged by</Th><Th>When</Th></tr>
           </thead>
           <tbody>
             {profile.maintenance.map((m) => (
@@ -150,6 +154,12 @@ export function EvProfilePage() {
                 <Td>{m.from_date}</Td>
                 <Td>{m.to_date ?? <span className="text-amber-300 font-medium">still open</span>}</Td>
                 <Td>{m.reason ?? ''}</Td>
+                <Td>
+                  <div className="flex gap-2">
+                    <MaintPhoto id={m.id} kind="out" has={m.has_out_photo} />
+                    <MaintPhoto id={m.id} kind="in" has={m.has_in_photo} />
+                  </div>
+                </Td>
                 <Td className="text-xs">{m.created_by ?? ''}</Td>
                 <Td className="text-xs">{m.created_at ?? ''}</Td>
               </tr>
@@ -169,6 +179,30 @@ export function EvProfilePage() {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * One maintenance photo as a thumbnail that opens full size.
+ *
+ * "out" is what was wrong — the evidence for the repair bill, and for saying
+ * the fault was not the rider's. "in" is what came back: whether the work was
+ * actually done. Both are optional by decision, so a dash is a normal answer
+ * here and not a missing file.
+ */
+function MaintPhoto({ id, kind, has }: { id: number; kind: 'out' | 'in'; has?: boolean }) {
+  const [broken, setBroken] = useState(false)
+  const label = kind === 'out' ? 'Fault' : 'Returned'
+  if (!has || broken) {
+    return <span className="text-xs text-slate-500" title={`No ${label.toLowerCase()} photo`}>—</span>
+  }
+  const url = `/api/evs/maintenance/${id}/photo?kind=${kind}`
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title={`${label} — open full size`}>
+      <img src={url} alt={label}
+           className="h-10 w-10 rounded object-cover ring-1 ring-white/10"
+           onError={() => setBroken(true)} />
+    </a>
   )
 }
 

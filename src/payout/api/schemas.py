@@ -414,6 +414,11 @@ class MaintenanceOut(BaseModel):
     reason: str | None = None
     created_by: str | None = None
     created_at: str | None = None
+    # Whether a picture exists, not the picture. The image is a separate GET
+    # so a list of thirty maintenance rows is not thirty megabytes, and so a
+    # client can decide whether to draw a thumbnail at all.
+    has_out_photo: bool = False
+    has_in_photo: bool = False
 
 
 # ── Ledger ──────────────────────────────────────────────────────────────────

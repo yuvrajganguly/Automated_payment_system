@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
+from payout.domain.placeholders import PLACEHOLDER_PREFIX
 from payout.money import to_paise
 
 router = APIRouter()
@@ -98,25 +99,60 @@ def zone_scope(user: dict, zone: str | None) -> str | None:
     raise HTTPException(403, "You can only see your own zone")
 
 
-# Deliberately absent: the unassigned pool.
+# ── riders nobody has placed ────────────────────────────────────────────────
 #
-# For half of 2026-09-11 there was one. Riders with no store and nobody
-# credited rode along with every fenced recruiter's zone, because tightening
-# the fence had made 75 of them — most paid that month, so working riders —
-# invisible to the entire field at once.
+# This has now been decided twice, in two different ways, and both decisions
+# are worth keeping written down because the second is narrower than the first.
 #
-# The office decided against it the same day, and the reason is worth keeping:
-# the pool put the same rider in both zones' lists, so two recruiters could
-# each reasonably believe he was theirs, and the count a North recruiter read
-# off their own screen was not a count of North. A fence that leaks the same
-# rows into both sides is not a fence, it is a shared inbox.
+# 2026-09-11 morning: tightening the zone fence made every rider with no
+# derivable zone invisible to the entire field at once. An "unassigned pool"
+# was added — anything with no store and nobody credited rode along with every
+# fenced recruiter's zone.
 #
-# So an unplaced rider is shown to neither zone until somebody places them,
-# exactly like an unclassified store. Placing one is two taps and there are two
-# ways to do it: give the rider a store, or set a zone on the account that
-# onboarded them. Either way they land in exactly one zone. Until then the
-# office finds them with ``zone=unassigned`` on riders, EVs or the todo board —
-# invisible to the field is not lost.
+# 2026-09-11 afternoon: removed. That pool put the same rider in BOTH zones'
+# lists, so two recruiters could each reasonably think he was theirs, and the
+# count a North recruiter read off their own screen was not a count of North.
+#
+# 2026-09-12: brought back, but only for **placeholder ids**. The office's
+# reasoning is the part the wide version was missing: a QSPEND id is not a
+# rider waiting to be classified, it is a rider whose company has not issued
+# an id yet. Somebody has to go and get that id, the job is not zoned, and
+# until it is done there is no store to derive a zone from. Showing them to
+# both zones is how the job gets picked up at all.
+#
+# The double-counting objection still stands, so it is bounded: a placeholder
+# id is temporary by construction, and the moment the real id replaces it
+# (POST /riders/rename-rider-id, which retires the placeholder) the rider
+# leaves this pool by themselves. Nothing needs remembering or cleaning up.
+#
+# Recruit counts are keyed on `recruited_by`, not on zone, so no count moves
+# because of this — what widens is which roster and to-do rows a fenced
+# recruiter can see.
+
+
+def sees_placeholder_pool(user: dict) -> bool:
+    """Does the placeholder pool ride along with this caller's zone filter?
+
+    Only for a fenced caller. An admin who asks for North wants North; the
+    pool is a concession to the fence, not a member of every zone, and an
+    admin's ``zone=unassigned`` is the honest way to see this population.
+    """
+    return fenced_zone(user) is not None
+
+
+def placeholder_pool_sql(rider_id_expr: str, zone_expr: str) -> str:
+    """SQL boolean: this rider is in the placeholder pool.
+
+    A placeholder rider id (``QSPEND…``) and no zone derivable from either the
+    store or the recruiter who onboarded them.
+
+    ``substr`` rather than ``LIKE 'QSPEND%'`` on purpose: SQLite's LIKE is
+    case-insensitive and PostgreSQL's is not, so the same predicate would
+    match different rows on the two backends. Placeholders are generated
+    upper-case, so an exact prefix comparison is both correct and identical
+    everywhere.
+    """
+    return f"(substr({rider_id_expr}, 1, 6) = '{PLACEHOLDER_PREFIX}' AND {zone_expr} IS NULL)"
 
 
 class HubOut(BaseModel):

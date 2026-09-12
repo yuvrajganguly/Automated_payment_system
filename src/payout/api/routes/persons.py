@@ -14,7 +14,7 @@ from payout.api.schemas import (
     SplitPersonIn,
 )
 from payout.db import get_connection
-from payout.db.references import drop_person_singletons
+from payout.db.references import drop_person_singletons, repoint_person
 from payout.domain.activity import record_activity
 from payout.domain.placeholders import retire_placeholders_everywhere
 
@@ -318,15 +318,11 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
         )
         if primary == secondary:
             return {"merged": False, "reason": "Already same person", "person_id": primary}
-        # Move everything that references person_registry from secondary →
-        # primary BEFORE we drop the secondary row, otherwise the FK constraint
-        # blocks the DELETE and the merge silently 500s on the client.
+        # Two collisions have to be settled BEFORE anything is re-pointed,
+        # because both are UNIQUE-per-person and the UPDATE would raise.
 
-        # rider_master: move all rider IDs.
-        conn.execute("UPDATE rider_master SET person_id=? WHERE person_id=?", (primary, secondary))
-        # ev_assignments: move history. If BOTH sides have an open assignment
-        # we can't move the secondary's open row (UNIQUE per person), so close
-        # it as of today.
+        # ev_assignments: if BOTH sides hold an EV, the secondary's open row
+        # cannot move, so close it as of today.
         primary_open = conn.execute(
             "SELECT 1 FROM ev_assignments WHERE person_id=? AND returned_date IS NULL",
             (primary,),
@@ -337,11 +333,50 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
                 "WHERE person_id=? AND returned_date IS NULL",
                 (secondary,),
             )
+        # referrals.new_person_id is UNIQUE — one person cannot have been
+        # referred twice. If both halves were, primary's row is the one kept;
+        # the money itself is in `transactions`, which survives the merge, so
+        # what is dropped is the bookkeeping row and not the payment record.
+        dropped_referral = None
+        if conn.execute("SELECT 1 FROM referrals WHERE new_person_id=?", (primary,)).fetchone():
+            row = conn.execute(
+                "SELECT id, installments_paid FROM referrals WHERE new_person_id=?", (secondary,)
+            ).fetchone()
+            if row:
+                dropped_referral = {
+                    "referral_id": int(row["id"]),
+                    "installments_paid": int(row["installments_paid"] or 0),
+                }
+                conn.execute("DELETE FROM referrals WHERE new_person_id=?", (secondary,))
+
+        # Everything that references person_registry moves from secondary to
+        # primary BEFORE the secondary row is dropped, or the foreign key
+        # blocks the DELETE and the merge 500s on the client.
+        #
+        # This walks db.references.PERSON_REFS rather than a list written out
+        # here. The hand-written one it replaced covered six tables and missed
+        # five that have real foreign keys — ev_closeouts, ev_closeout_reports,
+        # referrals, rider_documents, money_requests — so merging anybody who
+        # had a photo, a money request or a referral raised a foreign-key error
+        # the client saw as a bare HTTP 500. That is the second time this list
+        # has drifted (payment_lines was the first), which is why there is now
+        # only one of it.
+        repoint_person(conn, secondary, primary)
+
+        # A referral whose referrer is now also its referee is somebody
+        # referring themselves — possible only as a product of this merge, and
+        # it would qualify for a bonus. Void it rather than delete it: unlike
+        # the collision above there is no surviving row for this referral, so
+        # the history is worth keeping visible.
+        # Scoped to this person on purpose: a global predicate would also void
+        # any self-referral already sitting in the data, which is somebody
+        # else's problem and not this merge's to rewrite.
         conn.execute(
-            "UPDATE ev_assignments SET person_id=? WHERE person_id=?", (primary, secondary)
+            "UPDATE referrals SET status='void', note = COALESCE(note || ' | ', '') || "
+            "  'voided by person merge: referrer and referee are the same person' "
+            "WHERE new_person_id=? AND referrer_person_id=? AND status <> 'void'",
+            (primary, primary),
         )
-        # cod_holds: move every line item.
-        conn.execute("UPDATE cod_holds SET person_id=? WHERE person_id=?", (primary, secondary))
         # balances: sum secondary's into primary's. This includes the
         # pending_xc_rent bucket — if both halves had an unresolved
         # cross-company rent shortfall, we sum them so neither is lost.
@@ -412,19 +447,7 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
                     primary,
                 ),
             )
-        # transactions: move every event so the ledger follows the person.
-        conn.execute("UPDATE transactions SET person_id=? WHERE person_id=?", (primary, secondary))
-        # ev_daily_ledger: re-attribute the day rows. Without this, recovery
-        # walks for the merged person would miss the secondary's pre-merge
-        # missed/billed days and the Provider Weekly report would silently
-        # under-count their history.
-        conn.execute(
-            "UPDATE ev_daily_ledger SET assigned_person_id=? WHERE assigned_person_id=?",
-            (primary, secondary),
-        )
-        # payment_lines was not re-pointed before -> FK failure on the DELETE.
-        conn.execute("UPDATE payment_lines SET person_id=? WHERE person_id=?", (primary, secondary))
-        # Drop secondary's now-orphaned rows + the person_registry row last.
+        # Drop secondary's singleton rows + the person_registry row last.
         drop_person_singletons(conn, secondary)
         # If one half carried a QSPEND placeholder where the other has the
         # real id, the placeholder has served its purpose.
@@ -436,7 +459,11 @@ def link_riders(body: LinkRidersIn, user: dict = Depends(require_admin)) -> dict
             entity_type="person",
             entity_id=primary,
             person_id=primary,
-            details={"merged_from_person_id": secondary, "placeholders_retired": retired},
+            details={
+                "merged_from_person_id": secondary,
+                "placeholders_retired": retired,
+                "dropped_referral": dropped_referral,
+            },
         )
         conn.commit()
     return {

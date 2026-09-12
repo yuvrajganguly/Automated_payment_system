@@ -20,6 +20,7 @@ from payout.db import get_connection
 from payout.domain.activity import ACTIONS
 from payout.domain.naming import display_name_for, name_from
 from payout.domain.people import by_person
+from payout.domain.placeholders import PLACEHOLDER_PREFIX
 from payout.domain.worked import active_person_sql
 
 router = APIRouter()
@@ -446,7 +447,13 @@ def _todo_rows(conn) -> list[dict]:
         # credited to a recruiter nobody has placed yet, who is somebody's
         # responsibility and not in the pool.
         "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=pr.person_id "
-        "          AND rm.recruited_by IS NOT NULL) AS credited "
+        "          AND rm.recruited_by IS NOT NULL) AS credited, "
+        # Still waiting on a company-issued id. Such a rider rides along with
+        # both zones when no zone can be derived — see
+        # hubs.placeholder_pool_sql for why, and why it is bounded.
+        "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=pr.person_id "
+        f"          AND rm.is_active=1 AND substr(rm.rider_id, 1, 6) = '{PLACEHOLDER_PREFIX}') "
+        "          AS placeholders "
         "FROM person_registry pr "
         "LEFT JOIN ev_arrears ea ON ea.person_id=pr.person_id "
         "LEFT JOIN balances b ON b.person_id=pr.person_id "
@@ -473,6 +480,7 @@ def _todo_rows(conn) -> list[dict]:
             "ev_model": r["model"],
             "recruiter_zone": r["recruiter_zone"],
             "hub_zone": r["hub_zone"],
+            "placeholder": int(r["placeholders"] or 0) > 0,
         }
         if int(r["cod_outstanding"] or 0) > 0:
             items.append(
@@ -538,7 +546,14 @@ def todo(
         hub_zone = it.get("hub_zone") or it.get("recruiter_zone")
         if want == "unassigned" and hub_zone:
             continue
-        if want not in ("all", "unassigned") and (hub_zone or "").lower() != want:
+        # A fenced caller keeps the placeholder pool: no zone to derive, and a
+        # company id still to be fetched. See hubs.placeholder_pool_sql.
+        in_pool = bool(it.get("placeholder")) and not hub_zone
+        if (
+            want not in ("all", "unassigned")
+            and (hub_zone or "").lower() != want
+            and not (fence and in_pool)
+        ):
             continue
         store = stores.setdefault(
             it["hub"] or "Misc",

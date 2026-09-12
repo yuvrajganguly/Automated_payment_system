@@ -201,6 +201,24 @@ data class EvUnitOut(
     @SerialName("rent_charged_through") val rentChargedThrough: String? = null,
 )
 
+/**
+ * Asking the office to move money — POST /requests.
+ *
+ * A recruiter cannot post an adjustment, but they know things the office does
+ * not ("he paid ₹500 cash for the helmet"). This is that ask: it sits open
+ * until an admin approves it, which is what actually touches the ledger.
+ *
+ * `amount` is RUPEES, positive, whichever direction it is. "credit" and
+ * "debit" carry the sign; a negative amount is refused with a 422.
+ */
+@Serializable
+data class MoneyRequestIn(
+    @SerialName("person_id") val personId: Long,
+    val direction: String, // credit | debit
+    val amount: Double,
+    val reason: String,
+)
+
 @Serializable
 data class MoneyRequest(
     val id: Long,
@@ -347,6 +365,11 @@ data class MaintenanceOut(
     @SerialName("from_date") val fromDate: String,
     @SerialName("to_date") val toDate: String? = null,
     val reason: String? = null,
+    /** Whether a picture exists — not the picture. Two of them: what was
+     *  wrong on the way out, and what came back on the way in. Both optional;
+     *  false is the normal state for a fault logged on a dying phone. */
+    @SerialName("has_out_photo") val hasOutPhoto: Boolean = false,
+    @SerialName("has_in_photo") val hasInPhoto: Boolean = false,
 )
 
 /* ── EV requests: "I need 3 EVs at Belur" ── */
@@ -449,6 +472,29 @@ data class RecruitingCounts(
 
 @Serializable
 data class RecruitingCompany(@SerialName("company_name") val companyName: String, val riders: Int, val active: Int = 0)
+
+/**
+ * A partial edit of one rider id — PATCH /riders/{id}?company=.
+ *
+ * Every field is null by default and the app's Json is configured with
+ * `explicitNulls = false`, so a null is simply not sent and the server leaves
+ * that column alone. That is what makes this safe to reuse for a one-field
+ * change: nothing you did not type gets written.
+ *
+ * `accountName` is the exception worth knowing: an empty string is meaningful
+ * there. It clears the holder name back to "the account is in the rider's own
+ * name", which is the only way to undo one entered by mistake.
+ */
+@Serializable
+data class RiderPatchBody(
+    val name: String? = null,
+    val hub: String? = null,
+    @SerialName("account_no") val accountNo: String? = null,
+    @SerialName("account_name") val accountName: String? = null,
+    val ifsc: String? = null,
+    @SerialName("mob_no") val mobNo: String? = null,
+    @SerialName("is_active") val isActive: Boolean? = null,
+)
 
 @Serializable
 data class RecruitingRecent(

@@ -938,6 +938,27 @@ def _0032_head_recruiter(conn: Any) -> None:
     add_column(conn, "users", "is_head", "INTEGER NOT NULL DEFAULT 0")
 
 
+def _0033_maintenance_photos(conn: Any) -> None:
+    """A photo of the vehicle going out for repair, and one coming back.
+
+    Two columns rather than one, because they answer different arguments. The
+    outgoing picture is what was wrong — the evidence for the repair bill, and
+    for saying the fault was not the rider's. The incoming one is what came
+    back — whether the thing we asked for was actually done, and what the next
+    rider is being handed.
+
+    Both nullable, and no backfill: photographs of vehicles already in the
+    workshop cannot be invented, and the office asked for these to be optional
+    anyway (a recruiter on a dying phone should still be able to log a fault).
+    A maintenance row with no photo is normal, not broken.
+
+    The keys point into the same document store rider photos and close-out
+    damage photos use; nothing is kept in the database but the key.
+    """
+    add_column(conn, "ev_maintenance", "out_photo_key", "TEXT")
+    add_column(conn, "ev_maintenance", "in_photo_key", "TEXT")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -974,6 +995,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0030_adhoc_runs", _0030_adhoc_runs),
     ("0031_rider_account_name", _0031_rider_account_name),
     ("0032_head_recruiter", _0032_head_recruiter),
+    ("0033_maintenance_photos", _0033_maintenance_photos),
 ]
 
 _TRACKING_DDL = (

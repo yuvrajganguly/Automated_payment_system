@@ -797,6 +797,11 @@ CREATE TABLE IF NOT EXISTS ev_maintenance (
     from_date  TEXT NOT NULL,
     to_date    TEXT,                  -- NULL = still in maintenance, no return date yet
     reason     TEXT,
+    -- What was wrong, photographed on the way out; and what came back, on the
+    -- way in. Both optional: a recruiter on a dying phone must still be able
+    -- to log a fault. Keys point into the same document store rider photos do.
+    out_photo_key TEXT,
+    in_photo_key  TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     created_by TEXT
 );

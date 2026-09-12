@@ -77,6 +77,23 @@ interface PayoutApi {
     @POST("riders")
     suspend fun createRider(@Body body: RiderIn): RiderOut
 
+    /**
+     * Edit one rider id. The server has always let a recruiter write these
+     * columns — bank account, holder name, IFSC, phone, store, and the roster
+     * switch — but nothing in the app ever asked, so a wrong account number
+     * meant a message to the office. Salary and re-crediting stay admin-only
+     * and are refused with a 403 if ever sent from here.
+     *
+     * The (rider_id, company) pair is the primary key, hence the query
+     * parameter: the same id exists at more than one company.
+     */
+    @PATCH("riders/{rider_id}")
+    suspend fun patchRider(
+        @Path("rider_id") riderId: String,
+        @Query("company") company: String,
+        @Body body: RiderPatchBody,
+    ): RiderOut
+
     /** A rider's photo (doc_type=photo). The server shrinks and keeps the newest. */
     @Multipart
     @POST("persons/{id}/documents")
@@ -145,8 +162,34 @@ interface PayoutApi {
     @PATCH("evs/maintenance/{id}")
     suspend fun closeMaintenance(@Path("id") id: Long, @Body body: MaintenanceClose): MaintenanceOut
 
+    /**
+     * The vehicle, photographed on its way to the workshop (`kind=out`) or on
+     * its way back (`kind=in`). Optional by decision: a recruiter with a dying
+     * phone must still be able to log a fault, and a fault nobody logged is
+     * worse than one logged without a picture.
+     *
+     * The maintenance row is saved first — until it exists the server answers
+     * 404, because a photo of a fault nobody reported hangs off nothing.
+     * jpeg/png/webp, 8 MB; the app sends a shrunk JPEG.
+     */
+    @Multipart
+    @POST("evs/maintenance/{id}/photo")
+    suspend fun uploadMaintenancePhoto(
+        @Path("id") id: Long,
+        @Query("kind") kind: String,
+        @Part file: MultipartBody.Part,
+    ): OkOut
+
     @GET("requests")
     suspend fun requests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<MoneyRequest>
+
+    /**
+     * Raise a money request. The app could read this list from the start but
+     * never had the call that adds to it, so the one thing a recruiter can do
+     * about money — ask — had to go through a phone call to the office.
+     */
+    @POST("requests")
+    suspend fun createRequest(@Body body: MoneyRequestIn): MoneyRequest
 
     @GET("ev-requests")
     suspend fun evRequests(@Query("status") status: String? = null, @Query("limit") limit: Int? = null): List<EvRequest>

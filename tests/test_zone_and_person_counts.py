@@ -327,3 +327,100 @@ def test_the_todo_board_hides_them_too(db, client, board):
     assert "Owes COD" not in people
     admin = client.get("/api/app/todo?zone=unassigned", headers=board).json()
     assert "Owes COD" in [i["name"] for s in admin["stores"] for i in s["items"]]
+
+
+# ── the placeholder pool (2026-09-12) ───────────────────────────────────────
+#
+# Narrower than the pool removed the day before, and for a different reason: a
+# QSPEND id is a rider whose company has not issued an id yet. Somebody has to
+# go and get it, the job is not zoned, and there is no store to derive a zone
+# from until it is done. See hubs.placeholder_pool_sql.
+
+
+def _placeholder(db, name, rider_id="QSPEND0001", hub=None, recruited_by=None):
+    pid = make_person(db, name)
+    make_rider(db, pid, rider_id, "Shadowfax", name)
+    db.execute(
+        "UPDATE rider_master SET hub=?, recruited_by=? WHERE rider_id=?",
+        (hub, recruited_by, rider_id),
+    )
+    db.commit()
+    return pid
+
+
+def test_a_placeholder_with_no_zone_is_seen_from_both_zones(db, client, board):
+    _placeholder(db, "No Id Yet")
+    for email, pw in (("north@t.test", "Recruit-pass-1"), ("south@t.test", "Recruit-pass-2")):
+        got = {
+            r["rider_id"] for r in client.get("/api/riders", headers=_hdr(client, email, pw)).json()
+        }
+        assert "QSPEND0001" in got, f"{email} cannot see a rider whose id is still to be fetched"
+        assert "SF-M" not in got, "…and Misc still does not come along"
+
+
+def test_a_real_id_with_no_zone_is_still_hidden(db, client, board):
+    """The distinction this pool is narrow for. An ordinary id with no zone is
+    somebody's to place, not everybody's to chase."""
+    _placeholder(db, "Unplaced", rider_id="SF-REAL")
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    got = {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    assert "SF-REAL" not in got
+
+
+def test_a_placeholder_with_a_zone_belongs_to_that_zone_only(db, client, board):
+    """Placed by its store, so it is South's and not North's — the pool is for
+    riders with nothing to derive a zone from, not for every placeholder."""
+    _placeholder(db, "Placed", rider_id="QSPEND0002", hub="Garia")
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    south = _hdr(client, "south@t.test", "Recruit-pass-2")
+    assert "QSPEND0002" not in {
+        r["rider_id"] for r in client.get("/api/riders", headers=north).json()
+    }
+    assert "QSPEND0002" in {r["rider_id"] for r in client.get("/api/riders", headers=south).json()}
+
+
+def test_the_recruiters_zone_also_places_them(db, client, board):
+    _placeholder(db, "Credited", rider_id="QSPEND0003", recruited_by="north@t.test")
+    south = _hdr(client, "south@t.test", "Recruit-pass-2")
+    assert "QSPEND0003" not in {
+        r["rider_id"] for r in client.get("/api/riders", headers=south).json()
+    }
+
+
+def test_getting_the_real_id_empties_the_pool_by_itself(db, client, board):
+    """Why the double-counting objection is tolerable here: the population is
+    temporary by construction. Nothing to remember, nothing to clean up."""
+    pid = _placeholder(db, "Was Waiting", rider_id="QSPEND0004")
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    assert "QSPEND0004" in {r["rider_id"] for r in client.get("/api/riders", headers=north).json()}
+    r = client.post(
+        "/api/riders/rename-rider-id",
+        json={
+            "person_id": pid,
+            "company": "Shadowfax",
+            "new_rider_id": "SF-REALID",
+            "current_rider_id": "QSPEND0004",
+        },
+        headers=board,
+    )
+    assert r.status_code == 200, r.text
+    got = {x["rider_id"] for x in client.get("/api/riders", headers=north).json()}
+    assert "QSPEND0004" not in got and "SF-REALID" not in got, "no id, no zone, no pool"
+
+
+def test_an_admin_naming_a_zone_does_not_get_the_pool(db, client, board):
+    _placeholder(db, "No Id Yet")
+    got = {r["rider_id"] for r in client.get("/api/riders?zone=North", headers=board).json()}
+    assert got == {"SF-N"}
+
+
+def test_the_pool_reaches_the_todo_board(db, client, board):
+    pid = _placeholder(db, "Owes COD")
+    db.execute(
+        "INSERT INTO ev_arrears (person_id, cod_missed, cod_outstanding) VALUES (?, 5000, 5000)",
+        (pid,),
+    )
+    db.commit()
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    t = client.get("/api/app/todo", headers=north).json()
+    assert "Owes COD" in [i["name"] for s in t["stores"] for i in s["items"]]

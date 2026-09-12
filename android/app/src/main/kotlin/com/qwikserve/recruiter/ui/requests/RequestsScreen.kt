@@ -46,6 +46,7 @@ import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.Note
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.ScreenAction
 import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.rupees
@@ -188,12 +189,11 @@ fun RequestsScreen(onOpenPerson: (Long) -> Unit, vm: RequestsViewModel = hiltVie
             }
         }
         if (tab == 1) {
-            Rule()
-            BarButton(
-                "Ask for EVs",
-                onClick = { vm.clearSendError(); asking = true },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            // ScreenAction, not a bare BarButton: this one is flush with the
+            // foot of an edge-to-edge window, so it needs the navigation-bar
+            // inset for the same reason "New rider" did — its lower edge sat
+            // under the system bar and a low tap went to Home.
+            ScreenAction("Ask for EVs", onClick = { vm.clearSendError(); asking = true })
         }
     }
 
