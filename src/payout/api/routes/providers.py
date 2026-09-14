@@ -24,10 +24,13 @@ from io import BytesIO
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from payout.api.auth import get_current_user, require_admin
 from payout.db import get_connection
+from payout.domain.activity import record_activity
 from payout.domain.fleet_sync import IngestRow, ingest_master_rows
+from payout.domain.provider_bill import OVERRIDE_FIELDS, TAGS, reconcile
 from payout.domain.reconciliation import provider_rider_reconciliation
 from payout.exports import xlsx_response
 from payout.money import to_paise
@@ -195,7 +198,13 @@ def provider_reconciliation_export(
     date_to: str,
     _: dict = Depends(get_current_user),
 ):
-    """Styled .xlsx of the per-rider reconciliation — the sheet for the boss."""
+    """Styled .xlsx of the per-rider collection — the sheet for the boss.
+
+    Carries what the vehicles cost us and the recovery against it, and a tail
+    of the days nobody was billed for. Both were missing, and between them they
+    are the difference between "our riders paid 94% of what we asked" and "the
+    fleet lost money".
+    """
     df, dt = _validate_range(date_from, date_to)
     with get_connection() as conn:
         data = provider_rider_reconciliation(conn, provider, df, dt)
@@ -203,15 +212,33 @@ def provider_reconciliation_export(
         (
             r["name"],
             r["ev_ids"],
+            r["provider_owed"],
             r["expected"],
             r["collected"],
             r["missed"],
             r["recovered"],
             r["pending"],
             r["collection_pct"],
+            r["recovery_pct"],
             r["settled_via"],
         )
         for r in data["rows"]
+    ]
+    rows += [
+        (
+            f"(nobody — {u['status']})",
+            u["ev_id"],
+            u["provider_owed"],
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            f"{u['days']} day(s) we owed for and billed nobody",
+        )
+        for u in data.get("unheld", [])
     ]
     return xlsx_response(
         filename_stem=f"{data['provider']}_reconciliation_{df}_to_{dt}",
@@ -219,19 +246,21 @@ def provider_reconciliation_export(
         headers=[
             "Rider",
             "EV(s)",
+            "Cost to us",
             "Expected",
             "Collected",
             "Missed (outstanding)",
             "Recovered",
             "Pending",
             "Collection %",
+            "Recovery %",
             "Settled via",
         ],
         rows=rows,
-        numeric_cols=(3, 4, 5, 6, 7, 8),
-        money_cols=(3, 4, 5, 6, 7),
-        totals_cols=(3, 4, 5, 6, 7),
-        left_align_cols=(1, 2, 9),
+        numeric_cols=(3, 4, 5, 6, 7, 8, 9, 10),
+        money_cols=(3, 4, 5, 6, 7, 8),
+        totals_cols=(3, 4, 5, 6, 7, 8),
+        left_align_cols=(1, 2, 11),
     )
 
 
@@ -239,11 +268,21 @@ def provider_reconciliation_export(
 
 
 def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
-    """Parse a provider bill into a list of {ev_id, amount, status_note} dicts.
+    """Parse a provider bill into rows we can both tally and reconcile.
 
     Looks for an EV-id-ish column, an amount column, and a status-note column
     (heuristically the last text column). Tolerant of column-name variations
     so Raft and Blive can use slightly different headers.
+
+    Three more columns are read than the tally needs, because the tally is not
+    the only question. It answers "does their arithmetic match ours"; the
+    office also asks "did we charge somebody for this, and did they pay", and
+    that needs **the rider's name as the provider has it** — it is how a unit
+    we renamed is recognised (they keep billing the old id), how a
+    disagreement about who holds a vehicle surfaces at all, and how one person
+    record covering two different men gets caught. The VIN and the deployment
+    date come along because they are the other two things the provider knows
+    and we never check.
     """
     name = (file_name or "").lower()
     try:
@@ -266,6 +305,13 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
         "monthly rent",
         "total",
         "charge",
+    )
+    name_col = match_column(
+        df.columns, "dp name", "rider name", "driver name", "dp", "name", "customer name"
+    )
+    vin_col = match_column(df.columns, "vin", "vin no", "chassis", "chassis no")
+    deploy_col = match_column(
+        df.columns, "deployment date", "deployed", "deploy date", "start date", "handover date"
     )
     # Status column heuristic: last non-empty text column.
     status_col = match_column(
@@ -321,6 +367,9 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
                 "ev_id": ev_raw,  # we don't yet have a normaliser; matching is exact
                 "their_amount": amount,
                 "status_note": cell(row, status_col) if status_col else None,
+                "provider_name": cell(row, name_col),
+                "vin": cell(row, vin_col),
+                "deploy_date": cell(row, deploy_col),
             }
         )
     return out
@@ -385,8 +434,9 @@ async def upload_bill(
             conn.execute(
                 "INSERT INTO provider_bill_lines "
                 "(bill_id, line_no, ev_id_raw, ev_id, their_amount, "
-                " status_note, our_amount, discrepancy, notes) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                " status_note, our_amount, discrepancy, notes, "
+                " provider_name, vin, deploy_date) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     bill_id,
                     L["line_no"],
@@ -397,6 +447,9 @@ async def upload_bill(
                     ours,
                     round(disc, 2) if disc is not None else None,
                     line_notes,
+                    L.get("provider_name"),
+                    L.get("vin"),
+                    L.get("deploy_date"),
                 ),
             )
         conn.commit()
@@ -545,3 +598,228 @@ def delete_bill(
         ).rowcount
         conn.commit()
     return {"deleted_bill": c, "deleted_lines": n}
+
+
+# ── the weekly reconciliation ──────────────────────────────────────────────
+#
+# The tally above answers "does their arithmetic match ours" out of
+# ev_daily_ledger. This answers the question the office actually asks on a
+# Monday: for each vehicle they billed, did we charge a rider, and did that
+# rider pay? The rules live in domain/provider_bill.py, learned by reconciling
+# week 36 by hand; this is the HTTP skin over them.
+
+
+class OverrideIn(BaseModel):
+    """One correction to one line. ``value = null`` clears it."""
+
+    field: str
+    value: str | None = None
+    note: str | None = None
+
+
+def _bill_or_404(conn, prov: str, bill_id: int):
+    row = conn.execute(
+        "SELECT id, provider, period_start, period_end, bill_total, line_count, file_name "
+        "FROM provider_bills WHERE id=? AND LOWER(provider)=LOWER(?)",
+        (bill_id, prov),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "No such bill for this provider")
+    return row
+
+
+def _stored_lines(conn, bill_id: int) -> list[dict]:
+    """Bill lines in the shape the reconciler wants.
+
+    The stored column names predate it (``their_amount``, ``ev_id_raw``), so
+    the mapping happens here rather than teaching the domain layer two
+    vocabularies.
+    """
+    return [
+        {
+            "line_no": r["line_no"],
+            "ev_id": r["ev_id"] or r["ev_id_raw"] or "",
+            "vin": r["vin"],
+            "provider_name": r["provider_name"],
+            "amount": int(r["their_amount"] or 0),
+            "remark": r["status_note"],
+            "deploy_date": r["deploy_date"],
+        }
+        for r in conn.execute(
+            "SELECT line_no, ev_id, ev_id_raw, vin, provider_name, their_amount, "
+            "       status_note, deploy_date "
+            "FROM provider_bill_lines WHERE bill_id=? ORDER BY line_no, ev_id",
+            (bill_id,),
+        )
+    ]
+
+
+def _stored_overrides(conn) -> dict[str, dict[str, str]]:
+    ov: dict[str, dict[str, str]] = {}
+    for r in conn.execute("SELECT ev_id, field, value FROM provider_bill_overrides"):
+        ov.setdefault(r["ev_id"], {})[r["field"]] = r["value"]
+    return ov
+
+
+@router.get("/{provider}/bills/{bill_id}/reconciliation")
+def bill_reconciliation(
+    provider: str,
+    bill_id: int,
+    _: dict = Depends(require_admin),
+) -> dict:
+    """One week's bill against our own books, line by line.
+
+    Recomputed on every read rather than stored, on purpose: a merge done
+    today should change last week's report, because last week's report was
+    wrong. The only thing kept is what the office corrected by hand.
+    """
+    prov = _normalize_provider(provider)
+    with get_connection() as conn:
+        bill = _bill_or_404(conn, prov, bill_id)
+        report = reconcile(
+            conn,
+            _stored_lines(conn, bill_id),
+            bill["period_start"],
+            bill["period_end"],
+            _stored_overrides(conn),
+        )
+    return {
+        "bill_id": bill["id"],
+        "provider": bill["provider"],
+        "period_start": bill["period_start"],
+        "period_end": bill["period_end"],
+        "file_name": bill["file_name"],
+        "tags": list(TAGS),
+        **report,
+    }
+
+
+@router.patch("/{provider}/bills/{bill_id}/lines/{ev_id}")
+def set_line_override(
+    provider: str,
+    bill_id: int,
+    ev_id: str,
+    body: OverrideIn,
+    user: dict = Depends(require_admin),
+) -> dict:
+    """Correct one field on one line, and remember it against the vehicle.
+
+    Against the vehicle, not the line. Most of what gets corrected here is not
+    in the database at all — which vehicles came back, which rider is really on
+    a unit, that two person records are one man — and keyed to the line a
+    correction would die with its week and have to be made again every Monday.
+    """
+    if body.field not in OVERRIDE_FIELDS:
+        raise HTTPException(400, f"field must be one of {', '.join(OVERRIDE_FIELDS)}")
+    if body.field == "tag" and body.value and body.value not in TAGS:
+        raise HTTPException(400, f"tag must be one of {', '.join(TAGS)}")
+    prov = _normalize_provider(provider)
+    with get_connection() as conn:
+        _bill_or_404(conn, prov, bill_id)
+        if not conn.execute(
+            "SELECT 1 FROM provider_bill_lines WHERE bill_id=? AND (ev_id=? OR ev_id_raw=?)",
+            (bill_id, ev_id, ev_id),
+        ).fetchone():
+            raise HTTPException(404, "No such line on this bill")
+        if body.value is None:
+            conn.execute(
+                "DELETE FROM provider_bill_overrides WHERE ev_id=? AND field=?",
+                (ev_id, body.field),
+            )
+        else:
+            conn.execute(
+                "INSERT OR IGNORE INTO provider_bill_overrides "
+                "(ev_id, field, value, note, set_by) VALUES (?,?,?,?,?)",
+                (ev_id, body.field, body.value, body.note, user["email"]),
+            )
+            conn.execute(
+                "UPDATE provider_bill_overrides SET value=?, note=?, set_by=?, "
+                "set_at=datetime('now') WHERE ev_id=? AND field=?",
+                (body.value, body.note, user["email"], ev_id, body.field),
+            )
+        record_activity(
+            conn,
+            user,
+            "provider_bill.override",
+            entity_type="ev",
+            entity_id=ev_id,
+            details={"bill_id": bill_id, "field": body.field, "value": body.value},
+        )
+        conn.commit()
+    return {"ev_id": ev_id, "field": body.field, "value": body.value}
+
+
+_RECON_HEADERS = (
+    "EV ID",
+    "Tag",
+    "Rider",
+    "Person ID",
+    "Days",
+    "Billed by them",
+    "Expected at our rate",
+    "Charged by us",
+    "Collected",
+    "Missed",
+    "Hand-booked",
+    "Damage",
+    "Unit status",
+    "Their name for him",
+    "Deployed",
+    "Notes",
+    "Their remark",
+)
+
+
+@router.post("/{provider}/bills/{bill_id}/reconciliation/export")
+def bill_reconciliation_export(
+    provider: str,
+    bill_id: int,
+    _: dict = Depends(require_admin),
+):
+    """The same week as a styled .xlsx, for sending to the provider."""
+    prov = _normalize_provider(provider)
+    with get_connection() as conn:
+        bill = _bill_or_404(conn, prov, bill_id)
+        report = reconcile(
+            conn,
+            _stored_lines(conn, bill_id),
+            bill["period_start"],
+            bill["period_end"],
+            _stored_overrides(conn),
+        )
+
+    def rs(v) -> float:
+        return (v or 0) / 100.0
+
+    rows = [
+        (
+            r["ev_id"],
+            r["tag"],
+            r["rider"] or "",
+            r["person_id"] or "",
+            r["days"] or "",
+            rs(r["billed"]),
+            rs(r["expected"]),
+            rs(r["charged"]),
+            rs(r["collected"]),
+            rs(r["missed"]),
+            rs(r["hand_booked"]),
+            rs(r["damage"]),
+            r["unit_status"],
+            r["provider_name"] or "",
+            r["deploy_date"] or "",
+            r["note"] or "",
+            r["remark"] or "",
+        )
+        for r in report["rows"]
+    ]
+    return xlsx_response(
+        filename_stem=f"{bill['provider']}_{bill['period_start']}_{bill['period_end']}",
+        sheet_name="Reconciliation",
+        headers=_RECON_HEADERS,
+        rows=rows,
+        numeric_cols=(5, 6, 7, 8, 9, 10, 11),
+        totals_cols=(5, 6, 7, 8, 9, 10, 11),
+        money_cols=(5, 6, 7, 8, 9, 10, 11),
+        left_align_cols=(12, 13, 15, 16),
+    )

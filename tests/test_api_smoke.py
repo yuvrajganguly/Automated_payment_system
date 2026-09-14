@@ -64,6 +64,8 @@ _QUERY = {
 # GETs that legitimately answer something other than 200 with these params.
 _EXPECTED_STATUS = {
     "/api/providers/{provider}/bills/{bill_id}": 404,  # no bills in the demo seed
+    # Same reason: there is no bill 1 to reconcile until somebody uploads one.
+    "/api/providers/{provider}/bills/{bill_id}/reconciliation": 404,
     "/api/payments/uploads/{upload_id}": 404,  # no MIS uploads in the demo seed
     "/api/documents/{doc_id}/download": 404,  # no documents in the demo seed
     "/api/persons/{person_id}/photo": 404,  # no photo uploaded in the demo seed

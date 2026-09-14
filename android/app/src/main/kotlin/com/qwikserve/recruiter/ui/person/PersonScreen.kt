@@ -55,11 +55,13 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
+import com.qwikserve.recruiter.ui.common.chaseable
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.evs.CloseoutSheet
 import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
 import com.qwikserve.recruiter.ui.evs.GiveEvSheet
+import com.qwikserve.recruiter.ui.evs.RepairSheet
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
@@ -326,6 +328,7 @@ fun PersonScreen(
     LaunchedEffect(personId) { vm.show(personId) }
     val evActions: EvActionsViewModel = hiltViewModel()
     var giving by remember { mutableStateOf(false) }
+    var repairing by remember(personId) { mutableStateOf(false) }
     var evNote by remember { mutableStateOf<String?>(null) }
     // True from the moment this page asks for the vehicle back until the
     // deposit question that follows is done with. On a tablet this page and
@@ -380,7 +383,11 @@ fun PersonScreen(
                     Box(Modifier.width(1.dp).height(74.dp).background(Qwik.N400))
                     Standing("EV arrears", if (p == null) "…" else rupees(arr), Modifier.weight(1f), accent = (arr ?: 0.0) > 0)
                     Box(Modifier.width(1.dp).height(74.dp).background(Qwik.N400))
-                    Standing("Total dues", if (p == null) "…" else rupees(dues), Modifier.weight(1f), accent = (dues ?: 0.0) > 0)
+                    // The figure itself is always the truth on a person's own
+                    // page; only the red is held back below two days of their
+                    // EV's rent, so a tagging slip does not read like an
+                    // unpaid week.
+                    Standing("Total dues", if (p == null) "…" else rupees(dues), Modifier.weight(1f), accent = chaseable(dues, p?.ev?.weeklyRate))
                 }
                 Rule()
 
@@ -404,6 +411,32 @@ fun PersonScreen(
                             style = MaterialTheme.typography.bodyMedium, color = Qwik.N700,
                         )
                         Spacer(Modifier.height(8.dp))
+                        // A recruiter standing in front of a broken scooter is
+                        // looking at the rider, not the fleet list. Making them
+                        // leave the person, find the unit in the EVs tab and
+                        // open it there was the difference between a fault
+                        // getting logged and a fault getting mentioned on the
+                        // phone next week.
+                        //
+                        // Which way it points depends on where the vehicle is:
+                        // one already in the workshop needs bringing back, and
+                        // offering to send it again would open a second
+                        // maintenance window and zero its rent for good.
+                        if (ev.status == "maintenance") {
+                            GhostAction(
+                                if (evActions.busy) "Working…" else "Back from repair",
+                                onClick = {
+                                    evActions.backFromMaintenance(ev.evId, null) { m ->
+                                        evNote = m; vm.load()
+                                    }
+                                },
+                                enabled = !evActions.busy,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        } else {
+                            GhostAction("Send for repair", onClick = { evNote = null; repairing = true })
+                            Spacer(Modifier.height(8.dp))
+                        }
                         // Taking a vehicle back is two different things, and the
                         // difference matters to the fleet: a spare goes to the
                         // next rider, a return goes to the provider.
@@ -437,10 +470,10 @@ fun PersonScreen(
                 }
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
-                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName) }
+                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name) }
                     // The cache carries the holder name too since it became a column
                     // on RiderEntity, so the offline row says the same as the live one.
-                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName) }
+                    ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name) }
                 if (rows.isEmpty()) Skeleton(220.dp)
                 rows.forEach { r ->
                     Hairline()
@@ -449,6 +482,19 @@ fun PersonScreen(
                             Text(r.riderId, style = MaterialTheme.typography.titleLarge, color = Qwik.Ink)
                             Tag(r.company, outline = true)
                             if (!r.active) Tag("inactive")
+                        }
+                        // The id's own name, whenever the company knows him by
+                        // something other than the name at the top of this
+                        // screen. Two ids under different names is the case
+                        // that matters, but one id under a different name is
+                        // the same question and just as worth seeing.
+                        r.name?.takeIf { it.isNotBlank() && !sameName(it, name) }?.let {
+                            Text(
+                                "Registered as $it",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Qwik.Accent700,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
                         }
                         val detail = listOfNotNull(
                             r.hub,
@@ -494,8 +540,13 @@ fun PersonScreen(
                             ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { it.isDigit() || it == '+' })))
                         })
                     }
-                    // The only thing a recruiter may do about money: ask.
-                    GhostAction("Ask the office for money", onClick = vm::askMoney)
+                    // The only thing a recruiter may do about money: raise it
+                    // for the office to decide. The label used to read "Ask the
+                    // office for money", which sounds like the recruiter is
+                    // asking to be paid — and reads as grabby next to a rider's
+                    // name. What the button opens is an adjustment request, in
+                    // either direction, so it says that.
+                    GhostAction("Raise a balance adjustment", onClick = vm::askMoney)
                 }
                 vm.moneyNote?.let {
                     Text(
@@ -554,6 +605,17 @@ fun PersonScreen(
             personName = name,
             onDone = { message -> evNote = message; giving = false; vm.load() },
             onDismiss = { giving = false },
+            vm = evActions,
+        )
+    }
+
+    // The same form the fleet tab uses, so the promise it makes about the
+    // photo being optional cannot drift between the two places it is made.
+    p?.ev?.evId?.takeIf { repairing }?.let { evId ->
+        RepairSheet(
+            evId = evId,
+            onDone = { message -> evNote = message; repairing = false; vm.load() },
+            onDismiss = { repairing = false },
             vm = evActions,
         )
     }
@@ -822,9 +884,9 @@ private fun EditRiderSheet(
  * Ask the office to credit or debit this rider.
  *
  * This does not move money, and the wording says so twice — once as the
- * heading's note and once on the button — because a recruiter who believes
- * they have just paid somebody will not chase it, and the rider will be back
- * tomorrow asking where it is.
+ * heading's note and once on the send button — because a recruiter who
+ * believes they have just paid somebody will not chase it, and the rider will
+ * be back tomorrow asking where it is.
  *
  * Direction is a two-way switch rather than a signed amount. "He owes us 500"
  * and "we owe him 500" are the two things anybody actually means, and a minus
@@ -855,7 +917,7 @@ private fun AskMoneySheet(
             Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).padding(bottom = 24.dp),
         ) {
-            Text("Ask the office", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+            Text("Balance adjustment", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
             Spacer(Modifier.height(6.dp))
             Kicker(riderName ?: "This rider")
             Spacer(Modifier.height(10.dp))
@@ -929,11 +991,55 @@ private fun AskMoneySheet(
     }
 }
 
+/**
+ * Are these two the same name, allowing for how it was typed?
+ *
+ * Case, punctuation and doubled spaces never count. Beyond that a small
+ * similarity allowance, because Bengali names reach us transliterated
+ * differently by every company — Subham and Shubham, Bijoy and Bijay — and
+ * flagging every one of those would put a grey line under most ids and teach
+ * the office to stop reading it. 0.88 clears the spelling wobble and still
+ * separates two actual people: Somnath against Milon scores 0.31.
+ */
+private fun sameName(a: String, b: String?): Boolean {
+    if (b.isNullOrBlank()) return true          // nothing to disagree with
+    fun norm(x: String) = x.lowercase().replace(Regex("[^a-z ]"), " ")
+        .split(' ').filter { it.isNotBlank() }.joinToString(" ")
+    val (x, y) = norm(a) to norm(b)
+    if (x == y) return true
+    if (x.isEmpty() || y.isEmpty()) return true
+    return similarity(x, y) >= 0.88
+}
+
+/** Ratio of the longest common subsequence to the longer string. */
+private fun similarity(a: String, b: String): Double {
+    val prev = IntArray(b.length + 1)
+    val cur = IntArray(b.length + 1)
+    for (i in 1..a.length) {
+        for (j in 1..b.length) {
+            cur[j] = if (a[i - 1] == b[j - 1]) prev[j - 1] + 1 else maxOf(prev[j], cur[j - 1])
+        }
+        prev.indices.forEach { prev[it] = cur[it] }
+    }
+    return prev[b.length].toDouble() / maxOf(a.length, b.length)
+}
+
 private data class RiderLine(
     val riderId: String, val company: String, val hub: String?, val phone: String?,
     val account: String?, val ifsc: String?, val active: Boolean, val recruitedBy: String?,
     /** Whose name the account is in, only when it is not the rider's own. */
     val holder: String? = null,
+    /**
+     * The name this id is registered under at its own company.
+     *
+     * Usually the same as the person's, and then it says nothing. But a
+     * company registers whoever turned up at their onboarding desk, so the
+     * same man can be "Somnath Sardar" at one and "Milon Sardar" at another,
+     * and a person record can quietly cover two different men. The office
+     * found one of those reconciling a provider bill, which is far too late:
+     * the id's own name has to be on screen next to the id.
+     */
+    val name: String? = null,
 )
 
 /**

@@ -602,7 +602,16 @@ CREATE TABLE IF NOT EXISTS provider_bill_lines (
     -- Filled when we tally against ev_daily_ledger:
     our_amount      INTEGER,
     discrepancy     INTEGER,                              -- their_amount − our_amount
-    notes           TEXT
+    notes           TEXT,
+    -- The three things the provider knows about the rider that the tally does
+    -- not need but the weekly reconciliation cannot work without. The name is
+    -- the important one: it is how a unit we renamed is recognised (they keep
+    -- billing the old id), how a disagreement about who holds a vehicle
+    -- surfaces at all, and how one person record covering two different men
+    -- gets caught. See migration 0034 and domain/provider_bill.py.
+    provider_name   TEXT,                              -- their spelling of the rider
+    vin             TEXT,
+    deploy_date     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_bill_lines_bill ON provider_bill_lines (bill_id);
 CREATE INDEX IF NOT EXISTS idx_bill_lines_ev   ON provider_bill_lines (ev_id);
@@ -806,6 +815,25 @@ CREATE TABLE IF NOT EXISTS ev_maintenance (
     created_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_maint_ev ON ev_maintenance (ev_id);
+
+-- Corrections the office makes to a reconciled provider-bill line.
+--
+-- Keyed on ev_id, NOT the bill line, and that is the deliberate part. Most of
+-- what gets corrected is not in the database at all: which vehicles actually
+-- came back, which rider is really on a unit, that two person records are one
+-- man. Keyed by the line, a correction would die with its week and have to be
+-- made again every Monday. Keyed by the vehicle it carries forward, and a unit
+-- marked returned in one week is flagged the moment the provider bills it in
+-- the next.
+CREATE TABLE IF NOT EXISTS provider_bill_overrides (
+    ev_id    TEXT NOT NULL,
+    field    TEXT NOT NULL,
+    value    TEXT,
+    note     TEXT,
+    set_by   TEXT,
+    set_at   TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (ev_id, field)
+);
 """  # noqa: E501
 
 

@@ -227,6 +227,9 @@ class EvSummary(BaseModel):
     weekly_rate: float
     handover_date: str | None = None
     rent_charged_through: str | None = None
+    # in_use normally; maintenance while it is in the workshop. A rider keeps
+    # their assignment through a repair, so the two states both appear here.
+    status: str | None = None
 
 
 class EvHistoryItem(BaseModel):

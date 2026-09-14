@@ -62,6 +62,29 @@ fun rupees(n: Double?): String {
     return "₹" + f.format(Math.round(v))
 }
 
+/**
+ * Dues worth putting on a list: more than two days of this rider's own EV rent.
+ *
+ * Rent is charged weekly and recovered out of a payout, and the two do not
+ * always line up on the day — a leg that starts mid-cycle, a handover dated a
+ * day either side of when the vehicle really moved, a return booked late. What
+ * comes out is a rider showing a day or two missed who has in fact paid
+ * everything they were asked for. With the floor at zero the Dues filter
+ * filled with those, and a rider genuinely a week down sat in a list of sixty
+ * people owing a part-day, so the list stopped being read — worse than not
+ * having it.
+ *
+ * Two days of *their own* rate, not a flat figure: a Blue is 370, a Regular
+ * 357, a Blive 360. That is what makes the number mean "a tagging slip" rather
+ * than an amount somebody chose. A rider with no EV has no rent to mistag, so
+ * their floor is zero and anything owed shows.
+ *
+ * The server applies the same rule to the visit list (app.dues_floor); a
+ * person's own page still shows whatever they really owe.
+ */
+fun chaseable(dues: Double?, weeklyRate: Double?): Boolean =
+    (dues ?: 0.0) > 2 * (weeklyRate ?: 0.0) / 7
+
 fun initials(name: String?): String =
     name.orEmpty().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
         .take(2).joinToString("") { it.first().uppercaseChar().toString() }

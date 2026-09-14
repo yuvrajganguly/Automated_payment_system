@@ -418,6 +418,27 @@ def recruiting_board(user: dict = Depends(get_current_user)) -> dict:
 TODO_KINDS = ("cod", "ev_dues", "inactive_ev")
 
 
+# Dues below two days of the rider's own EV rent are not a visit.
+#
+# Rent is charged weekly and recovered out of a payout, and the two do not
+# always line up on the day: a leg that starts mid-cycle, a handover dated a
+# day either side of when the vehicle actually moved, a return booked late.
+# What comes out is a rider showing a day or two of rent missed who has in fact
+# paid everything they were asked for. With the floor at zero the visit list
+# filled up with those, and a rider genuinely a week down sat in a queue of
+# sixty people owing a part-day — so the list stopped being read, which is
+# worse than not having it.
+#
+# Two days of *their own* EV's rate, not a flat figure: a Blue is 370, a
+# Regular 357, a Blive 360. The rate is what makes the number mean "a tagging
+# slip" rather than "an amount of money somebody chose".
+#
+# Paise, like all money here. A rider with no EV has no rent to mistag, so
+# their floor is zero and anything owed shows.
+def dues_floor(weekly_rate_paise: int | None) -> int:
+    return round(2 * int(weekly_rate_paise or 0) / 7)
+
+
 def _todo_rows(conn) -> list[dict]:
     rows = conn.execute(
         "SELECT pr.person_id, pr.display_name, "
@@ -425,7 +446,7 @@ def _todo_rows(conn) -> list[dict]:
         "       COALESCE(ea.outstanding, 0) AS outstanding, "
         "       CASE WHEN COALESCE(b.current_balance, 0) < 0 "
         "            THEN -b.current_balance ELSE 0 END AS dues_outstanding, "
-        "       a.ev_id, a.handover_date, m.model_name AS model, "
+        "       a.ev_id, a.handover_date, m.model_name AS model, m.weekly_rate, "
         "       (SELECT COUNT(*) FROM rider_master rm WHERE rm.person_id=pr.person_id "
         "          AND rm.is_active=1) AS active_ids, "
         "       (SELECT rm.hub FROM rider_master rm WHERE rm.person_id=pr.person_id "
@@ -492,7 +513,7 @@ def _todo_rows(conn) -> list[dict]:
                 }
             )
         total_dues = int(r["outstanding"] or 0) + int(r["dues_outstanding"] or 0)
-        if r["ev_id"] and total_dues > 0:
+        if r["ev_id"] and total_dues > dues_floor(r["weekly_rate"]):
             items.append(
                 {
                     **base,

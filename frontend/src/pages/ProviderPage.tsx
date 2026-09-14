@@ -24,6 +24,58 @@ import { useAuth } from '../auth/AuthContext'
 
 type Cadence = 'weekly' | 'monthly'
 
+/**
+ * One reconciled line of a provider bill.
+ *
+ * The tally asks "does their arithmetic match ours". This asks the question
+ * the office actually asks on a Monday — did we charge a rider for this, and
+ * did that rider pay — so the shape is per-rider rather than per-amount.
+ * Money arrives in rupees; the API rupeeizes on the way out.
+ */
+interface ReconLine {
+  ev_id: string
+  tag: string
+  rider: string | null
+  person_id: number | null
+  provider_name: string | null
+  days: number
+  billed: number
+  expected: number | null
+  charged: number | null
+  collected: number | null
+  missed: number | null
+  hand_booked: number | null
+  damage: number | null
+  unit_status: string
+  note: string
+  remark: string | null
+  deploy_date: string | null
+  overridden?: string[]
+}
+interface BillReconResp {
+  bill_id: number
+  period_start: string
+  period_end: string
+  tags: string[]
+  rows: ReconLine[]
+  totals: Record<string, number>
+  tag_counts: Record<string, number>
+}
+
+/** The muted palette the hand-built workbook settled on. Orange first: a
+ *  vehicle that came back is not a collection problem. */
+const TAG_TONE: Record<string, string> = {
+  'Collected':     'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+  'Partial':       'bg-amber-500/10 text-amber-300 border-amber-500/20',
+  'Not collected': 'bg-rose-500/10 text-rose-300 border-rose-500/20',
+  'Returned':      'bg-orange-500/10 text-orange-300 border-orange-500/20',
+  'Swap':          'bg-sky-500/10 text-sky-300 border-sky-500/20',
+  'Charged':       'bg-indigo-500/10 text-indigo-300 border-indigo-500/20',
+  'Paid Manually': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+  'Reversed':      'bg-slate-500/10 text-slate-400 border-slate-500/20',
+  'Damage':        'bg-slate-500/10 text-slate-400 border-slate-500/20',
+}
+
 interface PerEv {
   ev_id: string
   provider: string
@@ -108,21 +160,38 @@ interface ReconRow {
   person_id: number
   name: string
   ev_ids: string
+  /** What those vehicles cost us over the range, whatever we billed. */
+  provider_owed: number
   expected: number
   collected: number
   missed: number
   recovered: number
   pending: number
   collection_pct: number
+  /** Collected against what the vehicle cost us — the one that says whether
+   *  the unit paid for itself. collection_pct's denominator is already net of
+   *  non-billable days, so a week in the workshop reads 100%. */
+  recovery_pct: number
   settled_via: string
+}
+/** Days in the range nobody was on the hook for. We owed the provider and
+ *  could bill no rider; the old query filtered these out entirely. */
+interface UnheldRow {
+  ev_id: string
+  status: string
+  days: number
+  provider_owed: number
 }
 interface ReconResp {
   provider: string
   from: string
   to: string
   rows: ReconRow[]
-  totals: { expected: number; collected: number; missed: number; recovered: number;
-            pending: number; collection_pct: number; rider_count: number }
+  unheld: UnheldRow[]
+  totals: { provider_owed: number; unheld_owed: number; unheld_evs: number;
+            expected: number; collected: number; missed: number; recovered: number;
+            pending: number; collection_pct: number; recovery_pct: number;
+            rider_count: number }
 }
 
 export function ProviderPage({ provider, cadence }: Props) {
@@ -157,6 +226,11 @@ export function ProviderPage({ provider, cadence }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [openBill, setOpenBill] = useState<number | null>(null)
   const [billDetail, setBillDetail] = useState<{ bill: BillRow; lines: BillLine[] } | null>(null)
+  // The drawer answers two different questions and they do not belong in one
+  // table: "tally" is their arithmetic against ours, "recon" is per rider.
+  const [billView, setBillView] = useState<'tally' | 'recon'>('recon')
+  const [billRecon, setBillRecon] = useState<BillReconResp | null>(null)
+  const [reconBusy, setReconBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const masterInput = useRef<HTMLInputElement>(null)
@@ -243,12 +317,47 @@ export function ProviderPage({ provider, cadence }: Props) {
     setOpenBill(id)
     setBillDetail(null)
     try {
+      void loadBillRecon(id)
       const data = await api.get<{ bill: BillRow; lines: BillLine[] }>(
         `/providers/${provider}/bills/${id}`,
       )
       setBillDetail(data)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load bill')
+    }
+  }
+
+  async function loadBillRecon(id: number) {
+    setReconBusy(true)
+    try {
+      setBillRecon(await api.get<BillReconResp>(`/providers/${provider}/bills/${id}/reconciliation`))
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not reconcile that bill')
+    } finally {
+      setReconBusy(false)
+    }
+  }
+
+  /** Correct one field on one line. Keyed to the vehicle on the server, so it
+   *  carries into next week's bill rather than dying with this one. */
+  async function setOverride(id: number, evId: string, field: string, value: string | null) {
+    try {
+      await api.patch(`/providers/${provider}/bills/${id}/lines/${encodeURIComponent(evId)}`,
+                      { field, value })
+      await loadBillRecon(id)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save that correction')
+    }
+  }
+
+  async function downloadBillRecon(id: number) {
+    try {
+      saveBlob(await api.download(`/providers/${provider}/bills/${id}/reconciliation/export`, {
+        json: {},   // an empty body is what makes api.download POST
+        fallbackName: `${provider}_bill_${id}.xlsx`,
+      }))
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Export failed')
     }
   }
 
@@ -462,9 +571,16 @@ export function ProviderPage({ provider, cadence }: Props) {
       <section className="panel overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-slate-700">Rider reconciliation — expected vs collected</h2>
+            {/* Not called "reconciliation" any more. Nothing external enters
+                this table — expected is our own day ledger's opinion — so a
+                provider over-billing us cannot appear in it. The bill drawer
+                does the reconciling, against their document. Two tabs with
+                the same name taught the office to trust neither. */}
+            <h2 className="font-semibold text-slate-700">Collection by rider</h2>
             <p className="text-xs text-slate-500">
-              For the range above. &quot;Settled via&quot; is the company payout that actually collected the rent.
+              What these vehicles cost us over the range against what we got back.
+              &quot;Settled via&quot; is the company payout that actually collected the rent.
+              To check the provider&apos;s own bill, open it below.
             </p>
           </div>
           <button onClick={downloadRecon}
@@ -478,11 +594,13 @@ export function ProviderPage({ provider, cadence }: Props) {
               <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                 <th className="px-3 py-2">Rider</th>
                 <th className="px-3 py-2">EV(s)</th>
+                <th className="px-3 py-2 text-right">Cost to us</th>
                 <th className="px-3 py-2 text-right">Expected</th>
                 <th className="px-3 py-2 text-right">Collected</th>
                 <th className="px-3 py-2 text-right">Missed</th>
                 <th className="px-3 py-2 text-right">Pending</th>
-                <th className="px-3 py-2 text-right">Collected %</th>
+                <th className="px-3 py-2 text-right" title="Collected against what we asked the rider for">Collected %</th>
+                <th className="px-3 py-2 text-right" title="Collected against what the vehicle cost us">Recovered %</th>
                 <th className="px-3 py-2">Settled via</th>
               </tr>
             </thead>
@@ -491,27 +609,51 @@ export function ProviderPage({ provider, cadence }: Props) {
                 <tr key={r.person_id} className="border-t hover:bg-slate-50">
                   <td className="px-3 py-2">{r.name}</td>
                   <td className="px-3 py-2 text-xs text-slate-600">{r.ev_ids}</td>
+                  <td className="px-3 py-2 text-right text-slate-500">₹{fmt(r.provider_owed)}</td>
                   <td className="px-3 py-2 text-right">₹{fmt(r.expected)}</td>
                   <td className="px-3 py-2 text-right text-emerald-300">₹{fmt(r.collected)}</td>
                   <td className="px-3 py-2 text-right text-red-400">₹{fmt(r.missed)}</td>
                   <td className="px-3 py-2 text-right text-amber-400">₹{fmt(r.pending)}</td>
                   <td className="px-3 py-2 text-right">{r.collection_pct}%</td>
+                  <td className={'px-3 py-2 text-right ' +
+                        (r.recovery_pct >= 95 ? 'text-emerald-300'
+                         : r.recovery_pct >= 70 ? 'text-amber-400' : 'text-red-400')}>
+                    {r.recovery_pct}%
+                  </td>
                   <td className="px-3 py-2 text-xs text-slate-600">{r.settled_via || '—'}</td>
+                </tr>
+              ))}
+              {/* The days nobody was billed for. Money we owed and could not
+                  charge anybody, and the single largest class of dispute in
+                  the week-36 bill — the old table dropped every one of them. */}
+              {(recon?.unheld || []).map(u => (
+                <tr key={'unheld:' + u.ev_id} className="border-t bg-orange-500/[0.04]">
+                  <td className="px-3 py-2 text-orange-300 text-xs">nobody · {u.status}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{u.ev_id}</td>
+                  <td className="px-3 py-2 text-right text-orange-300">₹{fmt(u.provider_owed)}</td>
+                  <td className="px-3 py-2 text-right text-slate-500" colSpan={6}>
+                    {u.days} day{u.days === 1 ? '' : 's'} we owed for and billed nobody
+                  </td>
+                  <td className="px-3 py-2"></td>
                 </tr>
               ))}
               {recon && recon.rows.length > 0 && (
                 <tr className="border-t bg-slate-50 font-semibold">
                   <td className="px-3 py-2" colSpan={2}>TOTAL ({recon.totals.rider_count})</td>
+                  <td className="px-3 py-2 text-right">
+                    ₹{fmt(recon.totals.provider_owed + recon.totals.unheld_owed)}
+                  </td>
                   <td className="px-3 py-2 text-right">₹{fmt(recon.totals.expected)}</td>
                   <td className="px-3 py-2 text-right text-emerald-300">₹{fmt(recon.totals.collected)}</td>
                   <td className="px-3 py-2 text-right text-red-400">₹{fmt(recon.totals.missed)}</td>
                   <td className="px-3 py-2 text-right text-amber-400">₹{fmt(recon.totals.pending)}</td>
                   <td className="px-3 py-2 text-right">{recon.totals.collection_pct}%</td>
+                  <td className="px-3 py-2 text-right">{recon.totals.recovery_pct}%</td>
                   <td className="px-3 py-2"></td>
                 </tr>
               )}
               {!loadingRecon && (!recon || recon.rows.length === 0) && (
-                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-400">
                   No rider rent activity in this range.
                 </td></tr>
               )}
@@ -575,7 +717,7 @@ export function ProviderPage({ provider, cadence }: Props) {
       {/* Tally drawer */}
       {openBill !== null && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-40 flex justify-end"
-             onClick={() => { setOpenBill(null); setBillDetail(null) }}>
+             onClick={() => { setOpenBill(null); setBillDetail(null); setBillRecon(null) }}>
           <div className="bg-panel w-full max-w-3xl h-full overflow-auto shadow-xl"
                onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b sticky top-0 bg-panel flex items-center justify-between">
@@ -593,13 +735,32 @@ export function ProviderPage({ provider, cadence }: Props) {
                   <button onClick={() => deleteBill(openBill)}
                           className="text-xs text-rose-400 underline">Delete</button>
                 )}
-                <button onClick={() => { setOpenBill(null); setBillDetail(null) }}
+                <button onClick={() => { setOpenBill(null); setBillDetail(null); setBillRecon(null) }}
                         className="text-slate-400 hover:text-slate-600">✕</button>
               </div>
             </div>
-            {!billDetail
-              ? <div className="p-8 flex justify-center"><Spinner /></div>
-              : <BillTally lines={billDetail.lines} billTotal={billDetail.bill.bill_total} />}
+            <div className="px-4 pt-3 flex items-center gap-2">
+              {(['recon', 'tally'] as const).map(v => (
+                <button key={v} onClick={() => setBillView(v)}
+                        className={'text-xs px-2 py-1 rounded border ' + (billView === v
+                          ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                          : 'text-slate-400 border-slate-700 hover:text-slate-200')}>
+                  {v === 'recon' ? 'Reconciliation' : 'Their total vs ours'}
+                </button>
+              ))}
+              {billView === 'recon' && billRecon && (
+                <button onClick={() => downloadBillRecon(openBill)}
+                        className="ml-auto text-xs text-indigo-600 underline">Export .xlsx</button>
+              )}
+            </div>
+            {billView === 'recon'
+              ? (reconBusy || !billRecon
+                  ? <div className="p-8 flex justify-center"><Spinner /></div>
+                  : <BillRecon recon={billRecon}
+                               onOverride={(ev, f, v) => setOverride(openBill, ev, f, v)} />)
+              : (!billDetail
+                  ? <div className="p-8 flex justify-center"><Spinner /></div>
+                  : <BillTally lines={billDetail.lines} billTotal={billDetail.bill.bill_total} />)}
           </div>
         </div>
       )}
@@ -694,6 +855,120 @@ function BillTally({ lines, billTotal }: { lines: BillLine[]; billTotal: number 
                 </tr>
               )
             })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A provider bill against our own books, line by line.
+ *
+ * The Tag column comes second on purpose: the office reads it down the page
+ * and hands the page to somebody else, so it is the thing that has to be
+ * legible at a glance. Everything the tag no longer carries — which vehicle
+ * the rider is really on, whose name the provider used, what was cleared by
+ * hand — sits in Notes at the far right.
+ *
+ * Every tag is editable, because most of what gets corrected here is not in
+ * the database at all: which vehicles actually came back, which rider is
+ * really on a unit, that two person records are one man. The server keys the
+ * correction to the vehicle, so it carries into next week's bill.
+ */
+function BillRecon({ recon, onOverride }: {
+  recon: BillReconResp
+  onOverride: (evId: string, field: string, value: string | null) => void
+}) {
+  const [tag, setTag] = useState<string>('all')
+  const t = recon.totals
+  const rows = tag === 'all' ? recon.rows : recon.rows.filter(r => r.tag === tag)
+  const counts = recon.tag_counts || {}
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Card label="They billed" value={`₹${fmt(t.billed || 0)}`} tone="indigo"
+              sub={t.damage ? `incl. ₹${fmt(t.damage)} damage` : undefined} />
+        <Card label="Expected at our rate" value={`₹${fmt(t.expected || 0)}`} tone="sky" />
+        <Card label="Collected" value={`₹${fmt(t.collected || 0)}`} tone="emerald"
+              sub={`of ₹${fmt(t.charged || 0)} charged`} />
+        <Card label="Still owed" value={`₹${fmt(t.missed || 0)}`}
+              tone={(t.missed || 0) > 0 ? 'rose' : 'emerald'} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button onClick={() => setTag('all')}
+                className={'text-xs px-2 py-0.5 rounded border ' + (tag === 'all'
+                  ? 'bg-slate-500/15 text-slate-200 border-slate-500/30'
+                  : 'text-slate-400 border-slate-700')}>
+          All {recon.rows.length}
+        </button>
+        {Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => (
+          <button key={k} onClick={() => setTag(tag === k ? 'all' : k)}
+                  className={'text-xs px-2 py-0.5 rounded border ' +
+                    (tag === k ? TAG_TONE[k] || 'border-slate-500' : 'text-slate-400 border-slate-700')}>
+            {k} {n}
+          </button>
+        ))}
+      </div>
+
+      <div className="border rounded overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50">
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="px-3 py-2">EV</th>
+              <th className="px-3 py-2">Tag</th>
+              <th className="px-3 py-2">Rider</th>
+              <th className="px-3 py-2 text-right">Days</th>
+              <th className="px-3 py-2 text-right">Billed</th>
+              <th className="px-3 py-2 text-right">Expected</th>
+              <th className="px-3 py-2 text-right">Charged</th>
+              <th className="px-3 py-2 text-right">Collected</th>
+              <th className="px-3 py-2 text-right">Owed</th>
+              <th className="px-3 py-2">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.ev_id + ':' + r.tag} className="border-t align-top">
+                <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{r.ev_id}</td>
+                <td className="px-3 py-2">
+                  <select
+                    value={r.tag}
+                    onChange={e => onOverride(r.ev_id, 'tag', e.target.value)}
+                    title={r.overridden?.includes('tag') ? 'Corrected by hand' : 'Derived'}
+                    className={'text-xs rounded border px-1.5 py-0.5 bg-transparent ' +
+                      (TAG_TONE[r.tag] || 'border-slate-600') +
+                      (r.overridden?.includes('tag') ? ' font-semibold' : '')}
+                  >
+                    {recon.tags.map(tg => <option key={tg} value={tg}>{tg}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2">
+                  {r.rider || <span className="text-slate-400">—</span>}
+                  {r.provider_name && r.rider && r.provider_name.toLowerCase() !== r.rider.toLowerCase() && (
+                    <div className="text-[10px] text-slate-400">they say {r.provider_name}</div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right text-xs">{r.days || ''}</td>
+                <td className="px-3 py-2 text-right">₹{fmt(r.billed)}</td>
+                <td className="px-3 py-2 text-right">{r.expected ? '₹' + fmt(r.expected) : '–'}</td>
+                <td className="px-3 py-2 text-right">{r.charged ? '₹' + fmt(r.charged) : '–'}</td>
+                <td className="px-3 py-2 text-right text-emerald-300">
+                  {r.collected ? '₹' + fmt(r.collected) : '–'}
+                </td>
+                <td className="px-3 py-2 text-right text-rose-300">
+                  {r.missed ? '₹' + fmt(r.missed) : '–'}
+                </td>
+                <td className="px-3 py-2 text-xs text-slate-500 max-w-xs">{r.note}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-400">
+                Nothing tagged {tag}.
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>

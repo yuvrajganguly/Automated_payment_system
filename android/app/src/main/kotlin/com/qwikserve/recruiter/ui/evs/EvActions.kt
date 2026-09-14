@@ -48,6 +48,7 @@ import com.qwikserve.recruiter.data.db.RiderEntity
 import com.qwikserve.recruiter.data.repo.AppRepository
 import com.qwikserve.recruiter.data.repo.PhotoRepository
 import com.qwikserve.recruiter.data.repo.RiderRepository
+import com.qwikserve.recruiter.ui.common.chaseable
 import com.qwikserve.recruiter.ui.common.BarButton
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
@@ -326,11 +327,10 @@ fun EvUnitSheet(
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var mode by remember { mutableStateOf("") } // "" | give | repair
-    var reason by remember { mutableStateOf("") }
-    // A picture of the fault, or of what came back. Held in the sheet rather
-    // than in the view model because it belongs to this one action and must
-    // not survive into the next unit's sheet.
-    var faultPhoto by remember(unit.evId) { mutableStateOf<Uri?>(null) }
+    // A picture of what came back. Held in the sheet rather than in the view
+    // model because it belongs to this one action and must not survive into
+    // the next unit's sheet. The outgoing one lives in RepairForm, for the
+    // same reason.
     var backPhoto by remember(unit.evId) { mutableStateOf<Uri?>(null) }
     // Set the moment this sheet asks for the vehicle back, so that on a tablet
     // — where this list and a rider's page share one EvActionsViewModel — the
@@ -406,7 +406,7 @@ fun EvUnitSheet(
                     )
                     unit.currentPersonId?.let { GhostAction("Open", onClick = { onOpenPerson(it) }) }
                 }
-                if ((unit.totalDues ?: 0.0) > 0) {
+                if (chaseable(unit.totalDues, unit.weeklyRate)) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Owes " + rupees(unit.totalDues) + " — taking the EV back does not clear it.",
@@ -431,29 +431,7 @@ fun EvUnitSheet(
                         vm.assign(unit.evId, rider.personId, onDone)
                     }
                 }
-                "repair" -> {
-                    Kicker("What is wrong?")
-                    Spacer(Modifier.height(8.dp))
-                    SearchField(reason, onChange = { reason = it }, placeholder = "e.g. battery not charging")
-                    Spacer(Modifier.height(14.dp))
-                    // Optional on purpose. A photo makes the argument with the
-                    // provider much easier, but a recruiter on a dying phone
-                    // must still be able to get the vehicle off the road — a
-                    // fault nobody logged is worse than one with no picture.
-                    PhotoTile(
-                        picked = faultPhoto,
-                        size = 88.dp,
-                        label = if (faultPhoto == null) "Photo of the fault — optional" else "Tap to retake",
-                        onPicked = { faultPhoto = it },
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    BarButton(
-                        if (vm.busy) "Sending…" else "Send for repair",
-                        onClick = { vm.sendToMaintenance(unit.evId, reason, faultPhoto, onDone) },
-                        enabled = !vm.busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                "repair" -> RepairForm(unit.evId, onDone, vm)
                 else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when (unit.status) {
                         "in_use" -> {
@@ -518,6 +496,81 @@ fun EvUnitSheet(
 
 /** "Give an EV" from a rider's page: the same actions, the other way round. */
 @OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Report a fault and take the vehicle off the road.
+ *
+ * One composable rather than two copies, because both places that offer this
+ * have to make the same promise about the photo, and a wording that drifts
+ * between the fleet tab and a rider's page is how a recruiter learns that one
+ * of them is lying.
+ *
+ * The photo is optional on purpose: it makes the argument with the provider
+ * much easier, but a recruiter on a dying phone must still be able to get the
+ * vehicle off the road, and a fault nobody logged is worse than one with no
+ * picture.
+ */
+@Composable
+fun RepairForm(
+    evId: String,
+    onDone: (String) -> Unit,
+    vm: EvActionsViewModel = hiltViewModel(),
+) {
+    var reason by remember(evId) { mutableStateOf("") }
+    var photo by remember(evId) { mutableStateOf<Uri?>(null) }
+    Kicker("What is wrong?")
+    Spacer(Modifier.height(8.dp))
+    SearchField(reason, onChange = { reason = it }, placeholder = "e.g. battery not charging")
+    Spacer(Modifier.height(14.dp))
+    PhotoTile(
+        picked = photo,
+        size = 88.dp,
+        label = if (photo == null) "Photo of the fault — optional" else "Tap to retake",
+        onPicked = { photo = it },
+    )
+    Spacer(Modifier.height(14.dp))
+    BarButton(
+        if (vm.busy) "Sending…" else "Send for repair",
+        onClick = { vm.sendToMaintenance(evId, reason, photo, onDone) },
+        enabled = !vm.busy,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    vm.error?.let {
+        Spacer(Modifier.height(8.dp))
+        Text(it, color = Qwik.Accent700, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * The same form in a sheet of its own, for a caller that has an EV id and no
+ * fleet row — a rider's page, where the vehicle is one line of their profile.
+ *
+ * A recruiter standing in front of a broken scooter is looking at the rider,
+ * not the fleet list. Making them leave the person, find the unit and open it
+ * there was the difference between a fault getting logged and a fault getting
+ * mentioned on the phone next week.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RepairSheet(
+    evId: String,
+    onDone: (String) -> Unit,
+    onDismiss: () -> Unit,
+    vm: EvActionsViewModel = hiltViewModel(),
+) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(evId) { vm.clear() }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Qwik.Bg) {
+        Column(
+            Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+        ) {
+            Text(evId, style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
+            Spacer(Modifier.height(12.dp))
+            RepairForm(evId, onDone, vm)
+        }
+    }
+}
+
 @Composable
 fun GiveEvSheet(
     personId: Long,

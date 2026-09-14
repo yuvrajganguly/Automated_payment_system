@@ -96,6 +96,16 @@ MONEY_KEYS = frozenset(
         "silent",
         "total_dues",
         "expected",
+        # Provider-bill reconciliation (2026-09-12). "charged", "expected",
+        # "collected", "missed" and "recovered" were already here.
+        "billed",
+        "damage",
+        "hand_booked",
+        "total_billed",
+        # What we owed a provider for days no rider was on the hook for
+        # (domain/reconciliation.py). provider_owed was already here; this is
+        # the remainder that used to be dropped from the report entirely.
+        "unheld_owed",
         "collected",
         "missed",
         "recovered",

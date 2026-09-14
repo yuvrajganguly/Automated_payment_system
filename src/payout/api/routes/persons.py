@@ -58,9 +58,13 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
                 (person_id,),
             )
         ]
+        # u.status rides along so the app can offer the right action on this
+        # page: a vehicle already in the workshop needs bringing back, not
+        # sending in again, and without the status the only honest button was
+        # none at all.
         ev_row = conn.execute(
             "SELECT a.ev_id, a.handover_date, a.rent_charged_through, "
-            "       m.provider, m.model_name, m.weekly_rate "
+            "       m.provider, m.model_name, m.weekly_rate, u.status "
             "FROM ev_assignments a "
             "JOIN ev_units  u ON u.ev_id    = a.ev_id "
             "JOIN ev_models m ON m.model_id = u.model_id "
@@ -87,6 +91,7 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
             weekly_rate=float(ev_row["weekly_rate"]),
             handover_date=ev_row["handover_date"],
             rent_charged_through=ev_row["rent_charged_through"],
+            status=ev_row["status"],
         )
         if ev_row
         else None

@@ -167,6 +167,10 @@ data class PersonEv(
     @SerialName("weekly_rate") val weeklyRate: Double = 0.0,
     @SerialName("handover_date") val handoverDate: String? = null,
     @SerialName("rent_charged_through") val rentChargedThrough: String? = null,
+    /** in_use normally, maintenance while it is in the workshop — a rider
+     *  keeps their assignment through a repair, so both appear here. Null from
+     *  a server that predates the field. */
+    val status: String? = null,
 )
 
 @Serializable

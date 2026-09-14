@@ -959,6 +959,50 @@ def _0033_maintenance_photos(conn: Any) -> None:
     add_column(conn, "ev_maintenance", "in_photo_key", "TEXT")
 
 
+def _0034_provider_bill_reconciliation(conn: Any) -> None:
+    """What the provider's bill says about the *rider*, and our corrections.
+
+    ``provider_bills`` and ``provider_bill_lines`` already existed: the bill is
+    uploaded and each line tallied against ``ev_daily_ledger``, which answers
+    "does their arithmetic match ours". It does not answer the question the
+    office actually asks every week — *did we charge somebody for this, and did
+    they pay* — because the three columns that would let it were thrown away at
+    parse time.
+
+    The rider's name as the provider has it is the important one. It is how a
+    unit we renamed is recognised (they keep billing the old id), how a
+    disagreement about who holds a vehicle surfaces at all, and how one person
+    record covering two men gets caught: reconciling week 36 by hand turned up
+    AV118 billed to Somnath Sardar and CBICEVD0005 to Milon Sardar, both
+    person 5. The VIN and the deployment date come along because they are the
+    other two things the provider knows and we do not check.
+
+    ``provider_bill_overrides`` holds what only the office knows. Keyed by
+    ev_id rather than by line, so a correction outlives the week it was made
+    in — see the note in schema.py.
+    """
+    add_column(conn, "provider_bill_lines", "provider_name", "TEXT")
+    add_column(conn, "provider_bill_lines", "vin", "TEXT")
+    add_column(conn, "provider_bill_lines", "deploy_date", "TEXT")
+    ddl = (
+        "CREATE TABLE IF NOT EXISTS provider_bill_overrides ("
+        "  ev_id    TEXT NOT NULL,"
+        "  field    TEXT NOT NULL,"
+        "  value    TEXT,"
+        "  note     TEXT,"
+        "  set_by   TEXT,"
+        "  set_at   TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (ev_id, field)"
+        ")"
+    )
+    if DB_URL:
+        from payout.db.connection import translate_ddl
+
+        conn.executescript(translate_ddl(ddl))
+    else:
+        conn.execute(ddl)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -996,6 +1040,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0031_rider_account_name", _0031_rider_account_name),
     ("0032_head_recruiter", _0032_head_recruiter),
     ("0033_maintenance_photos", _0033_maintenance_photos),
+    ("0034_provider_bill_reconciliation", _0034_provider_bill_reconciliation),
 ]
 
 _TRACKING_DDL = (

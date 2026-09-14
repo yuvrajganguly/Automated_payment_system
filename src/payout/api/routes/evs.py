@@ -1102,6 +1102,24 @@ def add_maintenance(body: MaintenanceIn, user: dict = Depends(require_recruiter)
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone():
             raise HTTPException(404, "EV not found")
+        # One open window at a time.
+        #
+        # Rent is zeroed for every day an open maintenance window covers, and
+        # bringing a vehicle back closes the first open window it finds. Two of
+        # them therefore means the second never closes and that EV earns
+        # nothing for the rest of its life — silently, because the unit reads
+        # in_use again and nothing looks wrong.
+        #
+        # Nothing guarded this until the action appeared on a rider's page as
+        # well as the fleet tab (2026-09-12). Two entry points and a double tap
+        # are all it takes, so the rule moved to where it cannot be bypassed.
+        if (
+            not body.to_date
+            and conn.execute(
+                "SELECT 1 FROM ev_maintenance WHERE ev_id=? AND to_date IS NULL", (body.ev_id,)
+            ).fetchone()
+        ):
+            raise HTTPException(409, f"{body.ev_id} is already in the workshop")
         # If we have a definite to_date use the existing helper; otherwise insert
         # directly so we can store NULL.
         if body.to_date:

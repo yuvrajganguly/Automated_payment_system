@@ -31,6 +31,7 @@ import com.qwikserve.recruiter.data.api.EvUnitOut
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.auth.TokenStore
 import com.qwikserve.recruiter.data.repo.AppRepository
+import com.qwikserve.recruiter.ui.common.chaseable
 import com.qwikserve.recruiter.ui.common.Chips
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.ListRow
@@ -126,7 +127,7 @@ private val MY_STATES = listOf("in_use" to "In use", "maintenance" to "Maintenan
 
 /** State filter. "dues" and "inactive" are about the holder, not the unit. */
 internal fun matches(u: EvUnitOut, state: String) = when (state) {
-    "dues" -> (u.totalDues ?: 0.0) > 0
+    "dues" -> chaseable(u.totalDues, u.weeklyRate)
     "inactive" -> u.holderActive == false
     else -> u.status == state
 }
@@ -219,7 +220,7 @@ fun EvsScreen(
                             u.currentRiderName,
                             u.hub,
                             u.handoverDate?.let { "since " + shortDate(it) },
-                            u.totalDues?.takeIf { it > 0 }?.let { "owes " + rupees(it) },
+                            u.totalDues?.takeIf { chaseable(it, u.weeklyRate) }?.let { "owes " + rupees(it) },
                             if (u.holderActive == false) "rider inactive" else null,
                         ).joinToString(" · ")
                     } else {
@@ -234,7 +235,7 @@ fun EvsScreen(
                                 u.zone?.let { Tag(it) }
                                 when {
                                     u.holderActive == false -> Tag("inactive", accent = true)
-                                    (u.totalDues ?: 0.0) > 0 -> Tag("dues", accent = true)
+                                    chaseable(u.totalDues, u.weeklyRate) -> Tag("dues", accent = true)
                                     else -> Tag(u.status.replace('_', ' '), accent = u.status == "maintenance")
                                 }
                             }
