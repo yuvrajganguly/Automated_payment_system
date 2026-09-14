@@ -494,8 +494,6 @@ fun EvUnitSheet(
     }
 }
 
-/** "Give an EV" from a rider's page: the same actions, the other way round. */
-@OptIn(ExperimentalMaterial3Api::class)
 /**
  * Report a fault and take the vehicle off the road.
  *
@@ -571,6 +569,8 @@ fun RepairSheet(
     }
 }
 
+/** "Give an EV" from a rider's page: the same actions, the other way round. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GiveEvSheet(
     personId: Long,
