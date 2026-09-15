@@ -24,6 +24,7 @@ from payout.api.routes.hubs import ZONES
 from payout.auth import hash_password
 from payout.auth.sessions import revoke_all
 from payout.db import get_connection
+from payout.domain.activity import record_activity
 
 router = APIRouter()
 
@@ -37,9 +38,12 @@ class UserOut(BaseModel):
     is_active: bool
     phone: str | None = None
     zone: str | None = None  # North | South — the recruiter's patch
-    # Head recruiter for that zone: supervises the field staff in it. A flag,
-    # not a rank — they stay a recruiter for every permission check.
+    # Head recruiter: supervises other recruiters' work. A flag, not a rank —
+    # they stay a recruiter for every permission check, money included.
     is_head: bool = False
+    # How far that reaches: "zone" (the zone above) or "field" (every
+    # recruiter, both zones). Meaningless unless is_head.
+    head_scope: str = "zone"
     created_at: str | None = None
 
 
@@ -96,7 +100,7 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
     anyone who is not one."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT email, role, is_active, phone, zone, is_head, created_at "
+            "SELECT email, role, is_active, phone, zone, is_head, head_scope, created_at "
             "FROM users ORDER BY email"
         ).fetchall()
     return [
@@ -107,6 +111,7 @@ def list_users(user: dict = Depends(get_current_user)) -> list[UserOut]:
             phone=r["phone"],
             zone=r["zone"],
             is_head=bool(r["is_head"]),
+            head_scope=r["head_scope"] or "zone",
             created_at=r["created_at"],
         )
         for r in rows
@@ -170,26 +175,39 @@ def set_zone(email: str, body: ZoneIn, user: dict = Depends(require_admin)) -> d
     list falls back to the recruiter's zone for hub-less riders, so writing it
     onto a colleague's account moves data around on their screen.
 
-    **Clearing the zone stands a head recruiter down.** ``set_head`` refuses
+    **Clearing the zone stands a head OF A ZONE down.** ``set_head`` refuses
     the flag on somebody with no zone precisely so it cannot mean nothing, and
     clearing the zone afterwards would walk round that check from the other
     side: the app reads ``is_head`` to decide whether to draw the supervision
     tab, so the account would keep a tab whose own endpoint then refused it.
     Moving somebody from North to South keeps the flag — they are the head of
     wherever they now are, which is what an office means by a transfer.
+
+    A head of the whole **field** is untouched by any of that. Their zone is
+    not what they supervise, so clearing it takes nothing away.
     """
     target = email.strip().lower()
     zone = (body.zone or "").strip().title() or None
     if zone is not None and zone not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)} (or empty to clear)")
     with get_connection() as conn:
-        row = conn.execute("SELECT role, is_head FROM users WHERE email=?", (target,)).fetchone()
+        row = conn.execute(
+            "SELECT role, is_head, head_scope FROM users WHERE email=?", (target,)
+        ).fetchone()
         if not row:
             raise HTTPException(404, "User not found")
         require_admin_over(user, row["role"])
-        stood_down = zone is None and bool(row["is_head"])
+        # A field head's zone is not what they supervise, so clearing it
+        # takes nothing away and must not stand them down. For a head OF a
+        # zone it is the whole basis of the flag, and clearing it would walk
+        # round set_head's check from the other side.
+        field_head = bool(row["is_head"]) and (row["head_scope"] or "zone") == "field"
+        stood_down = zone is None and bool(row["is_head"]) and not field_head
         if stood_down:
-            conn.execute("UPDATE users SET zone=NULL, is_head=0 WHERE email=?", (target,))
+            conn.execute(
+                "UPDATE users SET zone=NULL, is_head=0, head_scope='zone' WHERE email=?",
+                (target,),
+            )
         else:
             conn.execute("UPDATE users SET zone=? WHERE email=?", (zone, target))
         conn.commit()
@@ -198,23 +216,36 @@ def set_zone(email: str, body: ZoneIn, user: dict = Depends(require_admin)) -> d
 
 class HeadIn(BaseModel):
     is_head: bool
+    # "zone" (the default) supervises the zone on their account; "field" every
+    # recruiter in both. Ignored when is_head is false.
+    scope: str = "zone"
 
 
 @router.patch("/{email}/head")
 def set_head(email: str, body: HeadIn, user: dict = Depends(require_admin)) -> dict:
-    """Make a recruiter the head of their zone, or stand them down.
+    """Make a recruiter a head — of their zone, or of the whole field — or
+    stand them down.
 
     Only a recruiter can hold it: on an admin it would mean nothing (they see
     everything already) and on a plain user it would be a way to hand out
-    roster sight without the role that comes with it. A head with no zone
-    supervises nobody, so this refuses one rather than leaving a flag that
-    silently does nothing — set the zone first.
+    roster sight without the role that comes with it.
+
+    **A head of a zone must have one.** A flag that silently does nothing is
+    worse than a refusal, so this asks for the zone first.
+
+    **A head of the whole field needs no zone**, and that is the difference
+    between this and the thing that was refused in September: it is chosen,
+    not inferred from an empty field. Their zone, if they have one, stops
+    mattering for supervision — they see every recruiter either way.
 
     Rank-guarded like every other write here: this grants sight of colleagues'
     work, which is not something an admin should be able to hand to an account
     at or above their own rank.
     """
     target = email.strip().lower()
+    scope = (body.scope or "zone").strip().lower()
+    if scope not in ("zone", "field"):
+        raise HTTPException(400, "scope must be 'zone' or 'field'")
     with get_connection() as conn:
         row = conn.execute("SELECT role, zone FROM users WHERE email=?", (target,)).fetchone()
         if not row:
@@ -222,12 +253,30 @@ def set_head(email: str, body: HeadIn, user: dict = Depends(require_admin)) -> d
         require_admin_over(user, row["role"])
         if body.is_head:
             if row["role"] != "recruiter":
-                raise HTTPException(400, "Only a recruiter can be the head of a zone")
-            if not (row["zone"] or "").strip():
+                raise HTTPException(400, "Only a recruiter can be a head recruiter")
+            if scope == "zone" and not (row["zone"] or "").strip():
                 raise HTTPException(400, "Give them a zone first — a head with no zone sees nobody")
-        conn.execute("UPDATE users SET is_head=? WHERE email=?", (1 if body.is_head else 0, target))
+        # Standing somebody down resets the scope too, so a later re-tick
+        # cannot silently restore a wider reach than whoever ticks it intends.
+        conn.execute(
+            "UPDATE users SET is_head=?, head_scope=? WHERE email=?",
+            (1 if body.is_head else 0, scope if body.is_head else "zone", target),
+        )
+        record_activity(
+            conn,
+            user,
+            "user.head",
+            entity_type="user",
+            entity_id=target,
+            details={"is_head": body.is_head, "scope": scope if body.is_head else None},
+        )
         conn.commit()
-    return {"email": target, "is_head": body.is_head, "zone": row["zone"]}
+    return {
+        "email": target,
+        "is_head": body.is_head,
+        "head_scope": scope if body.is_head else "zone",
+        "zone": row["zone"],
+    }
 
 
 @router.patch("/{email}/role")

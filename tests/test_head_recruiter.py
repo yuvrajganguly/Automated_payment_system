@@ -308,3 +308,203 @@ def test_an_admin_sees_the_heads_too(client, staff):
     """An admin supervises the heads, so naming a zone lists everybody in it."""
     r = client.get("/api/app/zone-recruiting?zone=North", headers=staff["boss"]).json()
     assert {x["email"] for x in r["recruiters"]} == {"head-n@t.test", "rec-n@t.test"}
+
+
+# ── head of the whole field (2026-09-15) ─────────────────────────────────────
+#
+# The office asked twice for a head who sees both zones, and the note on
+# 2026-09-11 refused: "there is no such thing as a head who sees all — that is
+# an admin." On reflection the two are different people. An admin sees
+# balances, payouts, arrears and the ledger; this is somebody who sees the
+# *work* of the whole field and none of the money.
+#
+# It is a stored scope, not an absent zone. That was the real objection: a head
+# with no zone would make the widest setting look identical to an unconfigured
+# account, so clearing a box would hand somebody the company in silence.
+
+
+@pytest.fixture
+def field_head(client, staff, db):
+    """Promote the North head to the whole field."""
+    r = client.patch(
+        "/api/users/head-n@t.test/head",
+        json={"is_head": True, "scope": "field"},
+        headers=staff["boss"],
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["head_scope"] == "field"
+    return staff["head_n"]
+
+
+def test_a_field_head_sees_both_zones_recruiters(client, staff, field_head):
+    _onboard(client, staff["rec_n"], "Arjun Das", "SF-1")
+    _onboard(client, staff["rec_s"], "Chandan Sen", "SF-2")
+    board = client.get("/api/app/zone-recruiting", headers=field_head).json()
+    emails = {r["email"] for r in board["recruiters"]}
+    assert {"rec-n@t.test", "rec-s@t.test"} <= emails
+    assert board["scope"] == "field"
+    # The app's header prints "<zone> ZONE", so this has to read correctly on
+    # the build already installed — nobody should have to update for it.
+    assert board["zone"] == "Every"
+    assert board["totals"]["all_time"] == 2
+
+
+def test_a_field_head_sees_the_zone_heads_but_not_another_field_head(client, staff, field_head, db):
+    """A field head outranks a zone head, so head-s belongs on the board. A
+    second field head does not, for the same reason two zone heads in one zone
+    stay off each other's — and the board must not list a row that 403s."""
+    board = client.get("/api/app/zone-recruiting", headers=field_head).json()
+    assert "head-s@t.test" in {r["email"] for r in board["recruiters"]}
+
+    db.execute("UPDATE users SET head_scope='field' WHERE email='head-s@t.test'")
+    db.commit()
+    board = client.get("/api/app/zone-recruiting", headers=field_head).json()
+    listed = {r["email"] for r in board["recruiters"]}
+    assert "head-s@t.test" not in listed
+    assert "head-n@t.test" in listed, "their own row stays"
+    r = client.get("/api/app/my-recruiting?email=head-s@t.test", headers=field_head)
+    assert r.status_code == 403, "and the board agrees with what is behind it"
+
+
+def test_a_field_head_can_drill_into_either_zone(client, staff, field_head):
+    _onboard(client, staff["rec_s"], "Chandan Sen", "SF-9")
+    got = client.get("/api/app/my-recruiting?email=rec-s@t.test", headers=field_head)
+    assert got.status_code == 200, got.text
+    assert got.json()["counts"]["all_time"] == 1
+
+
+def test_a_field_head_may_narrow_to_one_zone(client, staff, field_head):
+    """Naming a zone is a filter, not a fence to climb: they supervise both."""
+    _onboard(client, staff["rec_n"], "Arjun Das", "SF-1")
+    _onboard(client, staff["rec_s"], "Chandan Sen", "SF-2")
+    north = client.get("/api/app/zone-recruiting?zone=North", headers=field_head).json()
+    assert {r["email"] for r in north["recruiters"]} == {"head-n@t.test", "rec-n@t.test"}
+    assert north["zone"] == "North"
+
+
+def test_a_field_head_sees_riders_in_both_zones(client, staff, field_head, db):
+    """The point of the whole thing. A fence would leave them reading both
+    zones' numbers on the board and being refused every rider behind them."""
+    boss = staff["boss"]
+    for rid, hub in (("SF-N", "Salt Lake"), ("SF-S", "Garia")):
+        pid = make_person(db, rid)
+        make_rider(db, pid, rid, "Shadowfax", rid)
+        db.execute("UPDATE rider_master SET hub=? WHERE rider_id=?", (hub, rid))
+    db.commit()
+    client.put("/api/hubs/Shadowfax/Salt Lake", json={"zone": "North"}, headers=boss)
+    client.put("/api/hubs/Shadowfax/Garia", json={"zone": "South"}, headers=boss)
+    got = {r["rider_id"] for r in client.get("/api/riders", headers=field_head).json()}
+    assert got == {"SF-N", "SF-S"}
+
+
+def test_a_field_head_still_cannot_see_money(client, staff, field_head, db):
+    """The one thing this must not do. Same test as for a zone head, because
+    the answer has to be the same: the fence keys off `role`, and this is not
+    a role."""
+    pid = make_person(db, "Arjun Das", balance=-25000)
+    make_rider(db, pid, "SF-1", "Shadowfax", "Arjun Das")
+    db.commit()
+    del pid
+    for path in ("/api/arrears", "/api/cod", "/api/dashboard/summary", "/api/inactive"):
+        r = client.get(path, headers=field_head)
+        assert r.status_code == 403, f"{path} answered {r.status_code} to a field head"
+
+
+def test_the_field_scope_needs_no_zone(client, staff, db):
+    """Where it differs from a head of a zone, and the only reason a column
+    exists instead of reading it off a NULL zone."""
+    db.execute("UPDATE users SET zone=NULL WHERE email='rec-n@t.test'")
+    db.commit()
+    zoned = client.patch(
+        "/api/users/rec-n@t.test/head",
+        json={"is_head": True, "scope": "zone"},
+        headers=staff["boss"],
+    )
+    assert zoned.status_code == 400, "a head OF A ZONE still needs one"
+    field = client.patch(
+        "/api/users/rec-n@t.test/head",
+        json={"is_head": True, "scope": "field"},
+        headers=staff["boss"],
+    )
+    assert field.status_code == 200, field.text
+
+
+def test_clearing_the_zone_does_not_stand_a_field_head_down(client, staff, field_head, db):
+    """Their zone is not what they supervise, so clearing it takes nothing
+    away. For a head of a zone it is the whole basis of the flag, and that
+    stand-down is tested above."""
+    r = client.patch("/api/users/head-n@t.test/zone", json={"zone": None}, headers=staff["boss"])
+    assert r.status_code == 200, r.text
+    row = db.execute("SELECT is_head, head_scope FROM users WHERE email='head-n@t.test'").fetchone()
+    assert bool(row["is_head"]) and row["head_scope"] == "field"
+    assert client.get("/api/app/zone-recruiting", headers=field_head).status_code == 200
+
+
+def test_standing_them_down_resets_the_scope(client, staff, field_head, db):
+    """So a later re-tick cannot silently restore a wider reach than whoever
+    ticks it intends."""
+    r = client.patch(
+        "/api/users/head-n@t.test/head", json={"is_head": False}, headers=staff["boss"]
+    )
+    assert r.status_code == 200, r.text
+    row = db.execute("SELECT is_head, head_scope FROM users WHERE email='head-n@t.test'").fetchone()
+    assert not row["is_head"] and row["head_scope"] == "zone"
+
+
+def test_an_unknown_scope_is_refused(client, staff):
+    r = client.patch(
+        "/api/users/rec-n@t.test/head",
+        json={"is_head": True, "scope": "everything"},
+        headers=staff["boss"],
+    )
+    assert r.status_code == 400
+
+
+def test_the_users_list_carries_the_scope(client, staff, field_head):
+    """The console draws the select from it."""
+    rows = {u["email"]: u for u in client.get("/api/users", headers=staff["boss"]).json()}
+    assert rows["head-n@t.test"]["head_scope"] == "field"
+    assert rows["head-s@t.test"]["head_scope"] == "zone"
+    assert rows["rec-n@t.test"]["head_scope"] == "zone", "meaningless but never null"
+
+
+def test_a_recruiter_cannot_make_themselves_a_field_head(client, staff):
+    r = client.patch(
+        "/api/users/rec-n@t.test/head",
+        json={"is_head": True, "scope": "field"},
+        headers=staff["rec_n"],
+    )
+    assert r.status_code == 403
+
+
+def test_every_supervision_target_is_loaded_with_its_scope():
+    """The bug this caught while being written.
+
+    ``supervises`` asks ``heads_field`` of the target, and a row loaded without
+    ``head_scope`` reads as a zone head — the narrow, safe answer, but the
+    wrong one: one field head could then read another's record even though the
+    board deliberately leaves them off it. A list that disagrees with what is
+    behind it is the same class of bug as the duplicate rider rows.
+
+    So both queries that feed ``supervises`` must select the column. Checked as
+    text because the alternative is waiting for the symptom.
+    """
+    import pathlib
+
+    for rel in ("src/payout/api/routes/app.py", "src/payout/api/routes/recruiters.py"):
+        src = pathlib.Path(__file__).resolve().parents[1].joinpath(rel).read_text()
+        assert "is_head, head_scope FROM users" in src, f"{rel} loads a target without head_scope"
+
+
+def test_a_field_head_is_not_a_field_head_without_the_flag(db):
+    """head_scope on its own grants nothing: somebody standing down keeps the
+    column, and it must not mean anything until the flag is back."""
+    from payout.api.auth import heads_field, heads_zone
+
+    assert not heads_field({"role": "recruiter", "is_head": False, "head_scope": "field"})
+    assert heads_field({"role": "recruiter", "is_head": True, "head_scope": "field"})
+    # And a field head has no single zone, so nothing can read one off them.
+    assert (
+        heads_zone({"role": "recruiter", "is_head": True, "head_scope": "field", "zone": "North"})
+        is None
+    )

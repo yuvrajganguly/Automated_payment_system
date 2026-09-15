@@ -423,11 +423,19 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     INTEGER NOT NULL DEFAULT 1,
     phone         TEXT,                           -- E.164 (+91…); second login id
     zone          TEXT,                           -- North | South: the recruiter's patch (app to-do list)
-    -- Head recruiter for their zone: a flag, not a rank. They stay a
-    -- `recruiter` for every permission check in the codebase; what this adds
-    -- is sight of what the other recruiters in their zone have done. See
-    -- migration 0032.
+    -- Head recruiter: a flag, not a rank. They stay a `recruiter` for every
+    -- permission check in the codebase; what this adds is sight of what other
+    -- recruiters have done. See migration 0032.
     is_head       INTEGER NOT NULL DEFAULT 0,
+    -- How far that sight reaches. 'zone' (the default) is the zone on this
+    -- row; 'field' is every recruiter in every zone, and then the zone above
+    -- stops mattering for supervision.
+    --
+    -- A column rather than reading it off a NULL zone, which is how the office
+    -- first described it: a head with no zone was refused because it would be
+    -- silent, and clearing a zone would hand somebody the whole company by
+    -- accident. See migration 0035 and auth.heads_field.
+    head_scope    TEXT NOT NULL DEFAULT 'zone',
     display_name  TEXT,                           -- what the console shows instead of the email
     created_at    TEXT DEFAULT (datetime('now'))
 );

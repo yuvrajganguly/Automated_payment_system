@@ -10,10 +10,12 @@ interface UserRow {
   is_active: boolean
   phone: string | null
   zone: string | null
-  /** Head recruiter for their zone: they see what the other recruiters in it
-   *  have done. A flag on a recruiter, deliberately not a role — the money
-   *  fence keys off `role`, so a new rung would have widened it. */
+  /** Head recruiter: they see what other recruiters have done. A flag on a
+   *  recruiter, deliberately not a role — the money fence keys off `role`, so
+   *  a new rung would have widened it. */
   is_head: boolean
+  /** How far that reaches: their own zone, or every recruiter in both. */
+  head_scope: 'zone' | 'field' 
   created_at: string | null
 }
 
@@ -101,19 +103,26 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }
   }
-  // Head recruiter for the zone above. The server refuses the flag on anyone
-  // who is not a recruiter, and on a recruiter with no zone — a flag that
-  // silently does nothing is worse than a refusal — so the box is only live
-  // once both are true, and clearing the zone clears the flag with it.
-  async function setHead(is_head: boolean) {
+  // Head recruiter. The server refuses the flag on anyone who is not a
+  // recruiter, and refuses the *zone* scope on a recruiter with no zone — a
+  // flag that silently does nothing is worse than a refusal.
+  //
+  // The field scope needs no zone, and that is the difference between it and
+  // the "head with no zone sees all" that was refused in September: it is
+  // chosen from this select, not inferred from an empty field, so nobody gets
+  // handed both zones by clearing a box.
+  async function setHead(scope: '' | 'zone' | 'field') {
     setBusy('head'); setError(null)
     try {
-      await api.patch('/users/' + encodeURIComponent(row.email) + '/head', { is_head })
+      await api.patch('/users/' + encodeURIComponent(row.email) + '/head',
+                      { is_head: scope !== '', scope: scope || 'zone' })
       onChanged()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(null) }
   }
-  const canBeHead = row.role === 'recruiter' && !!row.zone
+  const canBeHead = row.role === 'recruiter'
+  const canHeadZone = canBeHead && !!row.zone
+  const headValue = row.is_head ? (row.head_scope === 'field' ? 'field' : 'zone') : ''
   const [error, setError] = useState<string | null>(null)
   const isSelf = row.email === selfEmail
 
@@ -239,16 +248,19 @@ function UserRowEditor({ row, isCreator, isAdmin, selfEmail, onChanged }:
             </select>
           ) : (row.zone ?? '')}
           {isAdmin && (row.role === 'recruiter' || row.is_head) && (
-            <label className={'text-xs flex items-center gap-1 ' + (canBeHead ? 'text-slate-600' : 'text-slate-400')}
-                   title={canBeHead
-                     ? 'Head recruiter: adds a tab to their app showing what every recruiter in this zone has done — recruits, actives, EVs. Read-only, and it does not widen what they can see of the money.'
-                     : row.role !== 'recruiter'
-                     ? 'Only a recruiter can be a head.'
-                     : 'Give them a zone first — a head supervises one zone.'}>
-              <input type="checkbox" checked={row.is_head} disabled={!canBeHead || busy === 'head'}
-                     onChange={(e) => setHead(e.target.checked)} className="accent-brand" />
-              Head
-            </label>
+            <select className="border rounded px-1 py-0.5 text-xs bg-panel"
+                    value={headValue}
+                    disabled={!canBeHead || busy === 'head'}
+                    onChange={(e) => setHead(e.target.value as '' | 'zone' | 'field')}
+                    title={!canBeHead
+                      ? 'Only a recruiter can be a head.'
+                      : 'Head recruiter: adds a tab to their app showing what other recruiters have done — recruits, actives, EVs. Read-only, and it does not widen what they can see of the money.'}>
+              <option value="">Not a head</option>
+              <option value="zone" disabled={!canHeadZone}>
+                {canHeadZone ? 'Head of ' + row.zone : 'Head of zone — give them a zone first'}
+              </option>
+              <option value="field">Head of the whole field</option>
+            </select>
           )}
         </div>
       </Td>

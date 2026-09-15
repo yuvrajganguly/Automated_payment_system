@@ -110,7 +110,8 @@ def _load_user(email: str) -> dict | None:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, role, is_active, phone, zone, is_head FROM users WHERE email=?",
+            "SELECT email, role, is_active, phone, zone, is_head, head_scope "
+            "FROM users WHERE email=?",
             (email,),
         ).fetchone()
     if not row:
@@ -122,6 +123,7 @@ def _load_user(email: str) -> dict | None:
         "phone": row["phone"],
         "zone": row["zone"],
         "is_head": bool(row["is_head"]),
+        "head_scope": row["head_scope"] or "zone",
     }
 
 
@@ -159,6 +161,7 @@ def get_current_user(
         # ROLE_RANK: they are a recruiter everywhere a permission is checked,
         # including the money fence.
         "is_head": bool(user.get("is_head")),
+        "head_scope": user.get("head_scope") or "zone",
     }
 
 
@@ -189,16 +192,47 @@ def require_recruiter(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
-def heads_zone(user: dict) -> str | None:
-    """The zone this caller supervises, lowercased, or None.
+def heads_field(user: dict) -> bool:
+    """Does this caller supervise every recruiter, in both zones?
 
-    A head recruiter with no zone supervises nothing — the flag is meaningless
-    without a patch, and answering "everybody" would quietly hand a recruiter
-    the whole company.
+    The head flag shipped as head-of-a-zone, and the note then was blunt:
+    "there is no such thing as a head who sees all — that is an admin." The
+    office asked again, and on reflection the two really are different people.
+    An admin sees balances, payouts, arrears and the ledger. What they want is
+    somebody who sees the *work* of the whole field and none of the money —
+    which is what this flag has always meant, only wider.
+
+    It is a stored scope rather than an absent zone on purpose. A head with no
+    zone is still refused, because that would make the widest setting look
+    exactly like an unconfigured account: clearing a zone, or ticking the box
+    before setting one, would hand a recruiter the company silently. This
+    cannot happen by accident — somebody has to choose it.
+
+    The money fence is untouched. ``no_recruiter`` reads ``role``, this is not
+    a role, and ``test_a_head_still_cannot_see_money`` fails loudly if that
+    ever stops being true of either kind of head.
+    """
+    if not user.get("is_head"):
+        return False
+    if user.get("role") not in ("recruiter", "admin", "creator"):
+        return False
+    return (user.get("head_scope") or "zone") == "field"
+
+
+def heads_zone(user: dict) -> str | None:
+    """The one zone this caller supervises, lowercased, or None.
+
+    None for a field head as well as for a non-head: they supervise everybody,
+    so no single zone is theirs, and callers that mean "which zone is this
+    person's patch" must not get an answer that is only part of the truth. Ask
+    ``heads_field`` first — see ``supervises`` and ``zone_recruiting`` for the
+    two orderings that matter.
     """
     if not user.get("is_head"):
         return None
     if user.get("role") not in ("recruiter", "admin", "creator"):
+        return None
+    if heads_field(user):
         return None
     return ((user.get("zone") or "").strip().lower()) or None
 
@@ -218,6 +252,18 @@ def supervises(user: dict, target: dict | None) -> bool:
         return False
     if (user.get("email") or "").lower() == (target.get("email") or "").lower():
         return True
+    if target.get("role") != "recruiter":
+        return False
+    if heads_field(user):
+        # The whole field, zone heads included — a field head is above them.
+        # Not another field head: two of those must not read each other, for
+        # the same reason two zone heads in one zone must not.
+        #
+        # `heads_field` on the TARGET, so this asks the same question of them
+        # as of the caller. A row loaded without head_scope reads as a zone
+        # head, which is the narrower answer and therefore the safe one — but
+        # every caller passes the column, and a test pins that.
+        return not heads_field(target)
     zone = heads_zone(user)
     if zone is None:
         return False
@@ -225,7 +271,7 @@ def supervises(user: dict, target: dict | None) -> bool:
     # upwards. Two heads in one zone must not read each other.
     if target.get("is_head"):
         return False
-    return target.get("role") == "recruiter" and (target.get("zone") or "").lower() == zone
+    return (target.get("zone") or "").lower() == zone
 
 
 def no_recruiter(user: dict = Depends(get_current_user)) -> dict:

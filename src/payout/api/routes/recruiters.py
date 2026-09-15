@@ -131,7 +131,7 @@ def _resolve(user: dict, email: str | None) -> str:
     target = email.lower()
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT email, role, zone, is_head FROM users WHERE email=?", (target,)
+            "SELECT email, role, zone, is_head, head_scope FROM users WHERE email=?", (target,)
         ).fetchone()
     if not supervises(user, dict(row) if row else None):
         raise HTTPException(403, "You can only look at your own record")

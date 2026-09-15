@@ -1003,6 +1003,32 @@ def _0034_provider_bill_reconciliation(conn: Any) -> None:
         conn.execute(ddl)
 
 
+def _0035_head_of_the_field(conn: Any) -> None:
+    """A head recruiter who supervises the whole field, not one zone.
+
+    The flag shipped on 11 Sep as head-of-a-zone, and the note then was blunt:
+    "there is no such thing as a head who sees all — that is an admin." The
+    office asked for one anyway, twice, and they are right that the two are
+    not the same person. An admin sees balances, payouts, arrears and the
+    ledger. What they want is somebody who sees the *work* of both zones and
+    none of the money — a recruiter with a wider patch, which is exactly what
+    the flag already means.
+
+    Why a column rather than reading it off a NULL zone, which is how the
+    office first described it. A head with no zone was refused precisely
+    because it would be **silent**: clearing a zone, or ticking the box before
+    setting one, would hand a recruiter the whole company by accident and
+    nothing on screen would say so. A column cannot happen by accident. It
+    also leaves "no zone" meaning what it has always meant everywhere else,
+    instead of making the widest setting look like an empty field.
+
+    ``'zone'`` (the default, and every existing head) supervises the zone on
+    their account. ``'field'`` supervises every recruiter in every zone, and
+    their own zone stops mattering — see auth.heads_field.
+    """
+    add_column(conn, "users", "head_scope", "TEXT NOT NULL DEFAULT 'zone'")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1041,6 +1067,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0032_head_recruiter", _0032_head_recruiter),
     ("0033_maintenance_photos", _0033_maintenance_photos),
     ("0034_provider_bill_reconciliation", _0034_provider_bill_reconciliation),
+    ("0035_head_of_the_field", _0035_head_of_the_field),
 ]
 
 _TRACKING_DDL = (

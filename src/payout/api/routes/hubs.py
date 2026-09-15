@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from payout.api.auth import get_current_user, require_admin
+from payout.api.auth import get_current_user, heads_field, require_admin
 from payout.db import get_connection
 from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX
@@ -55,13 +55,20 @@ def fenced_zone(user: dict) -> str | None:
     and South was a filter chip they could simply not press. Hiding the chip
     without this would be theatre — ``GET /riders?zone=South`` still answered.
 
-    Two deliberate exemptions. **Admins and the creator** are never fenced;
+    Three deliberate exemptions. **Admins and the creator** are never fenced;
     they run the whole board. **A recruiter with no zone set** is not fenced
     either — an account nobody has placed yet has to be able to see the work,
     and the alternative is a new joiner staring at an empty app on their first
-    morning.
+    morning. **A head of the whole field** is not fenced, because a fence
+    would make the supervision pointless: they would see both zones' numbers
+    on their board and then be refused every rider behind them.
+
+    That last one is the only exemption somebody chooses deliberately; the
+    other two are a role and an omission. See auth.heads_field.
     """
     if user.get("role") in ("admin", "creator"):
+        return None
+    if heads_field(user):
         return None
     zone = (user.get("zone") or "").strip()
     return zone.lower() or None

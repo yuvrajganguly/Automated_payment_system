@@ -65,6 +65,11 @@ ACTIONS: dict[str, str] = {
     "shift.start": "Logged the opening odometer",
     "shift.end": "Logged the closing odometer",
     "ev.closeout_report": "Reported the EV's condition on return",
+    # Handing somebody sight of colleagues' work is worth a line in the feed —
+    # especially the field scope, which reaches both zones.
+    "user.head": "Changed a head recruiter",
+    "provider_bill.import": "Imported a provider bill",
+    "provider_bill.override": "Corrected a provider bill line",
 }
 
 

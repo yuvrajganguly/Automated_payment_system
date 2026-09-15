@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from payout.api.auth import get_current_user, heads_zone, supervises
+from payout.api.auth import get_current_user, heads_field, heads_zone, supervises
 from payout.api.ratelimit import rate_limit
 from payout.api.routes.hubs import ZONES, fenced_zone
 from payout.db import get_connection
@@ -237,7 +237,8 @@ def my_recruiting(
     if email and email.lower() != target:
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT email, role, zone, is_head FROM users WHERE email=?", (email.lower(),)
+                "SELECT email, role, zone, is_head, head_scope FROM users WHERE email=?",
+                (email.lower(),),
             ).fetchone()
         # An admin, or a head recruiter over somebody in their own zone.
         if not supervises(user, dict(row) if row else None):
@@ -252,7 +253,10 @@ def zone_recruiting(
     zone: str | None = Query(None, description="admins may name a zone; a head cannot"),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """A head recruiter's view of their own zone: one row per recruiter in it.
+    """A head recruiter's view of the field staff they supervise.
+
+    One row per recruiter: their own zone for a head of a zone, and every
+    recruiter in every zone for a head of the whole field (auth.heads_field).
 
     The same numbers each recruiter sees on their own "My numbers" tab, side
     by side, for the people the head is responsible for. Drilling into a row
@@ -268,7 +272,15 @@ def zone_recruiting(
     if asked and asked.title() not in ZONES:
         raise HTTPException(400, f"zone must be one of {', '.join(ZONES)}")
     mine = heads_zone(user)
-    if user["role"] in ("admin", "creator"):
+    field = heads_field(user) and user["role"] not in ("admin", "creator")
+    if field:
+        # Every zone, and the unplaced too: a recruiter nobody has given a
+        # zone to is still somebody's responsibility, and leaving them off the
+        # only board that lists field staff is how an account gets forgotten.
+        # `asked` narrows it, so the head can still look at one zone at a time
+        # — they supervise all of them, so naming one is not a fence to climb.
+        zone = asked
+    elif user["role"] in ("admin", "creator"):
         # An admin supervises any zone they name, and their own if they have
         # one. With neither there is no sensible default: "everybody" is the
         # console's recruiter board, not this.
@@ -295,14 +307,32 @@ def zone_recruiting(
         # would put a row on the board that 403s when it is tapped. An admin
         # looking at a zone sees everybody in it, heads included — they
         # supervise the heads too.
-        peer_heads = (
-            "" if user["role"] in ("admin", "creator") else " AND (u.is_head=0 OR u.email=?)"
-        )
-        params: tuple = (zone,) if not peer_heads else (zone, (user["email"] or "").lower())
+        # A field head outranks a zone head, so zone heads belong on their
+        # board; another field head does not, for the same reason two zone
+        # heads in one zone stay off each other's. `supervises()` decides, and
+        # this clause has to agree with it or the board grows a row that 403s
+        # when it is tapped.
+        if field:
+            peer_heads = " AND (u.head_scope<>'field' OR u.is_head=0 OR u.email=?)"
+        elif user["role"] in ("admin", "creator"):
+            peer_heads = ""
+        else:
+            peer_heads = " AND (u.is_head=0 OR u.email=?)"
+        # Zone is a filter here rather than the subject: a field head asking
+        # for everybody passes None. Clauses and parameters are built together
+        # so the two cannot fall out of step.
+        args: list[str] = []
+        where_zone = ""
+        if zone is not None:
+            where_zone = " AND LOWER(COALESCE(u.zone,''))=?"
+            args.append(zone)
+        if peer_heads:
+            args.append((user["email"] or "").lower())
+        params: tuple = tuple(args)
         staff = conn.execute(
-            "SELECT u.email, u.display_name, u.is_active, p.full_name "
+            "SELECT u.email, u.display_name, u.is_active, u.zone, p.full_name "
             "FROM users u LEFT JOIN recruiter_profiles p ON p.email = u.email "
-            f"WHERE u.role='recruiter' AND LOWER(COALESCE(u.zone,''))=?{peer_heads} "
+            f"WHERE u.role='recruiter'{where_zone}{peer_heads} "
             "ORDER BY u.email",
             params,
         ).fetchall()
@@ -338,6 +368,11 @@ def zone_recruiting(
                     "email": email,
                     "name": name_from(r["full_name"], r["display_name"], email),
                     "is_active": bool(r["is_active"]),
+                    # Which zone this recruiter works. Only interesting on a
+                    # field head's board, where the rows come from both; an
+                    # older app build ignores the key (its JSON reader is set
+                    # to skip unknown fields) so this costs nothing there.
+                    "zone": r["zone"],
                     "today": int(c["today"] or 0),
                     "week": int(c["week"] or 0),
                     "month": int(c["month"] or 0),
@@ -349,8 +384,14 @@ def zone_recruiting(
                 }
             )
     rows.sort(key=lambda x: (-x["month"], -x["all_time"], x["email"]))
+    # The app's header reads "<zone> ZONE", so a field head looking at
+    # everybody gets "EVERY ZONE" rather than a blank or a lie. Chosen to read
+    # correctly on the build already on their phones — nobody has to install
+    # anything for this to make sense.
+    label = zone.title() if zone else "Every"
     return {
-        "zone": zone.title(),
+        "zone": label,
+        "scope": "field" if field else "zone",
         "as_of": today.isoformat(),
         "periods": starts,
         "recruiters": rows,
