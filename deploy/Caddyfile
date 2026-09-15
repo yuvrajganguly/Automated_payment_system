@@ -26,10 +26,22 @@
 	# which is still there and still serves happily. It looks exactly like a
 	# feature that failed to ship. It cost us the "rider not showing up"
 	# false alarm on 2026-09-07 and the missing Recruiters page on 09-08.
+	#
+	# And a third time on 2026-09-15, because the fix above was written as
+	# `path / /index.html` — which matches those two URLs and nothing else.
+	# Every other console URL is a SPA deep link: /users, /providers/raft,
+	# /riders. They all return index.html and none of them matched, so they
+	# got no directive and the browser cached the shell exactly as before.
+	# Nobody browses to "/" — they are already on a page, or they bookmarked
+	# one, so in practice the rule covered the one path that never needed it.
+	#
+	# Inverted, so the question is "is this a fingerprinted asset?" rather
+	# than a list of shell URLs somebody has to remember to extend. /api/* is
+	# excluded because those responses set their own caching.
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 
-	@shell path / /index.html
+	@shell not path /assets/* /api/*
 	header @shell Cache-Control "no-cache"
 }
 
