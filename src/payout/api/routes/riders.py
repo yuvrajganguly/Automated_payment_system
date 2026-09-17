@@ -11,6 +11,7 @@ from payout.api.auth import get_current_user, no_recruiter, require_admin, requi
 from payout.api.routes.hubs import placeholder_pool_sql, sees_placeholder_pool, zone_scope
 from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderOut, RiderPatch
 from payout.db import get_connection
+from payout.db.references import rename_rider_id as rewrite_rider_id
 from payout.domain.activity import diff_fields, record_activity
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.domain.referrals import ReferralError, create_referral
@@ -252,25 +253,12 @@ def rename_rider_id(body: RenameRiderIdIn, user: dict = Depends(require_recruite
                 f"rider_id {new_rid!r} already exists at {body.company} "
                 f"(person {clash['person_id']}). Use Link Riders to merge instead.",
             )
-        conn.execute(
-            "UPDATE rider_master SET rider_id=? WHERE rider_id=? AND company=?",
-            (new_rid, current, body.company),
-        )
-        conn.execute(
-            "UPDATE transactions SET rider_id=? WHERE rider_id=? AND company=?",
-            (new_rid, current, body.company),
-        )
-        # cod_holds is per-cycle but indexed by rider_id too.
-        conn.execute(
-            "UPDATE cod_holds SET rider_id=? WHERE rider_id=? AND company=?",
-            (new_rid, current, body.company),
-        )
-        # person_registry.deduction_rider_id may also hold the old value.
-        conn.execute(
-            "UPDATE person_registry SET deduction_rider_id=? "
-            "WHERE deduction_rider_id=? AND deduction_company=?",
-            (new_rid, current, body.company),
-        )
+        # One canonical, company-scoped list (db/references.py). The list
+        # written out here covered four tables and missed salary_inputs, so
+        # renaming a salary company's rider orphaned their attendance and pay
+        # rows; it also left activity_log.entity_id pointing at the old id, so
+        # the rider's own feed stopped resolving. Same drift as PERSON_REFS.
+        rewrite_rider_id(conn, body.company, current, new_rid)
         record_activity(
             conn,
             user,

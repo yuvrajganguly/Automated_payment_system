@@ -36,8 +36,16 @@ PERSON_REFS: tuple[tuple[str, str], ...] = (
 PERSON_SINGLETON_TABLES: frozenset[str] = frozenset({"balances", "ev_arrears", "status_tracking"})
 
 # (table, column) pairs that reference ev_units(ev_id), children first.
+#
+# The two close-out tables are keyed on ``assignment_id``, not ``ev_id``, so
+# they were missing here — and deleting an EV whose assignment had a close-out
+# report tripped that foreign key, which the creator's delete saw as a bare
+# HTTP 500. They both carry the ``ev_id`` as well, so they clear the same way;
+# they only have to go BEFORE ``ev_assignments``.
 EV_REFS: tuple[tuple[str, str], ...] = (
     ("ev_daily_ledger", "ev_id"),
+    ("ev_closeouts", "ev_id"),  # -> ev_assignments(assignment_id) too
+    ("ev_closeout_reports", "ev_id"),  # -> ev_assignments(assignment_id) too
     ("ev_assignments", "ev_id"),
     ("ev_maintenance", "ev_id"),
 )
@@ -62,6 +70,64 @@ COMPANY_REFS: tuple[tuple[str, str], ...] = (
     ("company_cycles", "company"),  # part of UNIQUE(company, cycle_start, cycle_end)
     ("companies", "rider_ids_shared_with"),  # company -> company pointer
 )
+
+
+# (table, column) pairs holding a rider ID as text, alongside the column that
+# scopes it to a company. A rider_id is unique per company, never globally, so
+# every one of these updates has to be scoped or the same id at another company
+# is rewritten too.
+#
+# This exists for the same reason PERSON_REFS does: ``riders.rename_rider`` had
+# its own hand-written list, and the list was short. It covered rider_master,
+# transactions, cod_holds and person_registry, and missed ``salary_inputs`` —
+# so renaming a salary company's rider silently orphaned their attendance and
+# pay rows — and it never rewrote ``activity_log.entity_id``, so the rider's
+# own feed stopped resolving at the rename.
+RIDER_REFS: tuple[tuple[str, str, str], ...] = (
+    ("rider_master", "rider_id", "company"),  # part of PK (rider_id, company)
+    ("transactions", "rider_id", "company"),
+    ("cod_holds", "rider_id", "company"),
+    ("salary_inputs", "rider_id", "company"),
+    ("person_registry", "deduction_rider_id", "deduction_company"),
+)
+
+
+def rename_rider_id(conn, company: str, old: str, new: str) -> bool:
+    """Rewrite one company's rider ID everywhere, including history.
+
+    Returns False, changing nothing, when there is no such rider at that
+    company, when the two values are equal, or when ``new`` is already taken
+    there — the caller reports the clash and offers a merge instead, because
+    two ids that both exist are two rows to join, not one to rename.
+
+    A typo in a rider ID is the same bug as a typo in an EV id: a confusable
+    character (0 for O) makes a second identity that every later file misses.
+    """
+    if old == new:
+        return False
+    have = {
+        r[0]
+        for r in conn.execute(
+            "SELECT rider_id FROM rider_master WHERE company=? AND rider_id IN (?, ?)",
+            (company, old, new),
+        ).fetchall()
+    }
+    if old not in have or new in have:
+        return False
+    for table, col, scope in RIDER_REFS:
+        conn.execute(
+            f"UPDATE {table} SET {col}=? WHERE {col}=? AND {scope}=?",  # noqa: S608 - literals
+            (new, old, company),
+        )
+    # entity_id is "<rider_id>@<company>", baked in at write time. Matched as
+    # an exact string rather than with LIKE: an id is data, '_' and '%' are
+    # LIKE wildcards, and SQLite's LIKE is case-insensitive where Postgres's
+    # is not — the same rename would behave differently on the two backends.
+    conn.execute(
+        "UPDATE activity_log SET entity_id=? WHERE entity_type='rider' AND entity_id=?",
+        (f"{new}@{company}", f"{old}@{company}"),
+    )
+    return True
 
 
 def rename_company(conn, old: str, new: str) -> bool:
