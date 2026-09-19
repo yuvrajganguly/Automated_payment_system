@@ -41,6 +41,11 @@ interface BoardRow {
   onboarded_recent: number
   onboarded_month: number
   still_working: number
+  /** Onboarded long enough ago for a payout cycle to have closed over them,
+   *  and never once appeared in one. Not the same as "stopped working". */
+  never_worked: number
+  /** How many of this recruiter's people the Checks page says we already had. */
+  duplicates: number
   evs_deployed: number
   evs_deployed_recent: number
   km_this_month: number
@@ -390,6 +395,14 @@ function BoardTable({ rows, days, onOpen }: {
             <SortableTh tag="onboarded_all_time" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>All time</SortableTh>
             <SortableTh tag="still_working" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Still working</SortableTh>
             <SortableTh tag="retention_pct" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Retention</SortableTh>
+            <SortableTh tag="never_worked" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>
+              <span title="Onboarded, a payout cycle has closed over them, and they have never been in one">
+                Never started
+              </span>
+            </SortableTh>
+            <SortableTh tag="duplicates" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>
+              <span title="People we already had — see Admin → Checks">Duplicates</span>
+            </SortableTh>
             <SortableTh tag="evs_deployed" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>EVs deployed</SortableTh>
             <SortableTh tag="km_this_month" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Km this month</SortableTh>
           </tr>
@@ -414,6 +427,8 @@ function BoardTable({ rows, days, onOpen }: {
               <td className={cell}>{integer(r.onboarded_all_time)}</td>
               <td className={cell + ' text-emerald-300'}>{integer(r.still_working)}</td>
               <td className={cell}>{pct(r.retention_pct)}</td>
+              <td className={cell + (r.never_worked ? ' text-amber-400' : '')}>{integer(r.never_worked)}</td>
+              <td className={cell + (r.duplicates ? ' text-rose-400' : '')}>{integer(r.duplicates)}</td>
               <td className={cell}>{integer(r.evs_deployed)}</td>
               <td className={cell}>{integer(r.km_this_month)}</td>
             </tr>
@@ -427,6 +442,8 @@ function BoardTable({ rows, days, onOpen }: {
             <td className={cell}>{integer(sorted.reduce((a, r) => a + r.onboarded_all_time, 0))}</td>
             <td className={cell}>{integer(sorted.reduce((a, r) => a + r.still_working, 0))}</td>
             <td className={cell} />
+            <td className={cell}>{integer(sorted.reduce((a, r) => a + r.never_worked, 0))}</td>
+            <td className={cell}>{integer(sorted.reduce((a, r) => a + r.duplicates, 0))}</td>
             <td className={cell}>{integer(sorted.reduce((a, r) => a + r.evs_deployed, 0))}</td>
             <td className={cell}>{integer(sorted.reduce((a, r) => a + r.km_this_month, 0))}</td>
           </tr>

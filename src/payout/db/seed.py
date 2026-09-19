@@ -9,10 +9,13 @@ from __future__ import annotations
 import sqlite3
 
 # (provider, model_name, weekly_rate). Daily rate is derived as weekly / 7.
-EV_MODELS: list[tuple[str, str, float]] = [
-    ("Raft", "Regular", 125000),  # paise
-    ("Raft", "Blue", 129500),  # paise
-    ("Blive", "Standard", 126000),  # paise
+# (provider, model, weekly_rate in paise, id_prefix). The prefix is what every
+# one of that model's EV IDs starts with; None means we do not know the pattern
+# and only the confusable-character check guards new IDs. See migration 0036.
+EV_MODELS: list[tuple[str, str, float, str | None]] = [
+    ("Raft", "Regular", 125000, None),
+    ("Raft", "Blue", 129500, "CBICEVD"),
+    ("Blive", "Standard", 126000, "KOL"),
 ]
 
 # Company parser configs. See companies table in schema.py for column meanings.
@@ -209,7 +212,8 @@ _COMPANY_DEFAULTS = {
 
 def seed_ev_models(conn: sqlite3.Connection) -> None:
     conn.executemany(
-        "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate) VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate, id_prefix) "
+        "VALUES (?, ?, ?, ?)",
         EV_MODELS,
     )
 

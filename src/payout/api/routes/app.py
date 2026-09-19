@@ -792,7 +792,8 @@ def person_timeline(
     user: dict = Depends(get_current_user),
 ) -> list[dict]:
     """Everything that has happened to one rider, newest first: added, edited,
-    EV handed over, returned, sent for repair, closed out, documents, referrals.
+    EV handed over, returned, sent for repair, closed out, documents,
+    referrals — **and the money**.
 
     This is the same activity feed the console reads, but scoped to a person
     rather than to an operator. ``/api/activity`` deliberately confines a
@@ -800,6 +801,15 @@ def person_timeline(
     another's day — but a rider's own history has to show every hand that
     touched them, or the timeline lies by omission the moment a colleague
     hands over the EV.
+
+    The ledger was missing from it, and the ledger is what people actually
+    ask about. "Why was he charged twice" cannot be answered by a list of who
+    pressed which button; it is answered by seeing the rent legs, the payout
+    and the correction in the order they happened. So transactions are folded
+    into the same stream, and the two sources are told apart by ``source``.
+
+    Money rows are marked ``entity_type='money'`` and carry the amount in
+    ``details``, where the rupeeizing middleware finds it.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -808,9 +818,16 @@ def person_timeline(
             "FROM activity_log WHERE person_id=? ORDER BY id DESC LIMIT ?",
             (person_id, limit),
         ).fetchall()
+        money = conn.execute(
+            "SELECT id, created_at, created_by, event_type, amount, balance_after, "
+            "       cycle_start, cycle_end, company, rider_id, days, remarks "
+            "FROM transactions WHERE person_id=? ORDER BY id DESC LIMIT ?",
+            (person_id, limit),
+        ).fetchall()
     out = []
     for r in rows:
         d = dict(r)
+        d["source"] = "activity"
         d["action_label"] = ACTIONS.get(d["action"], d["action"])
         if d.get("details"):
             try:
@@ -818,4 +835,36 @@ def person_timeline(
             except (TypeError, ValueError):
                 d["details"] = None
         out.append(d)
-    return out
+    for r in money:
+        out.append(
+            {
+                "id": int(r["id"]),
+                "source": "money",
+                # transactions.created_at is when it was booked; the cycle it
+                # belongs to is in details. The feed sorts on this, so a
+                # backdated correction appears where it was made, not where it
+                # applies — which is the honest order for "what happened when".
+                "at": r["created_at"],
+                "email": r["created_by"],
+                "role": None,
+                "action": r["event_type"],
+                "action_label": (r["event_type"] or "").replace("_", " ").title(),
+                "entity_type": "money",
+                "entity_id": r["rider_id"],
+                "entity_label": r["company"],
+                "details": {
+                    "amount": int(r["amount"] or 0),
+                    "balance_after": int(r["balance_after"] or 0),
+                    "cycle": f"{r['cycle_start']} → {r['cycle_end']}",
+                    "days": r["days"],
+                    "remarks": r["remarks"],
+                },
+                "lat": None,
+                "lng": None,
+            }
+        )
+    # One axis, newest first. Sorting on the timestamp rather than on the id
+    # is what lets the two sources interleave; ids are only unique within
+    # their own table and would otherwise shuffle the two into blocks.
+    out.sort(key=lambda d: (d["at"] or "", d["source"], d["id"]), reverse=True)
+    return out[:limit]

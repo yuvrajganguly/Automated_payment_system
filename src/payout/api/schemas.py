@@ -158,6 +158,15 @@ class RiderIn(BaseModel):
     # operator has seen the warning and wants a separate person anyway
     # (two "Amit Naskar"s). A matching bank account is never bypassed.
     allow_duplicate_name: bool = False
+    # The cross-company check found somebody who looks like the same man —
+    # matching name AND a shared phone, account, Aadhaar or PAN — and the
+    # operator says it really is a different person. Separate from
+    # ``allow_duplicate_name`` on purpose: that one means "two riders at this
+    # company happen to share a name", which is common, and an old client
+    # sending it must not thereby wave through a shared phone number, which is
+    # not. Defaults false, so a client that has never heard of this check gets
+    # its protection.
+    confirm_new_person: bool = False
     # Optional identity numbers, stored on the person.
     aadhaar_no: str | None = None
     pan_no: str | None = None
@@ -310,6 +319,8 @@ class EvModelOut(BaseModel):
     provider: str
     model_name: str
     weekly_rate: float
+    # What this model's EV IDs start with; None when the pattern is unknown.
+    id_prefix: str | None = None
 
 
 class EvUnitIn(BaseModel):

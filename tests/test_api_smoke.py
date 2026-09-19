@@ -59,6 +59,8 @@ _QUERY = {
     # A head is locked to their own zone; an admin has to name one, because
     # "every zone" is the console's recruiter board rather than this route.
     "/api/app/zone-recruiting": "zone=North",
+    # Asked while an onboarding form is still open, so the name is the point.
+    "/api/riders/duplicate-check": "name=Somebody",
 }
 
 # GETs that legitimately answer something other than 200 with these params.

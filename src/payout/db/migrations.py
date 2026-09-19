@@ -1029,6 +1029,50 @@ def _0035_head_of_the_field(conn: Any) -> None:
     add_column(conn, "users", "head_scope", "TEXT NOT NULL DEFAULT 'zone'")
 
 
+def _0036_ev_id_prefix(conn: Any) -> None:
+    """What each EV model's IDs are supposed to start with.
+
+    Three times in September 2026 a confusable character went into an ID and
+    made a vehicle, or a rider, that does not exist: CBJCEVD0250 (J for I),
+    CBICEVDO286 (letter O for zero) and the rider id 67163_MN0W000471 (zero
+    for letter O). Each one was found weeks later, in a reconciliation, by
+    which time rent had been charged against it.
+
+    The office knows the patterns — Blive IDs begin KOL, Raft Blue begin
+    CBICEVD — so the check is cheap. It lives on the model rather than in
+    Python because the fleet changes and a provider is not a code change.
+    Raft Regular is left NULL: nobody has told us its prefix, and a wrong
+    prefix would refuse real vehicles, which is worse than no prefix at all.
+    """
+    add_column(conn, "ev_models", "id_prefix", "TEXT")
+    for provider, model, prefix in (
+        ("Blive", "Standard", "KOL"),
+        ("Raft", "Blue", "CBICEVD"),
+    ):
+        row = conn.execute(
+            "SELECT model_id FROM ev_models WHERE LOWER(provider)=LOWER(?) "
+            "AND LOWER(model_name)=LOWER(?) AND id_prefix IS NULL",
+            (provider, model),
+        ).fetchone()
+        if not row:
+            continue
+        # Only enforce a pattern the fleet already agrees with. If even one
+        # vehicle on file breaks it, the rule is either wrong or the fleet is,
+        # and refusing real vehicles at the gate is a worse outcome than
+        # letting a typo through — the anomalies page catches the typo, nothing
+        # catches a recruiter who cannot add the bike in his hands. Set it by
+        # hand from the console once the odd ones out are explained.
+        breaks = conn.execute(
+            "SELECT COUNT(*) AS n FROM ev_units WHERE model_id=? "
+            "AND SUBSTR(UPPER(ev_id), 1, ?) <> ?",
+            (row["model_id"], len(prefix), prefix),
+        ).fetchone()["n"]
+        if not breaks:
+            conn.execute(
+                "UPDATE ev_models SET id_prefix=? WHERE model_id=?", (prefix, row["model_id"])
+            )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1068,6 +1112,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0033_maintenance_photos", _0033_maintenance_photos),
     ("0034_provider_bill_reconciliation", _0034_provider_bill_reconciliation),
     ("0035_head_of_the_field", _0035_head_of_the_field),
+    ("0036_ev_id_prefix", _0036_ev_id_prefix),
 ]
 
 _TRACKING_DDL = (

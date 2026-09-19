@@ -29,6 +29,9 @@ from payout.api.routes import (
     auth as auth_routes,
 )
 from payout.api.routes import (
+    checks as checks_routes,
+)
+from payout.api.routes import (
     cod as cod_routes,
 )
 from payout.api.routes import (
@@ -237,6 +240,9 @@ app.include_router(
     prefix="/api/dashboard",
     tags=["analytics"],
     dependencies=_NO_RECRUITER,
+)
+app.include_router(
+    checks_routes.router, prefix="/api/checks", tags=["checks"], dependencies=_NO_RECRUITER
 )
 app.include_router(
     corrections_routes.router,

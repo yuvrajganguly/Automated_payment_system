@@ -13,6 +13,7 @@ from payout.api.schemas import ExportSelection, RenameRiderIdIn, RiderIn, RiderO
 from payout.db import get_connection
 from payout.db.references import rename_rider_id as rewrite_rider_id
 from payout.domain.activity import diff_fields, record_activity
+from payout.domain.duplicates import find_duplicate_people
 from payout.domain.placeholders import PLACEHOLDER_PREFIX, retire_placeholders
 from payout.domain.referrals import ReferralError, create_referral
 from payout.domain.worked import active_person_sql, last_worked_sql
@@ -674,6 +675,38 @@ def delete_rider(
     }
 
 
+@router.get("/duplicate-check")
+def duplicate_check(
+    name: str = Query(..., min_length=1),
+    mob_no: str | None = None,
+    account_no: str | None = None,
+    aadhaar_no: str | None = None,
+    pan_no: str | None = None,
+    _: dict = Depends(require_recruiter),
+) -> dict:
+    """Who already on file looks like this person — asked while the form is
+    still open, before anything is created.
+
+    The hard stop in ``create_rider`` is the backstop; this is the part that
+    actually helps, because it answers at the moment the recruiter can still
+    look at the man in front of him and ask whether he has been here before.
+    ``strong`` hits will be refused on submit, ``strong=false`` ones will not.
+
+    Declared above ``GET /{rider_id}`` on purpose — that route would otherwise
+    swallow this path and try to look up a rider called "duplicate-check".
+    """
+    with get_connection() as conn:
+        hits = find_duplicate_people(
+            conn,
+            name,
+            phones=[mob_no],
+            accounts=[account_no],
+            aadhaar=aadhaar_no,
+            pan=pan_no,
+        )
+    return {"matches": hits, "blocking": any(h["strong"] for h in hits)}
+
+
 @router.get("/{rider_id}", response_model=RiderOut)
 def get_rider(
     rider_id: str, company: str = Query(...), _: dict = Depends(get_current_user)
@@ -699,6 +732,31 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
     on (name, company) and (account_no, company) is skipped when person_id
     is explicit, because attaching to a known person is the intent."""
     with get_connection() as conn:
+        # Cross-company, before the per-company check below. Suman Mondal was
+        # the office's rider at Jiffy and the recruiter's at Myntra, so the
+        # per-company check never saw a second copy of him — it cannot, by
+        # construction. A phone number is a person, not a company's rider.
+        strong: list[dict] = []
+        if body.person_id is None:
+            hits = find_duplicate_people(
+                conn,
+                body.name,
+                phones=[body.mob_no],
+                accounts=[body.account_no],
+                aadhaar=body.aadhaar_no,
+                pan=body.pan_no,
+            )
+            strong = [h for h in hits if h["strong"]]
+            if strong and not body.confirm_new_person:
+                h = strong[0]
+                raise HTTPException(
+                    409,
+                    f"This looks like #{h['person_id']} {h['display_name']}, who is already "
+                    f"on file ({h['evidence']}; {', '.join(h['rider_ids']) or 'no rider id'}). "
+                    f"If it is the same man, add this company from his profile instead of "
+                    f"creating him again. If it really is somebody else, the office can "
+                    f"override it.",
+                )
         if body.person_id is None:
             existing = _find_existing_rider(conn, body.name, body.company, body.account_no)
             if existing and body.allow_duplicate_name:

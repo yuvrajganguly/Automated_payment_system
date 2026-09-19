@@ -49,6 +49,7 @@ const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage')
 const RequestsPage = page(() => import('./pages/RequestsPage'), 'RequestsPage')
 const UsersPage = page(() => import('./pages/UsersPage'), 'UsersPage')
 const SystemPage = page(() => import('./pages/SystemPage'), 'SystemPage')
+const ChecksPage = page(() => import('./pages/ChecksPage'), 'ChecksPage')
 const RaftPage = page(() => import('./pages/RaftPage'), 'RaftPage')
 const BlivePage = page(() => import('./pages/BlivePage'), 'BlivePage')
 
@@ -84,6 +85,7 @@ export default function App() {
             <Route path="/requests" element={<RequestsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/system" element={<SystemPage />} />
+            <Route path="/checks" element={<ChecksPage />} />
             <Route path="/raft"  element={<RaftPage />} />
             <Route path="/blive" element={<BlivePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

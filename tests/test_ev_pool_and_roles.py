@@ -59,7 +59,7 @@ def test_add_ev_assigns_to_person_in_one_call(db, client):
     r = client.post(
         "/api/evs",
         json={
-            "ev_id": "RAFT-NEW-1",
+            "ev_id": "KOLNEW1",
             "provider": "Blive",
             "model": "Standard",
             "person_id": pid,
@@ -74,23 +74,21 @@ def test_add_ev_assigns_to_person_in_one_call(db, client):
     assert body["handover_date"] == "2026-09-01"
     a = db.execute(
         "SELECT person_id, handover_date FROM ev_assignments "
-        "WHERE ev_id='RAFT-NEW-1' AND returned_date IS NULL"
+        "WHERE ev_id='KOLNEW1' AND returned_date IS NULL"
     ).fetchone()
     assert tuple(a) == (pid, "2026-09-01")
-    assert (
-        db.execute("SELECT status FROM ev_units WHERE ev_id='RAFT-NEW-1'").fetchone()[0] == "in_use"
-    )
+    assert db.execute("SELECT status FROM ev_units WHERE ev_id='KOLNEW1'").fetchone()[0] == "in_use"
 
 
 def test_add_ev_with_unknown_person_creates_nothing(db, client):
     h = _login(client, _ADMIN)
     r = client.post(
         "/api/evs",
-        json={"ev_id": "RAFT-NEW-2", "provider": "Blive", "model": "Standard", "person_id": 9999},
+        json={"ev_id": "KOLNEW2", "provider": "Blive", "model": "Standard", "person_id": 9999},
         headers=h,
     )
     assert r.status_code == 404
-    assert db.execute("SELECT 1 FROM ev_units WHERE ev_id='RAFT-NEW-2'").fetchone() is None
+    assert db.execute("SELECT 1 FROM ev_units WHERE ev_id='KOLNEW2'").fetchone() is None
 
 
 def test_add_ev_refuses_person_who_already_holds_an_ev(db, client):

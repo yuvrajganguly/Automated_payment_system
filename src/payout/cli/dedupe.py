@@ -25,12 +25,20 @@ survive the merge. Those figures are printed so the carry-over is visible.
 
 from __future__ import annotations
 
-import re
 import sys
-from difflib import SequenceMatcher
 
 from payout.db import get_connection
 from payout.db.references import drop_person_singletons, purge_ev, repoint_person
+from payout.domain.duplicates import (
+    evidence,
+    identifiers,
+    name_tokens,
+    norm_account,
+    norm_name,
+    norm_phone,
+    same_name,
+    same_person,
+)
 from payout.domain.placeholders import retire_placeholders_everywhere
 
 # ── what we already know ─────────────────────────────────────────────────────
@@ -57,59 +65,10 @@ KNOWN_PAIRS: tuple[tuple[int, int], ...] = (
 PLACEHOLDER_PREFIX = "QSPEND"
 
 
-# ── name matching ────────────────────────────────────────────────────────────
-def _norm(name: str | None) -> str:
-    """Lowercase, punctuation to spaces, whitespace collapsed."""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (name or "").lower())).strip()
-
-
-def _tokens(name: str | None) -> tuple[str, ...]:
-    return tuple(sorted(_norm(name).split()))
-
-
-def same_name(a: str | None, b: str | None) -> bool:
-    """The same name written the same way, ignoring case, punctuation and order."""
-    ta = _tokens(a)
-    return bool(ta) and ta == _tokens(b)
-
-
-def same_person(a: str | None, b: str | None) -> bool:
-    """One name is the other, allowing spelling drift and dropped tokens.
-
-    Every token of the shorter name must pair off with a distinct token of the
-    longer one at 0.75 similarity or better. There is no surname list: pairing
-    on a shared surname alone is what made an earlier version call Somnath
-    Sardar and Milon Sardar the same man.
-    """
-    ta, tb = _norm(a).split(), _norm(b).split()
-    if not ta or not tb:
-        return False
-    if sorted(ta) == sorted(tb):
-        return True
-    short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
-    spare = list(long)
-    for tok in short:
-        best, at = 0.0, None
-        for i, other in enumerate(spare):
-            r = SequenceMatcher(None, tok, other).ratio()
-            if r > best:
-                best, at = r, i
-        if best < 0.75 or at is None:
-            return False
-        spare.pop(at)
-    return True
-
-
-def _phone(v: str | None) -> str:
-    """Last ten digits, so +91 and 0 prefixes compare equal."""
-    digits = re.sub(r"\D", "", v or "")
-    return digits[-10:] if len(digits) >= 10 else ""
-
-
-def _acct(v: str | None) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "", v or "").upper()
-
-
+# The matcher lives in domain/duplicates.py, because the check that runs when
+# a recruiter creates a rider has to agree with the cleanup that runs after one
+# slipped through. Two implementations of "is this the same man" would drift,
+# and the one that drifts is always the one nobody is looking at.
 # ── reading the world ────────────────────────────────────────────────────────
 class Person:
     """A person plus the few facts the merge rules need."""
@@ -117,8 +76,8 @@ class Person:
     def __init__(self, row) -> None:
         self.person_id = int(row["person_id"])
         self.name = row["display_name"] or ""
-        self.aadhaar = _acct(row["aadhaar_no"])
-        self.pan = _acct(row["pan_no"])
+        self.aadhaar = norm_account(row["aadhaar_no"])
+        self.pan = norm_account(row["pan_no"])
         self.phones: set[str] = set()
         self.accounts: set[str] = set()
         self.rider_ids: list[str] = []
@@ -130,12 +89,9 @@ class Person:
         """Hard identifiers — a shared one is what turns a name match into a
         duplicate. A name on its own never is: two men really are called
         Bidhan Mondal."""
-        out = {("phone", p) for p in self.phones} | {("account", a) for a in self.accounts}
-        if self.aadhaar:
-            out.add(("aadhaar", self.aadhaar))
-        if self.pan:
-            out.add(("pan", self.pan))
-        return out
+        return identifiers(
+            phones=self.phones, accounts=self.accounts, aadhaar=self.aadhaar, pan=self.pan
+        )
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics
         return f"p{self.person_id} {self.name!r}"
@@ -164,9 +120,9 @@ def load_people(conn, phantom_evs: frozenset[str]) -> dict[int, Person]:
         p.rider_ids.append(rid)
         if rid[:6].upper() != PLACEHOLDER_PREFIX:
             p.real_rider_ids.append(rid)
-        if phone := _phone(r["mob_no"]):
+        if phone := norm_phone(r["mob_no"]):
             p.phones.add(phone)
-        if acct := _acct(r["account_no"]):
+        if acct := norm_account(r["account_no"]):
             p.accounts.add(acct)
     for r in conn.execute(
         "SELECT person_id, ev_id FROM ev_assignments WHERE returned_date IS NULL"
@@ -182,7 +138,7 @@ def _quality(p: Person) -> tuple:
     """Higher wins. The copy holding the vehicle is the one the office knows
     about; after that, prefer a real rider id over a QSPEND placeholder, then
     the fuller-looking name, then the older record."""
-    toks = _norm(p.name).split()
+    toks = norm_name(p.name).split()
     return (
         1 if p.open_evs else 0,
         1 if p.real_rider_ids else 0,
@@ -197,8 +153,8 @@ def pick_primary(group: list[Person]) -> Person:
 
 
 # ── deciding what is a duplicate ─────────────────────────────────────────────
-def shared_keys(a: Person, b: Person) -> list[str]:
-    return sorted(f"{kind}={val}" for kind, val in (a.keys & b.keys))
+def shared_keys(a: Person, b: Person) -> str:
+    return evidence(a.keys & b.keys)
 
 
 def classify(a: Person, b: Person) -> tuple[bool, str]:
@@ -212,9 +168,8 @@ def classify(a: Person, b: Person) -> tuple[bool, str]:
     if not (exact or near):
         return False, "names do not match"
     if not shared:
-        return False, ("same name, but no shared phone/account/Aadhaar/PAN")
-    how = "same name" if exact else "matching name"
-    return True, f"{how} + {', '.join(shared)}"
+        return False, "same name, but no shared phone/account/Aadhaar/PAN"
+    return True, f"{'same name' if exact else 'matching name'} + {shared}"
 
 
 def discover(people: dict[int, Person]) -> tuple[list[tuple[int, int]], list[str]]:
@@ -227,7 +182,7 @@ def discover(people: dict[int, Person]) -> tuple[list[tuple[int, int]], list[str
     by_name: dict[tuple[str, ...], list[Person]] = {}
     by_key: dict[tuple[str, str], list[Person]] = {}
     for p in people.values():
-        if toks := _tokens(p.name):
+        if toks := name_tokens(p.name):
             by_name.setdefault(toks, []).append(p)
         for k in p.keys:
             by_key.setdefault(k, []).append(p)

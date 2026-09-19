@@ -36,12 +36,18 @@ from payout.api.routes.users import visible_role
 from payout.db import get_connection
 from payout.documents import ALLOWED_CONTENT_TYPES, get_storage, make_staff_key
 from payout.domain.activity import record_activity
+from payout.domain.anomalies import duplicate_people
 from payout.domain.identity import normalize_aadhaar, normalize_pan
 from payout.domain.naming import name_from
 from payout.domain.people import by_person
-from payout.domain.worked import ACTIVE_WITHIN_DAYS, active_person_sql
+from payout.domain.worked import ACTIVE_WITHIN_DAYS, active_person_sql, last_worked_sql
 
 router = APIRouter()
+
+# How long a new rider gets before "has never worked" means anything. A weekly
+# company's cycle plus the days it takes to arrive and be processed: until
+# that has passed, the silence is ours, not theirs.
+NEVER_WORKED_GRACE_DAYS = 14
 
 # Fields never returned in full outside the owner's own profile and an admin's
 # view of it. A masked value keeps the last four characters so the office can
@@ -658,8 +664,30 @@ def recruiter_board(
     """
     since = (date.today() - timedelta(days=days - 1)).isoformat()
     month_start = date.today().replace(day=1).isoformat()
+    # A rider onboarded on Friday has not failed to work — the payout that
+    # would show them has not run. Only count somebody as never having worked
+    # once enough time has passed for at least one weekly cycle to have closed
+    # over them, or the newest recruiter always looks like the worst one.
+    settled_by = (date.today() - timedelta(days=NEVER_WORKED_GRACE_DAYS)).isoformat()
     active = active_person_sql("rm.person_id")
+    ever_worked = last_worked_sql("rm.person_id")
     with get_connection() as conn:
+        # Who has been recorded twice, computed once for the whole board
+        # rather than per recruiter. A count is not an accusation — the
+        # September duplicates came from the office and the field alike — but
+        # a recruiter whose onboardings keep turning out to be people we
+        # already had is the earliest signal that something in the field
+        # process is wrong, and it is invisible in a headcount.
+        duplicated: set[int] = set()
+        for f in duplicate_people(conn):
+            duplicated.update(f.get("person_ids") or ())
+        mine: dict[str, set[int]] = {}
+        if duplicated:
+            for r in conn.execute(
+                "SELECT DISTINCT recruited_by, person_id FROM rider_master "
+                "WHERE recruited_by IS NOT NULL AND recruited_by <> ''"
+            ).fetchall():
+                mine.setdefault(r["recruited_by"], set()).add(int(r["person_id"]))
         rows = []
         for r in conn.execute(
             "SELECT u.email, u.display_name, u.zone, u.is_active, p.full_name, "
@@ -682,18 +710,20 @@ def recruiter_board(
             per_person = (
                 "SELECT rm.person_id AS pid, "
                 "       MIN(substr(rm.created_at,1,10)) AS first_day, "
-                f"      MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS working "
+                f"      MAX(CASE WHEN {active} THEN 1 ELSE 0 END) AS working, "
+                f"      MAX(CASE WHEN {ever_worked} IS NOT NULL THEN 1 ELSE 0 END) AS ever "
                 "FROM rider_master rm WHERE rm.recruited_by=? GROUP BY rm.person_id"
             )
             counts = conn.execute(
                 "SELECT COUNT(*) AS all_time, "
                 "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS recent, "
                 "  SUM(CASE WHEN first_day >= ? THEN 1 ELSE 0 END) AS month, "
-                "  SUM(working) AS still_working "
+                "  SUM(working) AS still_working, "
+                "  SUM(CASE WHEN ever = 0 AND first_day <= ? THEN 1 ELSE 0 END) AS never_worked "
                 f"FROM ({per_person}) p",  # noqa: S608 - built from literals
-                # The two date comparisons bind before the subquery's email —
+                # The three date comparisons bind before the subquery's email —
                 # they appear earlier in the SQL string.
-                (since, month_start, email),
+                (since, month_start, settled_by, email),
             ).fetchone()
             evs = conn.execute(
                 "SELECT COUNT(*) AS n, "
@@ -719,6 +749,10 @@ def recruiter_board(
                     "onboarded_recent": int(counts["recent"] or 0),
                     "onboarded_month": int(counts["month"] or 0),
                     "still_working": int(counts["still_working"] or 0),
+                    # Onboarded long enough ago for a cycle to have closed
+                    # over them, and never once appeared in a payout.
+                    "never_worked": int(counts["never_worked"] or 0),
+                    "duplicates": len(mine.get(email, set()) & duplicated),
                     "evs_deployed": int(evs["n"] or 0),
                     "evs_deployed_recent": int(evs["recent"] or 0),
                     "km_this_month": int(km["km"] or 0),
@@ -732,6 +766,7 @@ def recruiter_board(
         "since": since,
         "window_days": days,
         "active_within_days": ACTIVE_WITHIN_DAYS,
+        "never_worked_grace_days": NEVER_WORKED_GRACE_DAYS,
         "recruiters": rows,
     }
 

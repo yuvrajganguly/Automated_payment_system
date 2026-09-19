@@ -34,6 +34,18 @@ interface Backrent {
 
 const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** One row of the merged activity + ledger feed (GET /app/person/{id}/timeline). */
+interface TimelineRow {
+  id: number
+  source: 'activity' | 'money'
+  at: string | null
+  email: string | null
+  action: string
+  action_label: string
+  entity_label: string | null
+  details: Record<string, unknown> | null
+}
+
 const EVENT_COLOR: Record<string, string> = {
   PAYOUT: 'bg-emerald-500/15', RENT: 'bg-orange-500/15', RENT_MISSED: 'bg-red-500/15',
   RENT_RECOVERED: 'bg-blue-500/15', DUES_CARRY: 'bg-yellow-500/15', ADJUSTMENT: 'bg-purple-500/15',
@@ -245,6 +257,8 @@ export function PersonPage() {
         {txns.length === 0 && <p className="p-3 text-slate-500 text-sm">No transactions yet.</p>}
       </Section>}
 
+      <PersonTimeline personId={person.person_id} />
+
       {isCreator && (
         <DangerZone
           kind="person"
@@ -266,6 +280,80 @@ export function PersonPage() {
           onClose={() => setSplitOpen(false)}
           onSplit={(newId) => { setSplitOpen(false); window.location.href = '/persons/' + newId }}
         />
+      )}
+    </div>
+  )
+}
+
+/** One axis for everything that happened to this person.
+ *
+ * The page above already has the EV history and the ledger, each in its own
+ * table, each in its own order. That is fine for looking a number up and
+ * useless for the question people actually ask — "why was he charged twice" —
+ * which is answered by seeing the handover, the rent leg, the correction and
+ * the return in the order they occurred. The server interleaves the activity
+ * log and the ledger into one stream; this renders it.
+ */
+function PersonTimeline({ personId }: { personId: number }) {
+  const [rows, setRows] = useState<TimelineRow[]>([])
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || rows.length) return
+    setBusy(true)
+    api.get<TimelineRow[]>(`/app/person/${personId}/timeline`, { query: { limit: 200 } })
+      .then(setRows)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }, [open, personId, rows.length])
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="font-semibold mb-2 flex items-center gap-2 hover:text-brand-300"
+      >
+        <span>{open ? '▾' : '▸'}</span> Timeline
+        <span className="text-xs font-normal text-slate-500">
+          everything that happened, in order
+        </span>
+      </button>
+      {open && (
+        <div className="panel p-3">
+          {busy && <p className="text-sm text-slate-500">Loading…</p>}
+          {error && <p className="text-sm text-rose-700">{error}</p>}
+          {!busy && !error && rows.length === 0 && (
+            <p className="text-sm text-slate-500">Nothing recorded yet.</p>
+          )}
+          <ol className="space-y-0">
+            {rows.map((r) => (
+              <li key={`${r.source}-${r.id}`} className="flex gap-3 py-1.5 border-t border-edge-soft first:border-0">
+                <span className="text-xs text-slate-500 w-32 shrink-0 tabular-nums">
+                  {(r.at || '').slice(0, 16).replace('T', ' ')}
+                </span>
+                <span
+                  className={'w-1.5 shrink-0 rounded ' +
+                    (r.source === 'money' ? (EVENT_COLOR[r.action] || 'bg-slate-500/30') : 'bg-sky-500/20')}
+                />
+                <span className="min-w-0">
+                  <span className="text-sm">{r.action_label}</span>
+                  {r.source === 'money' && r.details ? (
+                    <span className="text-sm ml-2 tabular-nums">
+                      {fmt(Number(r.details.amount ?? 0))}
+                      <span className="text-slate-500"> · {String(r.details.cycle ?? '')}</span>
+                    </span>
+                  ) : null}
+                  {r.entity_label && (
+                    <span className="text-xs text-slate-500 ml-2">{r.entity_label}</span>
+                  )}
+                  {r.email && <span className="text-xs text-slate-500 ml-2">{r.email}</span>}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
     </div>
   )

@@ -18,27 +18,8 @@ from __future__ import annotations
 from payout.cli import dedupe
 from tests.conftest import assign, make_ev, make_person, make_rider
 
-
-# ── name matching ────────────────────────────────────────────────────────────
-def test_same_name_ignores_case_punctuation_and_order():
-    assert dedupe.same_name("BIDHAN MONDAL", "Bidhan Mondal")
-    assert dedupe.same_name("Ghosh, Susanta", "susanta ghosh")
-    assert not dedupe.same_name("Susanta Ghosh", "Sushanta Ghosh")  # spelling drift
-    assert not dedupe.same_name("", "Anyone")
-
-
-def test_same_person_allows_drift_and_dropped_tokens_but_not_a_shared_surname():
-    assert dedupe.same_person("SUSANTA GHOSH", "Sushanta ghosh")
-    assert dedupe.same_person("Abhishek Tiwary", "Abhishek tiwari")
-    assert dedupe.same_person("Jeet", "Jeet Kumar Ghosh")
-    # The bug this replaced: matching on the surname alone made these one man.
-    assert not dedupe.same_person("Somnath Sardar", "MILON SARDAR")
-    assert not dedupe.same_person("Prosenjit A-1", "Prosenjit Das")
-
-
-def test_phone_compares_by_last_ten_digits():
-    assert dedupe._phone("+91 70036-64227") == dedupe._phone("07003664227")
-    assert dedupe._phone("12345") == ""
+# The matcher itself is tested in test_duplicates.py — it lives in
+# domain/duplicates.py so this tool and the entry-time checks share one copy.
 
 
 # ── the fixture: the live shape ──────────────────────────────────────────────

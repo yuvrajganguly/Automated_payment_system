@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS ev_models (
     provider    TEXT NOT NULL,
     model_name  TEXT NOT NULL,
     weekly_rate INTEGER NOT NULL,
+    -- What every one of this model's IDs starts with (Blive: KOL, Raft Blue:
+    -- CBICEVD). Optional: NULL means we do not know the pattern and only the
+    -- confusable-character check applies. Set it and a mistyped prefix is
+    -- refused at the point of entry rather than found in a bill six weeks on.
+    id_prefix   TEXT,
     UNIQUE (provider, model_name)
 );
 

@@ -378,14 +378,25 @@ class EvModelIn(BaseModel):
     provider: str
     model_name: str
     weekly_rate: float
+    # What every one of this model's EV IDs starts with (Blive: KOL, Raft
+    # Blue: CBICEVD). Set it and an ID that breaks the pattern is refused when
+    # a recruiter adds a vehicle, instead of becoming a bike that does not
+    # exist. Blank means we do not know the pattern; only the
+    # confusable-character check then applies. See migration 0036.
+    id_prefix: str | None = None
 
 
 @router.post("/ev-models")
 def create_ev_model(body: EvModelIn, _: dict = Depends(require_admin)) -> dict:
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO ev_models (provider, model_name, weekly_rate) VALUES (?,?,?)",
-            (body.provider, body.model_name, to_paise(body.weekly_rate)),
+            "INSERT INTO ev_models (provider, model_name, weekly_rate, id_prefix) VALUES (?,?,?,?)",
+            (
+                body.provider,
+                body.model_name,
+                to_paise(body.weekly_rate),
+                (body.id_prefix or "").strip().upper() or None,
+            ),
         )
         conn.commit()
         mid = cur.lastrowid
@@ -398,8 +409,15 @@ def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_admi
         if not conn.execute("SELECT 1 FROM ev_models WHERE model_id=?", (model_id,)).fetchone():
             raise HTTPException(404, "Model not found")
         conn.execute(
-            "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=? WHERE model_id=?",
-            (body.provider, body.model_name, to_paise(body.weekly_rate), model_id),
+            "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=?, id_prefix=? "
+            "WHERE model_id=?",
+            (
+                body.provider,
+                body.model_name,
+                to_paise(body.weekly_rate),
+                (body.id_prefix or "").strip().upper() or None,
+                model_id,
+            ),
         )
         conn.commit()
     return {"updated": True, "model_id": model_id}

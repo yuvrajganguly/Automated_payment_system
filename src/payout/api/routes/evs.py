@@ -39,6 +39,7 @@ from payout.domain.closeout import (
     report_for,
     save_report,
 )
+from payout.domain.duplicates import EvIdProblem, check_ev_id
 from payout.domain.placeholders import is_placeholder
 from payout.domain.return_heal import heal_backdated_return
 from payout.exports import xlsx_response
@@ -54,7 +55,7 @@ MAX_CLOSEOUT_PHOTO_BYTES = 8 * 1024 * 1024
 def list_ev_models(_: dict = Depends(get_current_user)) -> list[EvModelOut]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT model_id, provider, model_name, weekly_rate FROM ev_models "
+            "SELECT model_id, provider, model_name, weekly_rate, id_prefix FROM ev_models "
             "ORDER BY provider, model_name"
         ).fetchall()
     return [
@@ -63,6 +64,7 @@ def list_ev_models(_: dict = Depends(get_current_user)) -> list[EvModelOut]:
             provider=r["provider"],
             model_name=r["model_name"],
             weekly_rate=float(r["weekly_rate"]),
+            id_prefix=r["id_prefix"],
         )
         for r in rows
     ]
@@ -235,12 +237,37 @@ def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> E
         if conn.execute("SELECT 1 FROM ev_units WHERE ev_id=?", (body.ev_id,)).fetchone():
             raise HTTPException(409, "EV already exists")
         m = conn.execute(
-            "SELECT model_id, weekly_rate FROM ev_models "
+            "SELECT model_id, weekly_rate, id_prefix FROM ev_models "
             "WHERE LOWER(provider)=LOWER(?) AND LOWER(model_name)=LOWER(?)",
             (body.provider, body.model),
         ).fetchone()
         if not m:
             raise HTTPException(400, f"Unknown provider/model: {body.provider}/{body.model}")
+        # A confusable character — J for I, letter O for zero — makes a vehicle
+        # that does not exist, and nothing downstream notices: it gets handed to
+        # a rider, it accrues rent, and the mismatch surfaces when the provider's
+        # bill is reconciled weeks later. Two of those reached live data in
+        # September 2026. Refuse it here, where the man who typed it is still
+        # looking at the vehicle and can read the ID again.
+        #
+        # Only this route checks. The importer and the fleet sync take the
+        # provider's own list, which is authoritative even when it is ugly;
+        # blocking there would refuse real vehicles. Anything they bring in that
+        # collides shows up on the anomalies page instead.
+        try:
+            check_ev_id(
+                body.ev_id,
+                m["id_prefix"],
+                [
+                    (r["ev_id"], r["id_prefix"])
+                    for r in conn.execute(
+                        "SELECT u.ev_id, md.id_prefix FROM ev_units u "
+                        "JOIN ev_models md ON md.model_id = u.model_id"
+                    ).fetchall()
+                ],
+            )
+        except EvIdProblem as exc:
+            raise HTTPException(409, str(exc)) from exc
         conn.execute(
             "INSERT INTO ev_units (ev_id, model_id, status, notes) VALUES (?,?, 'spare', ?)",
             (body.ev_id, m["model_id"], body.notes),

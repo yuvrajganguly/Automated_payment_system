@@ -80,22 +80,22 @@ def test_recruiter_can_run_the_roster_and_fleet(db, client):
     # fleet: add + assign in one go, maintenance out and back, spare, return
     r = client.post(
         "/api/evs",
-        json={"ev_id": "EV-REC-1", "provider": "Blive", "model": "Standard", "person_id": pid},
+        json={"ev_id": "KOLREC1", "provider": "Blive", "model": "Standard", "person_id": pid},
         headers=h,
     )
     assert r.status_code == 201, r.text
     r = client.post(
         "/api/evs/maintenance",
-        json={"ev_id": "EV-REC-1", "from_date": "2026-09-01", "reason": "brake"},
+        json={"ev_id": "KOLREC1", "from_date": "2026-09-01", "reason": "brake"},
         headers=h,
     )
     assert r.status_code == 201, r.text
     mid = r.json()["id"]
     r = client.patch(f"/api/evs/maintenance/{mid}", json={"to_date": "2026-09-02"}, headers=h)
     assert r.status_code == 200, r.text
-    r = client.post("/api/evs/to-spare", json={"ev_id": "EV-REC-1"}, headers=h)
+    r = client.post("/api/evs/to-spare", json={"ev_id": "KOLREC1"}, headers=h)
     assert r.status_code == 200, r.text
-    r = client.post("/api/evs/return", json={"ev_id": "EV-REC-1"}, headers=h)
+    r = client.post("/api/evs/return", json={"ev_id": "KOLREC1"}, headers=h)
     assert r.status_code == 200, r.text
     # roster and fleet reads
     assert client.get("/api/riders", headers=h).status_code == 200
