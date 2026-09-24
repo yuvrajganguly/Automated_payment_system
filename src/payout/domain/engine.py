@@ -13,6 +13,12 @@ from payout.domain.arrears import (
     record_missed_rent,
     record_recovery,
 )
+from payout.domain.duplicates import (
+    find_duplicate_people,
+    norm_phone,
+    people_with_phone,
+    same_person,
+)
 from payout.domain.ev_daily import (
     attribute_recovery as _ev_attribute_recovery,
 )
@@ -26,6 +32,7 @@ from payout.domain.holds import (
     load_hub_names,
     persist_holds,
 )
+from payout.domain.placeholders import is_placeholder, retire_placeholders
 from payout.domain.referrals import pay_installments
 from payout.domain.rent import advance_rent_charged_through, resolve_rent
 from payout.money import to_rupees
@@ -408,6 +415,98 @@ def _shared_rider_source(conn, company):
     return (src or "").strip() or None
 
 
+def _link_by_phone(conn, rider_id, company, phone, name):
+    """Attach a real company id to somebody the office already has, by phone.
+
+    The case this exists for, seen on a Myntra run in September 2026: a
+    recruiter onboards a rider in the field before the company has issued an
+    id, so the rider goes on the books under a ``QSPEND`` placeholder. Weeks
+    later the company's payout file arrives carrying that rider's real id. The
+    id is unknown, so the operator is asked to onboard them — and does, because
+    the modal shows a name and a payout and nothing to say this person is
+    already on file. The result was 17 "new" riders and 16 existing ones
+    falling inactive on one run: the same people, twice.
+
+    A phone number is the only field in a payout file that survives a change of
+    rider id, so it is what the match is made on.
+
+    Four things have to be true before this links anything, because getting it
+    wrong attaches one rider's money to another:
+
+    * the phone resolves to **exactly one** person — a shared handset is
+      common enough that two candidates means stop and let a human decide;
+    * that person has **no real id at this company already** — they may
+      legitimately hold two, but a second one should be created deliberately,
+      not inferred;
+    * the person is not already in this same file under another id;
+    * the file's name, when it has one, is **not obviously somebody else** —
+      a phone typed into the wrong row should not hand over a payout.
+
+    Returns the linked person row, or None. Every link is reported in
+    ``result.auto_linked`` and is visible in the preview before anybody
+    commits, which is the real safety net: this proposes, the operator agrees.
+    """
+    digits = norm_phone(phone)
+    if not digits:
+        return None
+    people = conn.execute(
+        "SELECT DISTINCT rm.person_id, pr.display_name "
+        "FROM rider_master rm JOIN person_registry pr ON pr.person_id = rm.person_id "
+        "WHERE rm.mob_no IS NOT NULL AND rm.mob_no <> ''",
+    ).fetchall()
+    # Matching is done here rather than in SQL because a phone is stored as the
+    # office typed it — +91 prefixes, spaces, hyphens — and only the last ten
+    # digits are comparable. A LIKE would miss half of them.
+    hits = []
+    for r in people:
+        got = conn.execute(
+            "SELECT mob_no FROM rider_master WHERE person_id=? AND mob_no IS NOT NULL",
+            (r["person_id"],),
+        ).fetchall()
+        if any(norm_phone(g["mob_no"]) == digits for g in got):
+            hits.append(r)
+    if len(hits) != 1:
+        return None
+    person_id = int(hits[0]["person_id"])
+
+    here = conn.execute(
+        "SELECT rider_id FROM rider_master WHERE person_id=? AND company=?",
+        (person_id, company),
+    ).fetchall()
+    if any(not is_placeholder(h["rider_id"]) for h in here):
+        return None  # already has a real id here; a second one is a decision
+
+    known = (hits[0]["display_name"] or "").strip()
+    if name and known and not same_person(name, known):
+        return None
+
+    src = conn.execute(
+        "SELECT name, hub, vehicle, account_no, ifsc, mob_no, email FROM rider_master "
+        "WHERE person_id=? ORDER BY is_active DESC, updated_at DESC LIMIT 1",
+        (person_id,),
+    ).fetchone()
+    conn.execute(
+        "INSERT OR IGNORE INTO rider_master "
+        "(rider_id, company, person_id, name, hub, vehicle, account_no, ifsc, mob_no, email, "
+        " is_active) VALUES (?,?,?,?,?,?,?,?,?,?,1)",
+        (
+            rider_id,
+            company,
+            person_id,
+            (src["name"] if src else None) or name,
+            src["hub"] if src else None,
+            src["vehicle"] if src else None,
+            src["account_no"] if src else None,
+            src["ifsc"] if src else None,
+            (src["mob_no"] if src else None) or phone,
+            src["email"] if src else None,
+        ),
+    )
+    # The placeholder has done its job the moment the real id exists.
+    retired = retire_placeholders(conn, person_id, company, rider_id)
+    return {"person_id": person_id, "name": hits[0]["display_name"], "retired": retired}
+
+
 def _auto_link_rider(conn, rider_id, company, source_company):
     """Create the (rider_id, company) roster row from the same id at
     ``source_company``, pointing at the same person. Returns the source row or
@@ -577,17 +676,67 @@ def process_cycle(
                         result.warnings.append(
                             f"Rider {rec.rider_id} linked to {p['name']} (same id at {shared_from})"
                         )
+            if not p:
+                # Before calling them unknown: is this somebody we already have
+                # under a placeholder, whose real id has just arrived? The
+                # phone says so when the file carries one.
+                linked = _link_by_phone(conn, rec.rider_id, company, rec.mob_no, rec.name)
+                if linked:
+                    p = _lookup(conn, rec.rider_id, company)
+                    if p:
+                        result.auto_linked.append(
+                            {
+                                "rider_id": rec.rider_id,
+                                "person_id": linked["person_id"],
+                                "name": linked["name"],
+                                "linked_from": "phone",
+                                "retired_placeholders": linked["retired"],
+                            }
+                        )
+                        result.warnings.append(
+                            f"Rider {rec.rider_id} matched {linked['name']} by phone"
+                            + (
+                                f" — placeholder {', '.join(linked['retired'])} retired"
+                                if linked["retired"]
+                                else ""
+                            )
+                        )
             if p:
                 present_persons[rec.rider_id] = p
                 _sync_hub(conn, rec, company, p, result)
             else:
                 result.unknown_ids.append(rec.rider_id)
+                # The auto-link above refuses whenever it is not certain — two
+                # people on one handset, a name that reads like somebody else,
+                # a person who already has an id here. Refusing is right, but
+                # leaving the operator with a bare id and a payout is how 17
+                # "new" riders got created for 16 people we already had. So
+                # say who it might be and let them decide.
+                # Phone first, because a payout file may carry no name at
+                # all; then anyone whose name matches, for the files that do.
+                maybe = people_with_phone(conn, rec.mob_no)
+                seen_ids = {m["person_id"] for m in maybe}
+                maybe += [
+                    m
+                    for m in find_duplicate_people(conn, rec.name, phones=[rec.mob_no])
+                    if m["person_id"] not in seen_ids
+                ]
+                maybe = maybe[:3]
                 result.unknown_riders.append(
                     {
                         "rider_id": rec.rider_id,
                         "name": rec.name or "",
                         "hub": rec.hub or "",
                         "payout": rec.payout,
+                        "possible_matches": [
+                            {
+                                "person_id": m["person_id"],
+                                "display_name": m["display_name"],
+                                "rider_ids": m["rider_ids"],
+                                "evidence": m["evidence"],
+                            }
+                            for m in maybe
+                        ],
                     }
                 )
                 result.warnings.append(f"Unknown rider_id '{rec.rider_id}' - skipped")

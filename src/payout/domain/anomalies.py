@@ -313,8 +313,69 @@ def rent_with_no_vehicle(conn) -> list[dict]:
     ]
 
 
+def ev_on_the_wrong_model(conn) -> list[dict]:
+    """A unit whose ID does not look like its model's IDs.
+
+    Eight vehicles were on file as Blive Standard with ``CBICEVD`` IDs — the
+    Raft Blue pattern. Nothing was corrupt and nothing failed; they were
+    simply the wrong model, quietly charging the wrong weekly rate, and it
+    took somebody reading a list to notice.
+
+    The entry-time check in ``domain.duplicates.check_ev_id`` refuses this for
+    anything created from now on. It could not refuse these, because migration
+    0036 only sets a model's prefix when every unit already on file agrees
+    with it, and these eight were the disagreement. That restraint was right —
+    enforcing KOL for Blive would have refused the real Blive units too — but
+    it means the mis-tagged ones have to be found rather than blocked, and
+    this is what finds them.
+    """
+    rows = conn.execute(
+        "SELECT u.ev_id, u.status, m.provider, m.model_name, m.id_prefix, m.weekly_rate, "
+        "       (SELECT p.display_name FROM ev_assignments a "
+        "          JOIN person_registry p ON p.person_id = a.person_id "
+        "         WHERE a.ev_id = u.ev_id AND a.returned_date IS NULL LIMIT 1) AS holder "
+        "FROM ev_units u JOIN ev_models m ON m.model_id = u.model_id "
+        "WHERE m.id_prefix IS NOT NULL AND m.id_prefix <> ''"
+    ).fetchall()
+    # Which prefixes exist at all, so the finding can say what it looks like
+    # instead of only what it is not.
+    elsewhere = {
+        (r["id_prefix"] or "").upper(): f"{r['provider']} {r['model_name']}"
+        for r in conn.execute(
+            "SELECT provider, model_name, id_prefix FROM ev_models "
+            "WHERE id_prefix IS NOT NULL AND id_prefix <> ''"
+        ).fetchall()
+    }
+    out = []
+    for r in rows:
+        ev_id, prefix = (r["ev_id"] or "").upper(), (r["id_prefix"] or "").upper()
+        if ev_id.startswith(prefix):
+            continue
+        looks_like = next(
+            (name for pre, name in elsewhere.items() if pre and ev_id.startswith(pre)), None
+        )
+        out.append(
+            _finding(
+                "ev_on_the_wrong_model",
+                # Money, not identity: the rate follows the model, so every
+                # week one of these runs it bills the wrong amount.
+                "money",
+                "EV recorded against the wrong model",
+                f"{r['ev_id']} is on {r['provider']} {r['model_name']} "
+                f"(IDs start {prefix}, {int(r['weekly_rate']) / 100:,.0f} a week)"
+                + (f" but reads like a {looks_like} ID" if looks_like else "")
+                + (f" — held by {r['holder']}" if r["holder"] else ""),
+                "Change the model on the EV's page. Rent already booked stays as it was; "
+                "only days not yet billed pick up the corrected rate.",
+                ev_ids=[r["ev_id"]],
+            )
+        )
+    return out
+
+
 CHECKS = (
     billed_during_maintenance,
+    ev_on_the_wrong_model,
     rent_with_no_vehicle,
     confusable_ev_ids,
     confusable_rider_ids,

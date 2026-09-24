@@ -166,6 +166,7 @@ __all__ = [
     "check_ev_id",
     "evidence",
     "find_duplicate_people",
+    "people_with_phone",
     "fold_id",
     "identifiers",
     "name_tokens",
@@ -307,3 +308,38 @@ def find_duplicate_people(
         )
     hits.sort(key=lambda h: (not h["strong"], h["person_id"]))
     return hits
+
+
+def people_with_phone(conn, phone: str | None) -> list[dict]:
+    """Everyone carrying this phone number, whatever their name.
+
+    ``find_duplicate_people`` needs a name to compare, and a payout file does
+    not always have one — a Myntra sheet may carry an id, an amount and a
+    phone. When somebody has to be identified from the phone alone, this is
+    the question: who else has it. It never links anything on its own; it is
+    what the onboarding list shows so a human can.
+    """
+    digits = norm_phone(phone)
+    if not digits:
+        return []
+    out: dict[int, dict] = {}
+    for r in conn.execute(
+        "SELECT rm.person_id, pr.display_name, rm.mob_no, rm.rider_id, rm.company "
+        "FROM rider_master rm JOIN person_registry pr ON pr.person_id = rm.person_id "
+        "WHERE rm.mob_no IS NOT NULL AND rm.mob_no <> ''"
+    ).fetchall():
+        if norm_phone(r["mob_no"]) != digits:
+            continue
+        hit = out.setdefault(
+            int(r["person_id"]),
+            {
+                "person_id": int(r["person_id"]),
+                "display_name": r["display_name"] or "",
+                "rider_ids": [],
+                "evidence": f"phone={digits}",
+            },
+        )
+        hit["rider_ids"].append(f"{r['rider_id']}@{r['company']}")
+    for hit in out.values():
+        hit["rider_ids"].sort()
+    return sorted(out.values(), key=lambda h: h["person_id"])

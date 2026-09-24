@@ -19,7 +19,11 @@ from openpyxl import Workbook
 from payout.domain.engine import process_cycle
 from tests.conftest import assign, make_ev, make_person, make_rider
 
-RAFT_WEEK_R = 1250.0  # rupees
+RAFT_WEEK_R = 1250.0  # rupees — what the RIDER is charged for a Raft Regular
+# What Raft invoice US for the same vehicle. The two were one number until
+# their W38 bill showed otherwise (migration 0038); the gap is the margin, and
+# a per-EV P&L that cannot see it reports every vehicle as breaking even.
+RAFT_PROVIDER_WEEK_R = 1050.0
 
 
 def _file(rows, headers=("rider_id", "net_pay")):
@@ -163,8 +167,12 @@ def test_fleet_economics(seeded, client):
     # (Day-level rows carry the rounded ₹178.57 daily rate, so a week can be a
     # paisa or two off ₹1,250 — the ledger reconciles at the RENT row level.)
     assert abs(ev["earned"] - 2 * RAFT_WEEK_R) < 0.1
-    assert abs(ev["provider_owed"] - 2 * RAFT_WEEK_R) < 0.1
+    # What we owe Raft is their rate, not the rider's. This assertion read
+    # `2 * RAFT_WEEK_R` while one column did both jobs, which made the margin
+    # identically zero on every vehicle in the fleet.
+    assert abs(ev["provider_owed"] - 2 * RAFT_PROVIDER_WEEK_R) < 2
     assert round(ev["margin"], 2) == round(ev["earned"] - ev["provider_owed"], 2)
+    assert ev["margin"] > 0, "a Raft Regular earns 200 a week; the P&L must show it"
     assert ev["billable_days"] == 14 and ev["ledger_days"] == 14
     assert ev["utilization"] == 100.0
     assert ev["holder"] == "Trend Rider"

@@ -267,6 +267,53 @@ def provider_reconciliation_export(
 # ── Bill upload + parsing ─────────────────────────────────────────────────
 
 
+# Words that only appear in a bill's header row. Raft's sheet opens with a
+# merged banner — "WEEK W38 (2026) (14th September to 20th September)" — and
+# reading that as the header produced one column called exactly that and no
+# usable rows, with an error blaming the columns the file plainly has.
+_HEADER_WORDS = frozenset(
+    {
+        "tracker no",
+        "tracker",
+        "ev_id",
+        "ev id",
+        "vin",
+        "vin no",
+        "dp name",
+        "rider name",
+        "deduction",
+        "amount",
+        "rent",
+        "deployment date",
+        "sr.",
+        "sr",
+        "remarks",
+        "remarks 1",
+    }
+)
+
+
+def _with_header_row(raw: pd.DataFrame) -> pd.DataFrame:
+    """Find the real header row and return the table beneath it.
+
+    Scans the first fifteen rows for the one that reads like headers — two or
+    more cells that are header words — and falls back to the first row, which
+    is what pandas would have assumed anyway.
+    """
+    best, best_hits = 0, 0
+    for i in range(min(15, len(raw))):
+        cells = [str(v).strip().lower() for v in raw.iloc[i].tolist() if str(v).strip()]
+        hits = sum(1 for c in cells if c in _HEADER_WORDS)
+        if hits > best_hits:
+            best, best_hits = i, hits
+    header = [str(v).strip() for v in raw.iloc[best].tolist()]
+    # Unnamed columns become positional so two blanks cannot collide.
+    header = [h if h and h.lower() != "nan" else f"col_{n}" for n, h in enumerate(header)]
+    out = raw.iloc[best + 1 :].copy()
+    out.columns = header
+    return out.reset_index(drop=True)
+
+
 def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
     """Parse a provider bill into rows we can both tally and reconcile.
 
@@ -288,14 +335,33 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
     try:
         if name.endswith(".csv") or name.endswith(".tsv"):
             sep = "\t" if name.endswith(".tsv") else ","
-            df = pd.read_csv(BytesIO(file_bytes), sep=sep, dtype=str, keep_default_na=False)
+            raw = pd.read_csv(
+                BytesIO(file_bytes), sep=sep, dtype=str, keep_default_na=False, header=None
+            )
         else:
-            df = pd.read_excel(BytesIO(file_bytes), dtype=str)
+            raw = pd.read_excel(BytesIO(file_bytes), dtype=str, header=None)
     except Exception as exc:
         raise HTTPException(400, f"Couldn't open the file: {exc}")  # noqa: B904
 
+    df = _with_header_row(raw)
     df.columns = [str(c).strip() for c in df.columns]
-    ev_col = match_column(df.columns, "ev_id", "ev id", "ev", "ev no", "vehicle id", "vehicle no")
+    # Raft calls the unit a "Tracker No"; Blive's sheets say EV ID. match_column
+    # is an exact, case-insensitive match, so every spelling has to be listed.
+    ev_col = match_column(
+        df.columns,
+        "ev_id",
+        "ev id",
+        "ev",
+        "ev no",
+        "vehicle id",
+        "vehicle no",
+        "tracker no",
+        "tracker",
+        "tracker id",
+        "tracker number",
+        "unit no",
+        "unit id",
+    )
     amount_col = match_column(
         df.columns,
         "amount",
@@ -305,6 +371,11 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
         "monthly rent",
         "total",
         "charge",
+        # What Raft's sheet calls the money: it is a deduction from their side.
+        "deduction",
+        "deductions",
+        "deduction amount",
+        "total deduction",
     )
     name_col = match_column(
         df.columns, "dp name", "rider name", "driver name", "dp", "name", "customer name"
@@ -313,9 +384,20 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
     deploy_col = match_column(
         df.columns, "deployment date", "deployed", "deploy date", "start date", "handover date"
     )
-    # Status column heuristic: last non-empty text column.
-    status_col = match_column(
-        df.columns, "status", "remarks", "remark", "notes", "comment", "comments"
+    # Raft splits its notes across "Remarks 1" and "Remarks 2" — the damage
+    # charge in one, the maintenance hold in the other. Taking a single column
+    # dropped whichever half the heuristic did not land on, so take them all
+    # and join them; ``status_cols`` is read per row below.
+    status_cols = [
+        c
+        for c in df.columns
+        if str(c).strip().lower().split()[0]
+        in {"status", "remarks", "remark", "notes", "comment", "comments"}
+    ]
+    status_col = (
+        status_cols[0]
+        if status_cols
+        else match_column(df.columns, "status", "remarks", "remark", "notes", "comment", "comments")
     )
     if not status_col and len(df.columns):
         # fall back: last column if it doesn't look numeric
@@ -366,7 +448,8 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
                 "ev_id_raw": ev_raw,
                 "ev_id": ev_raw,  # we don't yet have a normaliser; matching is exact
                 "their_amount": amount,
-                "status_note": cell(row, status_col) if status_col else None,
+                "status_note": " · ".join(v for v in (cell(row, c) for c in status_cols) if v)
+                or (cell(row, status_col) if status_col else None),
                 "provider_name": cell(row, name_col),
                 "vin": cell(row, vin_col),
                 "deploy_date": cell(row, deploy_col),

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from payout.api.auth import get_current_user, require_admin, require_recruiter
+from payout.api.routes.riders import RIDER_OUT_SQL
 from payout.api.schemas import (
     EvSummary,
     IdentityIn,
@@ -48,9 +49,12 @@ def get_person(person_id: int, user: dict = Depends(get_current_user)) -> Person
         riders = [
             RiderOut(**_rider_dict(r))
             for r in conn.execute(
-                "SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
-                "       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "  # noqa: E501
-                "       rm.account_no, rm.ifsc, rm.mob_no, rm.is_active "
+                # One shared column list (riders.RIDER_OUT_SQL). This select
+                # used to omit account_name and recruited_by, so the recruiter
+                # app — whose person screen reads exactly this — showed a bank
+                # holder name it had just saved as blank. The value was never
+                # lost; it was never sent.
+                f"SELECT {RIDER_OUT_SQL} "
                 "FROM rider_master rm "
                 "LEFT JOIN ev_assignments ea "
                 "  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "

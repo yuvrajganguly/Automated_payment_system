@@ -41,6 +41,22 @@ _RIDER_ALIASES = (
 # Name column: Myntra files say "Name" or "Worker Name" depending on the
 # export; both mean the rider's name.
 _NAME_ALIASES = ("rider_name", "rider name", "name", "worker name", "worker_name")
+# Phone column. Not every company sends one; when they do it is the only field
+# in the file that reliably identifies a person across a change of rider id.
+_PHONE_ALIASES = (
+    "mob_no",
+    "mobile",
+    "mobile no",
+    "mobile number",
+    "phone",
+    "phone no",
+    "phone number",
+    "contact",
+    "contact no",
+    "contact number",
+    "rider_mobile",
+    "rider mobile",
+)
 # Hub / store column. Spencer's new layout carries the store as store_names
 # (+ store_ids); older files used Store / Hub.
 _HUB_ALIASES = (
@@ -154,6 +170,7 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
     name_col = match_column(df.columns, *_NAME_ALIASES)
     hub_col = match_column(df.columns, *_HUB_ALIASES)
     hub_code_col = match_column(df.columns, *_HUB_CODE_ALIASES)
+    phone_col = match_column(df.columns, *_PHONE_ALIASES)
     if hub_code_col == hub_col:
         hub_code_col = None  # the code IS the hub column; nothing to map
     if name_col:
@@ -210,6 +227,7 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 name=_cell(name_col),
                 hub=_cell(hub_col),
                 hub_code=_cell(hub_code_col),
+                mob_no=_cell(phone_col),
                 payout_invalid=payout_invalid,
             )
         )

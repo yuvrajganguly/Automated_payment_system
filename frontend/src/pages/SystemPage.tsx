@@ -229,7 +229,18 @@ function AuditTab() {
 }
 
 function EvModelsTab() {
-  interface Model { model_id: number; provider: string; model_name: string; weekly_rate: number }
+  interface Model {
+    model_id: number; provider: string; model_name: string; weekly_rate: number
+    /** What this model's EV IDs start with (Raft Blue: CBICEVD). Blank = unknown. */
+    id_prefix?: string | null
+    /** Retired models keep their units and their rate but are no longer offered
+     *  when adding a vehicle, in the console or in the recruiter app. */
+    is_active?: boolean
+    /** What the PROVIDER invoices us per week. Blank means the same as the
+     *  rider's rate — which is what it was for every model until Raft's W38
+     *  bill showed 1,225 against a rider rate of 1,295. */
+    provider_rate?: number | null
+  }
   const [models, setModels] = useState<Model[]>([])
   const [busy, setBusy] = useState(true)
   const [form, setForm] = useState({ provider: '', model_name: '', weekly_rate: '' })
@@ -261,10 +272,11 @@ function EvModelsTab() {
       reload()
     } catch (e) { fail(e) }
   }
-  async function edit(m: Model, field: 'weekly_rate' | 'model_name' | 'provider', value: string | number) {
+  async function edit(m: Model, field: 'weekly_rate' | 'model_name' | 'provider' | 'id_prefix' | 'provider_rate', value: string | number | null) {
     setErr(null)
-    if (field === 'weekly_rate' && !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
-      setErr('Weekly rate must be a positive number.')
+    if ((field === 'weekly_rate' || field === 'provider_rate') && value !== null &&
+        !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+      setErr('A rate must be a positive number (leave the provider rate blank to mean "same").')
       reload()                       // snap the input back to the saved value
       return
     }
@@ -272,9 +284,16 @@ function EvModelsTab() {
     try {
       // A rejected PATCH used to be ignored: the row kept showing the typed
       // value while the server still had the old one.
-      await api.patch('/creator/ev-models/' + m.model_id, {
-        provider: next.provider, model_name: next.model_name, weekly_rate: next.weekly_rate,
-      })
+      // Only the field that changed. The endpoint patches what it is sent,
+      // so nothing here can clear id_prefix or un-retire a model by omission.
+      await api.patch('/creator/ev-models/' + m.model_id, { [field]: next[field] })
+    } catch (e) { fail(e) }
+    reload()
+  }
+  async function setActive(m: Model, active: boolean) {
+    setErr(null)
+    try {
+      await api.patch('/creator/ev-models/' + m.model_id, { is_active: active })
     } catch (e) { fail(e) }
     reload()
   }
@@ -308,7 +327,10 @@ function EvModelsTab() {
               <th className="px-3 py-2 text-xs">ID</th>
               <th className="px-3 py-2 text-xs">Provider</th>
               <th className="px-3 py-2 text-xs">Model</th>
-              <th className="px-3 py-2 text-xs">Weekly</th>
+              <th className="px-3 py-2 text-xs" title="What the rider is charged per week">Rider pays</th>
+              <th className="px-3 py-2 text-xs" title="What the provider invoices us per week. Blank = the same.">Provider charges</th>
+              <th className="px-3 py-2 text-xs" title="What this model's EV IDs start with">ID starts</th>
+              <th className="px-3 py-2 text-xs">Offered</th>
               <th className="px-3 py-2 text-xs">{''}</th>
             </tr>
           </thead>
@@ -316,7 +338,8 @@ function EvModelsTab() {
             {models.map((m) => (
               // key includes the saved values so a rejected edit re-mounts the
               // uncontrolled inputs with what the server actually has.
-              <tr key={`${m.model_id}:${m.provider}:${m.model_name}:${m.weekly_rate}`} className="border-t">
+              <tr key={`${m.model_id}:${m.provider}:${m.model_name}:${m.weekly_rate}:${m.provider_rate}:${m.id_prefix}:${m.is_active}`}
+                  className={'border-t' + (m.is_active === false ? ' opacity-60' : '')}>
                 <td className="px-3 py-2 text-xs">{m.model_id}</td>
                 <td className="px-3 py-2">
                   <input defaultValue={m.provider}
@@ -333,6 +356,30 @@ function EvModelsTab() {
                          onBlur={(e) => parseFloat(e.target.value) !== m.weekly_rate &&
                                         edit(m, 'weekly_rate', parseFloat(e.target.value))}
                          className="border rounded px-2 py-0.5 text-sm w-24" />
+                </td>
+                <td className="px-3 py-2">
+                  <input type="number" defaultValue={m.provider_rate ?? ''} placeholder="same"
+                         onBlur={(e) => {
+                           const raw = e.target.value.trim()
+                           const next = raw === '' ? null : parseFloat(raw)
+                           if (next !== (m.provider_rate ?? null)) edit(m, 'provider_rate', next)
+                         }}
+                         className="border rounded px-2 py-0.5 text-sm w-24" />
+                </td>
+                <td className="px-3 py-2">
+                  <input defaultValue={m.id_prefix ?? ''} placeholder="e.g. CBICEVD"
+                         onBlur={(e) => e.target.value !== (m.id_prefix ?? '') &&
+                                        edit(m, 'id_prefix', e.target.value)}
+                         className="border rounded px-2 py-0.5 text-sm w-28 font-mono" />
+                </td>
+                <td className="px-3 py-2">
+                  {m.is_active === false
+                    ? <button onClick={() => setActive(m, true)}
+                              className="text-xs text-slate-400 underline"
+                              title="Offer this model again when adding a vehicle">retired</button>
+                    : <button onClick={() => setActive(m, false)}
+                              className="text-xs text-emerald-300 underline"
+                              title="Stop offering it — existing units keep their rate">yes</button>}
                 </td>
                 <td className="px-3 py-2">
                   <button onClick={() => del(m.model_id)}

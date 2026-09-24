@@ -139,8 +139,12 @@ def materialize_cycle_for_person(
     ce = cycle_end if hasattr(cycle_end, "isoformat") else date.fromisoformat(cycle_end)
     for leg in legs:
         ev_id = leg.ev_id
-        weekly = int(leg.weekly_rate)  # paise
-        daily = round(weekly / 7)  # provider per-day (paise), uniform
+        weekly = int(leg.weekly_rate)  # paise — what the RIDER pays
+        rider_daily = round(weekly / 7)
+        # What we owe the PROVIDER is a separate number: Raft invoice 1,225 a
+        # week for a unit we rent at 1,295. Legs built before that distinction
+        # existed carry no provider_rate, so fall back to the one rate.
+        daily = round(int(getattr(leg, "provider_rate", None) or weekly) / 7)
         hod = leg.handover_date
         ret = leg.returned_date
         # The leg's contributing window inside this cycle. When None, the leg
@@ -210,7 +214,10 @@ def materialize_cycle_for_person(
             if kind == "free":
                 this_daily = 0
             elif kind == "out_window":
-                this_daily = daily  # carryover cost (billed in a prior cycle)
+                # Carryover: billed to the rider in a prior cycle, so it is the
+                # RIDER's daily rate. It used to read `daily`, which was the
+                # same number until the provider rate split away from it.
+                this_daily = rider_daily
             else:
                 this_daily = part_map.get(i, 0)
             _upsert_row(
@@ -226,11 +233,15 @@ def materialize_cycle_for_person(
             )
 
 
-def materialize_unassigned_window(conn, *, ev_id, start, end_inclusive, weekly_rate):
+def materialize_unassigned_window(
+    conn, *, ev_id, start, end_inclusive, weekly_rate, provider_rate=None
+):
     """Write 'unassigned' rows for an EV that wasn't held by anyone over the
-    window. provider_cost is still owed (we pay the provider regardless).
+    window. provider_cost is still owed (we pay the provider regardless), and
+    at the provider's rate rather than the rider's — an idle vehicle costs
+    what the invoice says, which is the whole point of counting idle days.
     """
-    daily = round(int(weekly_rate) / 7)  # paise
+    daily = round(int(provider_rate or weekly_rate) / 7)  # paise
     for day in _iter_days(start, end_inclusive):
         _upsert_row(
             conn,
@@ -339,7 +350,9 @@ def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
     if not day_from or not day_to:
         return 0
     row = conn.execute(
-        "SELECT a.ev_id, m.weekly_rate FROM ev_assignments a "
+        "SELECT a.ev_id, m.weekly_rate, "
+        "       COALESCE(m.provider_rate, m.weekly_rate) AS provider_rate "
+        "FROM ev_assignments a "
         "JOIN ev_units u ON u.ev_id = a.ev_id "
         "JOIN ev_models m ON m.model_id = u.model_id "
         "WHERE a.person_id=? AND a.returned_date IS NULL",
@@ -347,7 +360,8 @@ def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
     ).fetchone()
     if not row:
         return 0
-    daily = round(int(row["weekly_rate"]) / 7)  # paise
+    daily = round(int(row["weekly_rate"]) / 7)  # paise, rider side
+    provider_daily = round(int(row["provider_rate"]) / 7)
     created = 0
     for day in _iter_days(_parse(str(day_from)), _parse(str(day_to))):
         if conn.execute(
@@ -362,7 +376,7 @@ def backfill_billed_days(conn, *, person_id, event_id, day_from, day_to):
             state="billable",
             person_id=person_id,
             daily_cost=daily,
-            provider_cost=daily,
+            provider_cost=provider_daily,
             billing_status="billed",
             cycle_event_id=event_id,
         )

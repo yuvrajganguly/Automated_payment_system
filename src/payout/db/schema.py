@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS ev_models (
     -- confusable-character check applies. Set it and a mistyped prefix is
     -- refused at the point of entry rather than found in a bill six weeks on.
     id_prefix   TEXT,
+    -- 0 retires the model: it stops being offered when somebody adds a
+    -- vehicle, in the console and in the recruiter app alike. Units already
+    -- on a retired model keep working and keep their rate — retiring is about
+    -- what can be created next, never about what exists. See migration 0037.
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    -- What the PROVIDER charges us per week, when that differs from what the
+    -- rider pays (``weekly_rate``). NULL means the two are the same, which is
+    -- what every model assumed before Raft's W38 bill showed otherwise. Always
+    -- read as COALESCE(provider_rate, weekly_rate). See migration 0038.
+    provider_rate INTEGER,
     UNIQUE (provider, model_name)
 );
 

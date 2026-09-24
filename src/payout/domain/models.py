@@ -29,6 +29,12 @@ class RiderRecord:
     # one next to the hub name. Teaches the code → name map used to label COD
     # rows, which only ever state the code.
     hub_code: str | None = None
+    # The rider's phone from the file, when the layout carries one. This is how
+    # a real company id gets attached to somebody the office already has: a
+    # recruiter onboards a rider before the company has issued an id, so they
+    # sit on a QSPEND placeholder, and weeks later the payout file arrives with
+    # the real id and no way to tell it is the same human. The phone is the way.
+    mob_no: str | None = None
     # The raw cell text when the payout could not be read as money (e.g. "N/A",
     # a date, "abc"). ``payout`` is 0 in that case and the engine refuses to
     # settle the rider — it must NOT treat them as absent (that used to write

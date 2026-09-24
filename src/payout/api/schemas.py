@@ -321,6 +321,12 @@ class EvModelOut(BaseModel):
     weekly_rate: float
     # What this model's EV IDs start with; None when the pattern is unknown.
     id_prefix: str | None = None
+    # False means retired: still valid for the units that carry it, no longer
+    # offered when adding one.
+    is_active: bool = True
+    # What the provider invoices us per week. None means the same as
+    # weekly_rate, which is what it was for every model until Raft's W38 bill.
+    provider_rate: float | None = None
 
 
 class EvUnitIn(BaseModel):

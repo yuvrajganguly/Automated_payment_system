@@ -69,7 +69,15 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
         providers = [
             {"provider": r["provider"], "model_name": r["model_name"], "model_id": r["model_id"]}
             for r in conn.execute(
-                "SELECT model_id, provider, model_name FROM ev_models ORDER BY provider, model_name"
+                # Retired models are left out entirely rather than sent with a
+                # flag: the app picks the FIRST entry as its default (see
+                # NewUnitForm in ui/evs/EvActions.kt), so what this query
+                # returns and the order it returns it in *is* the picker. That
+                # also means retiring Blive here fixes the default on every
+                # phone already in the field, with no new APK — the one lever
+                # that reaches handsets we cannot update.
+                "SELECT model_id, provider, model_name FROM ev_models "
+                "WHERE COALESCE(is_active, 1) = 1 ORDER BY provider, model_name"
             )
         ]
         # What to call this person. The profile's full name if they have filled

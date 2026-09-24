@@ -32,6 +32,27 @@ _ACTIVE = active_person_sql("rm.person_id")
 _LAST_WORKED = last_worked_sql("rm.person_id")
 
 
+# The columns every RiderOut is built from, in one place.
+#
+# This list has now drifted three times, each time the same way and each time
+# invisible: a column perfectly writable through PATCH, missing from a SELECT
+# that feeds the same model, so the value saved fine and came back blank.
+# ``account_name`` was missing from the PATCH response (a client folding that
+# response into its cache then showed the account as the rider's own), and it
+# was missing from ``GET /persons/{id}`` as well — which is the screen the
+# recruiter app shows after an edit, so recruiters reported adding bank details
+# that "did not stick" when the data was on disk the whole time.
+#
+# Anything added to RiderOut belongs here, and ``tests/test_rider_out_columns``
+# fails when a route builds a RiderOut from a narrower set.
+RIDER_OUT_SQL = (
+    "rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
+    "CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
+    "rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
+    "rm.recruited_by"
+)
+
+
 def _rider_dict(row) -> dict:
     d = dict(row)
     d["is_active"] = bool(d["is_active"])
@@ -301,9 +322,7 @@ def export_riders(
         params.append(1 if active else 0)
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
-            f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
-            f"       rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary "
+            f"SELECT {RIDER_OUT_SQL} "
             f"FROM rider_master rm "
             f"LEFT JOIN ev_assignments ea "
             f"  ON ea.person_id = rm.person_id AND ea.returned_date IS NULL "
@@ -1015,7 +1034,21 @@ def bulk_create_riders(
     }
 
 
-_UPDATABLE = ("name", "hub", "vehicle", "account_no", "ifsc")
+_UPDATABLE = ("name", "hub", "vehicle", "account_no", "ifsc", "is_active")
+
+_TRUE = {"1", "y", "yes", "true", "t", "active", "on"}
+_FALSE = {"0", "n", "no", "false", "f", "inactive", "off"}
+
+
+def _as_flag(value: str) -> int | None:
+    """A spreadsheet cell as 1, 0, or None when it is neither.
+
+    Offices write "Yes", "ACTIVE", "n" and "0" in the same column, so all of
+    them are accepted. Anything else returns None and the caller reports the
+    line rather than guessing — guessing wrong here silently keeps charging
+    somebody rent."""
+    v = (value or "").strip().lower()
+    return 1 if v in _TRUE else (0 if v in _FALSE else None)
 
 
 @router.post("/bulk-update")
@@ -1036,7 +1069,14 @@ def bulk_update_riders(
 
     Any subset of the updatable columns may be present and only non-blank
     cells are written — leaving a cell empty leaves the stored value alone.
-    Updatable columns: name | hub | vehicle | account_no | ifsc
+    Updatable columns: name | hub | vehicle | account_no | ifsc | is_active
+
+    ``is_active`` accepts yes/no, true/false, y/n, active/inactive or 1/0.
+    Switching an id off is what stops a rider who left a company six months
+    ago from being charged EV rent every time that company is processed — see
+    the absent-rider loop in ``domain/engine.py``. It is a roster flag, not a
+    deletion: the id, its history and its money all stay exactly where they
+    are, and switching it back on restores it.
 
     Dry-run by default. Pass ``?commit=true`` to actually persist.
     """
@@ -1063,6 +1103,7 @@ def bulk_update_riders(
             df.columns, "account_no", "account no", "acc_no", "account number", "a/c no", "ac no"
         ),
         "ifsc": match_column(df.columns, "ifsc", "ifsc code"),
+        "active": match_column(df.columns, "is_active", "active", "status"),
     }
     if not cols["co"]:
         raise HTTPException(400, "Missing required 'company' column.")
@@ -1119,7 +1160,7 @@ def bulk_update_riders(
                 )
                 continue
 
-            patch: dict[str, str] = {}
+            patch: dict[str, str | int] = {}
             for field, key in (
                 ("name", "name"),
                 ("hub", "hub"),
@@ -1132,6 +1173,22 @@ def bulk_update_riders(
                     if field == "ifsc":
                         v = v.upper()
                     patch[field] = v
+            # is_active is the one boolean here, so it cannot ride the loop
+            # above: that compares strings and would write the word "yes" into
+            # an INTEGER column. An unreadable value is an error rather than a
+            # silent no-op, because "inactive" quietly not applying is exactly
+            # the failure this column exists to prevent.
+            raw = cell(row, "active")
+            if raw is not None:
+                want = _as_flag(raw)
+                if want is None:
+                    errors.append(
+                        f"line {line}: cannot read is_active={raw!r} — "
+                        f"use yes/no, true/false, active/inactive or 1/0"
+                    )
+                    continue
+                if int(cur["is_active"] or 0) != want:
+                    patch["is_active"] = want
             if not patch:
                 unchanged.append({"line": line, "rider_id": cur["rider_id"], "company": co})
                 continue

@@ -1073,6 +1073,61 @@ def _0036_ev_id_prefix(conn: Any) -> None:
             )
 
 
+def _0037_retire_ev_models(conn: Any) -> None:
+    """Let a model be taken off the menu without deleting it.
+
+    Eight vehicles were added in September 2026 as Blive Standard when they
+    were Raft Blue — every one of them with a ``CBICEVD`` ID, which is the
+    Raft Blue pattern and nothing like Blive's. The office has stopped taking
+    Blive units, so the reliable fix is not to train people harder: it is to
+    stop offering the choice.
+
+    Deleting the model is not an option — ``ev_units.model_id`` references it
+    and the rate card is how historic rent is still computed. So this is a
+    flag. A retired model keeps its rate, keeps its units, and disappears only
+    from the two pickers where new vehicles are created.
+
+    Blive is not retired here. It still owns those eight units at the time
+    this runs, and retiring a model somebody is about to re-tag away from
+    would hide the row they need. The office retires it from
+    Admin -> System -> EV Models once the re-tag is done.
+    """
+    add_column(conn, "ev_models", "is_active", "INTEGER NOT NULL DEFAULT 1")
+
+
+def _0038_provider_rate(conn: Any) -> None:
+    """What the rider pays and what we pay the provider are two numbers.
+
+    ``ev_models.weekly_rate`` was doing both jobs: it set the rider's rent AND
+    ``ev_daily_ledger.provider_cost``, the thing every per-EV P&L subtracts.
+    Raft's W38 bill (14-20 September 2026) showed they are not the same. Raft
+    charge **1,225** a week for the CBICEVD units we rent riders at 1,295, and
+    **1,050** for the older EV/FX/AV trackers we rent at 1,250. So the ledger
+    had been recording a cost 70 to 200 a week per vehicle higher than the
+    invoice — across ninety units, several thousand a week of margin that
+    existed but did not show.
+
+    NULL means "the same as weekly_rate", so every other model keeps behaving
+    exactly as it did and nothing moves on its own. Only the two Raft models
+    are seeded, only where nobody has set a rate by hand, and only from a real
+    invoice rather than an assumption.
+
+    Nothing historic is rewritten: ``ev_daily_ledger`` keeps the
+    ``provider_cost`` it was written with, so past weeks still reconcile
+    against the bills that were actually paid.
+    """
+    add_column(conn, "ev_models", "provider_rate", "INTEGER")
+    for provider, model, rate in (
+        ("Raft", "Blue", 122500),  # paise — W38 line for every CBICEVD tracker
+        ("Raft", "Regular", 105000),  # paise — W38 line for the EV/FX/AV trackers
+    ):
+        conn.execute(
+            "UPDATE ev_models SET provider_rate=? WHERE LOWER(provider)=LOWER(?) "
+            "AND LOWER(model_name)=LOWER(?) AND provider_rate IS NULL",
+            (rate, provider, model),
+        )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1113,6 +1168,8 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0034_provider_bill_reconciliation", _0034_provider_bill_reconciliation),
     ("0035_head_of_the_field", _0035_head_of_the_field),
     ("0036_ev_id_prefix", _0036_ev_id_prefix),
+    ("0037_retire_ev_models", _0037_retire_ev_models),
+    ("0038_provider_rate", _0038_provider_rate),
 ]
 
 _TRACKING_DDL = (

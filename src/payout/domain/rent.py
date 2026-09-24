@@ -46,6 +46,11 @@ class AssignmentLeg:
     provider: str
     model: str
     weekly_rate: float
+    # What the provider invoices us for this vehicle per week. Usually the same
+    # as weekly_rate, and not always — Raft bill 1,225 for a unit we rent at
+    # 1,295. Only ev_daily uses it, for provider_cost; the rider's rent is
+    # always weekly_rate.
+    provider_rate: float
     handover_date: date | None
     returned_date: date | None
     rent_charged_through: date | None
@@ -278,7 +283,8 @@ def resolve_rent(
         """
         SELECT a.assignment_id, a.person_id, a.ev_id, a.handover_date, a.returned_date,
                a.rent_charged_through, a.created_at,
-               m.provider, m.model_name, m.weekly_rate
+               m.provider, m.model_name, m.weekly_rate,
+               COALESCE(m.provider_rate, m.weekly_rate) AS provider_rate
         FROM ev_assignments a
         JOIN ev_units  u ON u.ev_id = a.ev_id
         JOIN ev_models m ON m.model_id = u.model_id
@@ -401,6 +407,7 @@ def resolve_rent(
             provider=r["provider"],
             model=r["model_name"],
             weekly_rate=int(r["weekly_rate"]),
+            provider_rate=int(r["provider_rate"]),
             handover_date=leg["hod"],
             returned_date=leg["ret"],
             rent_charged_through=leg["charged"],

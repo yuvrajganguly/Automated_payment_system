@@ -384,6 +384,12 @@ class EvModelIn(BaseModel):
     # exist. Blank means we do not know the pattern; only the
     # confusable-character check then applies. See migration 0036.
     id_prefix: str | None = None
+    # False retires the model: no longer offered when adding a vehicle, while
+    # every unit already on it keeps its rate and its history.
+    is_active: bool = True
+    # What the provider invoices us per week, when that is not the rider's
+    # rate. Blank means the two are the same.
+    provider_rate: float | None = None
 
 
 @router.post("/ev-models")
@@ -403,24 +409,56 @@ def create_ev_model(body: EvModelIn, _: dict = Depends(require_admin)) -> dict:
     return {"created": True, "model_id": mid}
 
 
+class EvModelPatch(BaseModel):
+    """Every field optional, and only the ones actually sent are written.
+
+    This used to take the same all-required model as create, which meant any
+    client that did not know about a column overwrote it with the default.
+    The console's rate editor sends three fields; the moment ``id_prefix`` and
+    ``is_active`` existed, changing a rate would have silently cleared the ID
+    pattern and un-retired the model. Same lesson as ``confirm_new_person``:
+    an old client must not be able to undo a setting it has never heard of.
+    """
+
+    provider: str | None = None
+    model_name: str | None = None
+    weekly_rate: float | None = None
+    id_prefix: str | None = None
+    is_active: bool | None = None
+    provider_rate: float | None = None
+
+
 @router.patch("/ev-models/{model_id}")
-def edit_ev_model(model_id: int, body: EvModelIn, _: dict = Depends(require_admin)) -> dict:
+def edit_ev_model(model_id: int, body: EvModelPatch, _: dict = Depends(require_admin)) -> dict:
+    sent = body.model_dump(exclude_unset=True)
+    if not sent:
+        return {"updated": False, "reason": "Nothing to change", "model_id": model_id}
     with get_connection() as conn:
         if not conn.execute("SELECT 1 FROM ev_models WHERE model_id=?", (model_id,)).fetchone():
             raise HTTPException(404, "Model not found")
+        cols: dict[str, object] = {}
+        if "provider" in sent:
+            cols["provider"] = body.provider
+        if "model_name" in sent:
+            cols["model_name"] = body.model_name
+        if "weekly_rate" in sent:
+            cols["weekly_rate"] = to_paise(body.weekly_rate)
+        if "id_prefix" in sent:
+            cols["id_prefix"] = (body.id_prefix or "").strip().upper() or None
+        if "is_active" in sent:
+            cols["is_active"] = 1 if body.is_active else 0
+        if "provider_rate" in sent:
+            # Explicit null clears it back to "the same as the rider's rate".
+            cols["provider_rate"] = (
+                to_paise(body.provider_rate) if body.provider_rate is not None else None
+            )
+        sets = ", ".join(f"{c}=?" for c in cols)
         conn.execute(
-            "UPDATE ev_models SET provider=?, model_name=?, weekly_rate=?, id_prefix=? "
-            "WHERE model_id=?",
-            (
-                body.provider,
-                body.model_name,
-                to_paise(body.weekly_rate),
-                (body.id_prefix or "").strip().upper() or None,
-                model_id,
-            ),
+            f"UPDATE ev_models SET {sets} WHERE model_id=?",  # noqa: S608 - keys are literals
+            [*cols.values(), model_id],
         )
         conn.commit()
-    return {"updated": True, "model_id": model_id}
+    return {"updated": True, "model_id": model_id, "fields": sorted(cols)}
 
 
 @router.delete("/ev-models/{model_id}")

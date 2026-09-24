@@ -911,6 +911,32 @@ function RiderRow({
 
   function reset() { setForm(initial()); setErr(null); setEditing(false) }
 
+  /** Switch this rider id off (or back on).
+   *
+   * A person keeps an id at every company they have ever worked for, and the
+   * payout engine charges EV rent to anybody holding a vehicle who still has
+   * an ACTIVE id at the company being processed — see the absent-rider loop
+   * in domain/engine.py. So a rider who did one week at Jiffy in March and
+   * has been on Myntra ever since shows up owing a week's rent every time
+   * Jiffy runs. Switching the Jiffy id off is the fix, and it is reversible:
+   * the id, its transactions and its arrears all stay put.
+   */
+  async function toggleActive() {
+    setBusy(true); setErr(null)
+    try {
+      await api.patch(
+        '/riders/' + encodeURIComponent(rider.rider_id) +
+        '?company=' + encodeURIComponent(rider.company),
+        { is_active: !rider.is_active },
+      )
+      onSaved()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function remove() {
     setBusy(true); setErr(null)
     try {
@@ -974,7 +1000,11 @@ function RiderRow({
         <Td>{rider.account_no ?? '-'}</Td>
         <Td>{rider.ifsc ?? '-'}</Td>
         <Td>{rider.mob_no ?? '-'}</Td>
-        <Td>{rider.is_active ? 'yes' : 'no'}</Td>
+        <Td>
+          {rider.is_active
+            ? <span className="text-emerald-300">yes</span>
+            : <span className="text-slate-500" title="No rent is charged at this company for this id">off</span>}
+        </Td>
         {isAdmin && (
           <Td>
             {confirmDel ? (
@@ -995,6 +1025,13 @@ function RiderRow({
                 <button onClick={() => setEditing(true)}
                         className="text-brand underline hover:opacity-80 mr-2">
                   Edit
+                </button>
+                <button onClick={toggleActive} disabled={busy}
+                        title={rider.is_active
+                          ? 'Stop charging EV rent at this company for this id'
+                          : 'Charge and pay at this company again'}
+                        className="text-brand underline hover:opacity-80 mr-2 disabled:opacity-50">
+                  {busy ? '…' : rider.is_active ? 'Switch off' : 'Switch on'}
                 </button>
                 <button onClick={() => setConfirmDel(true)}
                         className="text-red-400/70 underline hover:text-red-300">

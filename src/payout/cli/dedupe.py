@@ -260,9 +260,13 @@ def ev_rows(conn, ev_id: str) -> dict[str, int]:
 
 
 def delete_phantom(conn, phantom: str) -> None:
-    """Purge a unit. ``purge_ev`` walks ``EV_REFS``, which does not include the
-    two close-out tables — they key on ``assignment_id`` — so they are cleared
-    first or the DELETE on ``ev_assignments`` trips their foreign key."""
+    """Purge a unit.
+
+    ``EV_REFS`` now covers both close-out tables, so ``purge_ev`` clears them
+    on its own and the two DELETEs below are redundant. They stay because this
+    script is also piped into a container running an older image, where
+    ``EV_REFS`` still omitted them and the DELETE on ``ev_assignments`` tripped
+    their foreign key. Deleting nothing twice is cheap; the 500 was not."""
     conn.execute("DELETE FROM ev_closeouts WHERE ev_id=?", (phantom,))
     conn.execute("DELETE FROM ev_closeout_reports WHERE ev_id=?", (phantom,))
     purge_ev(conn, phantom)
