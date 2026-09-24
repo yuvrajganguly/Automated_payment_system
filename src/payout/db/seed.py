@@ -9,13 +9,22 @@ from __future__ import annotations
 import sqlite3
 
 # (provider, model_name, weekly_rate). Daily rate is derived as weekly / 7.
-# (provider, model, weekly_rate in paise, id_prefix). The prefix is what every
-# one of that model's EV IDs starts with; None means we do not know the pattern
-# and only the confusable-character check guards new IDs. See migration 0036.
-EV_MODELS: list[tuple[str, str, float, str | None]] = [
-    ("Raft", "Regular", 125000, None),
-    ("Raft", "Blue", 129500, "CBICEVD"),
-    ("Blive", "Standard", 126000, "KOL"),
+# (provider, model, weekly_rate, id_prefix, provider_rate) — all money in paise.
+#
+# ``id_prefix`` is what every one of that model's EV IDs starts with; None means
+# we do not know the pattern and only the confusable-character check guards new
+# IDs (migration 0036).
+#
+# ``provider_rate`` is what the provider invoices US per week, when that differs
+# from what the rider pays. None means the two are the same. The Raft figures
+# come off their W38 bill (migration 0038); Blive's have never been seen to
+# differ. A fresh database gets SCHEMA and only *stamps* the migrations, so
+# these have to be here as well or a new deployment starts with the columns and
+# none of the values.
+EV_MODELS: list[tuple[str, str, float, str | None, float | None]] = [
+    ("Raft", "Regular", 125000, None, 105000),
+    ("Raft", "Blue", 129500, "CBICEVD", 122500),
+    ("Blive", "Standard", 126000, "KOL", None),
 ]
 
 # Company parser configs. See companies table in schema.py for column meanings.
@@ -212,8 +221,9 @@ _COMPANY_DEFAULTS = {
 
 def seed_ev_models(conn: sqlite3.Connection) -> None:
     conn.executemany(
-        "INSERT OR IGNORE INTO ev_models (provider, model_name, weekly_rate, id_prefix) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO ev_models "
+        "(provider, model_name, weekly_rate, id_prefix, provider_rate) "
+        "VALUES (?, ?, ?, ?, ?)",
         EV_MODELS,
     )
 

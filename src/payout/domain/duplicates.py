@@ -26,7 +26,9 @@ Aadhaar or PAN.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
 from difflib import SequenceMatcher
+from typing import Any
 
 # Characters that look alike in a handwritten or hurriedly-typed ID, folded to
 # one representative each. Digits win over letters because the IDs in question
@@ -130,8 +132,8 @@ def norm_account(value: str | None) -> str:
 
 def identifiers(
     *,
-    phones: object = (),
-    accounts: object = (),
+    phones: Iterable[str | None] | None = (),
+    accounts: Iterable[str | None] | None = (),
     aadhaar: str | None = None,
     pan: str | None = None,
 ) -> set[tuple[str, str]]:
@@ -185,7 +187,7 @@ class EvIdProblem(Exception):
     breaks — "invalid" on its own tells a man in the field nothing."""
 
 
-def check_ev_id(new_id: str, prefix: str | None, existing: object) -> None:
+def check_ev_id(new_id: str, prefix: str | None, existing: Iterable[Sequence[Any]] | None) -> None:
     """Raise ``EvIdProblem`` if ``new_id`` cannot be a real vehicle.
 
     ``existing`` is every unit already on file as ``(ev_id, id_prefix)`` pairs.
@@ -230,8 +232,8 @@ def find_duplicate_people(
     conn,
     name: str | None,
     *,
-    phones: object = (),
-    accounts: object = (),
+    phones: Iterable[str | None] | None = (),
+    accounts: Iterable[str | None] | None = (),
     aadhaar: str | None = None,
     pan: str | None = None,
     exclude_person_id: int | None = None,
