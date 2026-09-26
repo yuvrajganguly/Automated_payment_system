@@ -19,6 +19,7 @@ Three responsibilities per provider:
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from io import BytesIO
 
@@ -314,6 +315,30 @@ def _with_header_row(raw: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+_FOOTER_LABEL = re.compile(
+    r"^\s*(grand\s+|sub\s*|net\s+)?(total|sum)(\s+(amount|deduction|deductions|rent|payable))?\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_footer_row(ev_raw: str | None, labels: list[str | None]) -> bool:
+    """A provider sheet's own arithmetic, not a vehicle line.
+
+    Two shapes, both seen: "TOTAL" sitting in the tracker column, or a blank
+    tracker with "TOTAL" in the name column and the sum in the money column.
+    A blank tracker with no label at all beside the amount is treated the
+    same way — an unlabelled subtotal — because there is nothing on the row a
+    reconciler could match. A line the provider forgot the tracker on but
+    named the rider is kept: the name is what the reconciler matches on.
+    """
+    if ev_raw and _FOOTER_LABEL.match(ev_raw):
+        return True
+    if ev_raw:
+        return False
+    texts = [t for t in labels if t]
+    return not texts or any(_FOOTER_LABEL.match(t) for t in texts)
+
+
 def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
     """Parse a provider bill into rows we can both tally and reconcile.
 
@@ -437,11 +462,21 @@ def _parse_bill_excel(file_bytes: bytes, file_name: str) -> list[dict]:
         amt = cell(row, amount_col)
         if not ev_raw and not amt:
             continue
+        # The provider's own footer. Raft's W38/W39 sheets end with a row that
+        # has no tracker, "TOTAL" in the name column and the column sum in the
+        # money column; read as a line it became a vehicle "not in the DB"
+        # billed for the whole week, and doubled every total downstream.
+        # A row with no vehicle and nothing but a label (or nothing at all)
+        # beside its amount cannot be reconciled to anything, so it is the
+        # sheet's arithmetic, not a charge.
+        labels = [cell(row, c) for c in (name_col, vin_col, deploy_col, *status_cols)]
+        if _is_footer_row(ev_raw, labels):
+            continue
         line_no += 1
         try:
             amount = to_paise(str(amt).replace(",", "").replace("₹", "").strip()) if amt else 0
         except ValueError:
-            amount = 0.0
+            amount = 0
         out.append(
             {
                 "line_no": line_no,
@@ -851,6 +886,14 @@ _RECON_HEADERS = (
     "Notes",
     "Their remark",
 )
+# 1-based, to match ``add_styled_sheet``. Days is a count and is totalled but
+# never rupeeized; everything from "Billed by them" to "Damage" is money.
+_RECON_NUMERIC_COLS = tuple(
+    range(_RECON_HEADERS.index("Days") + 1, _RECON_HEADERS.index("Damage") + 2)
+)
+_RECON_MONEY_COLS = tuple(
+    range(_RECON_HEADERS.index("Billed by them") + 1, _RECON_HEADERS.index("Damage") + 2)
+)
 
 
 @router.post("/{provider}/bills/{bill_id}/reconciliation/export")
@@ -871,9 +914,11 @@ def bill_reconciliation_export(
             _stored_overrides(conn),
         )
 
-    def rs(v) -> float:
-        return (v or 0) / 100.0
-
+    # Money stays in paise here: ``money_cols`` is the one place it becomes
+    # rupees. This route used to divide by 100 itself as well, and its column
+    # numbers were off by one, so the sheet went out with Days ÷ 100 and every
+    # rupee figure ÷ 10,000 while Damage — the one column the two mistakes
+    # missed — was right. Columns are 1-based, as in ``_RECON_HEADERS``.
     rows = [
         (
             r["ev_id"],
@@ -881,13 +926,13 @@ def bill_reconciliation_export(
             r["rider"] or "",
             r["person_id"] or "",
             r["days"] or "",
-            rs(r["billed"]),
-            rs(r["expected"]),
-            rs(r["charged"]),
-            rs(r["collected"]),
-            rs(r["missed"]),
-            rs(r["hand_booked"]),
-            rs(r["damage"]),
+            r["billed"] or 0,
+            r["expected"] or 0,
+            r["charged"] or 0,
+            r["collected"] or 0,
+            r["missed"] or 0,
+            r["hand_booked"] or 0,
+            r["damage"] or 0,
             r["unit_status"],
             r["provider_name"] or "",
             r["deploy_date"] or "",
@@ -901,8 +946,8 @@ def bill_reconciliation_export(
         sheet_name="Reconciliation",
         headers=_RECON_HEADERS,
         rows=rows,
-        numeric_cols=(5, 6, 7, 8, 9, 10, 11),
-        totals_cols=(5, 6, 7, 8, 9, 10, 11),
-        money_cols=(5, 6, 7, 8, 9, 10, 11),
-        left_align_cols=(12, 13, 15, 16),
+        numeric_cols=_RECON_NUMERIC_COLS,
+        totals_cols=_RECON_NUMERIC_COLS,
+        money_cols=_RECON_MONEY_COLS,
+        left_align_cols=(13, 14, 16, 17),
     )

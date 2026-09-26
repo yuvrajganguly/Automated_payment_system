@@ -156,3 +156,35 @@ def test_a_file_with_neither_column_says_so_usefully():
     with pytest.raises(Exception) as e:
         _parse_bill_excel(buf.getvalue(), "wrong.xlsx")
     assert "columns" in str(e.value).lower()
+
+
+def test_the_total_row_at_the_foot_is_not_a_vehicle():
+    """W39 ended with a row that had no tracker, "TOTAL" under DP Name and the
+    column sum under Deduction. Read as a line it became a unit "not in the
+    DB" billed for a full week, and every total downstream was exactly
+    double: the sheet's own sum was being added to the sum of the sheet."""
+    rows = [*W38, ["", "", "", "", "TOTAL", 100710, "", ""]]
+    lines = _parse_bill_excel(_sheet(rows), "w39.xlsx")
+    assert len(lines) == len(W38)
+    assert sum(L["their_amount"] for L in lines) == sum(r[5] for r in W38) * 100
+    assert not any((L["provider_name"] or "").upper() == "TOTAL" for L in lines)
+
+
+def test_a_total_in_the_tracker_column_is_also_a_footer():
+    rows = [*W38, ["", "", "Grand Total", "", "", 100710, "", ""]]
+    assert len(_parse_bill_excel(_sheet(rows), "w39.xlsx")) == len(W38)
+
+
+def test_an_unlabelled_trailing_amount_is_a_footer_too():
+    """Nothing on the row a reconciler could match to a vehicle or a man."""
+    rows = [*W38, ["", "", "", "", "", 100710, "", ""]]
+    assert len(_parse_bill_excel(_sheet(rows), "w39.xlsx")) == len(W38)
+
+
+def test_a_line_missing_only_its_tracker_is_kept():
+    """The provider forgot the id but named the rider: that is a real charge
+    the name matcher can still place, not arithmetic."""
+    rows = [*W38, [91, "16-Sep-26", "", "RCEV/K1/01551", "GOPAL MONDAL", 700, "", ""]]
+    lines = _parse_bill_excel(_sheet(rows), "w39.xlsx")
+    assert len(lines) == len(W38) + 1
+    assert lines[-1]["provider_name"] == "GOPAL MONDAL" and lines[-1]["their_amount"] == 70000

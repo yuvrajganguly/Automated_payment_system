@@ -273,6 +273,16 @@ def _bill_file() -> bytes:
                 "Amount": "175",
                 "Remark": "",
             },
+            # Raft's own footer. It is not a vehicle and must not be counted.
+            {
+                "Sr": "",
+                "Deployment Date": "",
+                "EV ID": "",
+                "VIN": "",
+                "DP Name": "TOTAL",
+                "Amount": "1400",
+                "Remark": "",
+            },
         ]
     ).to_excel(buf, index=False)
     return buf.getvalue()
@@ -296,6 +306,9 @@ def test_upload_then_reconcile_over_http(db, client):
     )
     assert up.status_code == 200, up.text
     bill_id = up.json()["bill_id"]
+    # Two vehicles, not three: the sheet's TOTAL row is arithmetic, not a line.
+    assert up.json()["line_count"] == 2
+    assert up.json()["bill_total"] == 1400.0
 
     got = client.get(f"/api/providers/Raft/bills/{bill_id}/reconciliation", headers=boss)
     assert got.status_code == 200, got.text
@@ -330,6 +343,28 @@ def test_upload_then_reconcile_over_http(db, client):
     xl = client.post(f"/api/providers/Raft/bills/{bill_id}/reconciliation/export", headers=boss)
     assert xl.status_code == 200
     assert xl.content[:2] == b"PK"
+    # The sheet says the same thing as the screen. It went out once with every
+    # rupee figure divided by 10,000 and Days divided by 100 — the route was
+    # converting paise itself *and* naming 0-based columns to a 1-based
+    # ``money_cols`` — and nothing here opened the file to notice.
+    from openpyxl import load_workbook
+
+    ws = load_workbook(io.BytesIO(xl.content)).active
+    header = [c.value for c in ws[1]]
+    sheet = {
+        r[header.index("EV ID")]: dict(zip(header, r, strict=True))
+        for r in ws.iter_rows(min_row=2, values_only=True)
+    }
+    w1 = sheet["EV-W1"]
+    assert w1["Days"] == 7
+    assert w1["Billed by them"] == 1225.0
+    assert w1["Expected at our rate"] == 1295.0
+    assert w1["Collected"] == 1295.0
+    assert w1["Damage"] == 0
+    assert w1["Unit status"] == "in_use"
+    assert "TOTAL" not in {r["Their name for him"] for r in sheet.values() if r["EV ID"]}
+    total_row = [r for r in ws.iter_rows(min_row=2, values_only=True) if r[0] == "TOTAL"]
+    assert len(total_row) == 1  # the sheet's own total, and only that
 
 
 def test_a_recruiter_cannot_see_the_bill(client):
