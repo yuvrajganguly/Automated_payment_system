@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS rider_master (
     is_active  INTEGER NOT NULL DEFAULT 1,
     salary     INTEGER,                        -- paise per cycle (salary companies)
     recruited_by TEXT,                         -- users.email of the recruiter who onboarded them
+    payment_model TEXT,                        -- overrides companies.payment_model for this id; NULL = company default
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (rider_id, company)
@@ -179,7 +180,7 @@ CREATE TABLE IF NOT EXISTS ev_arrears (
 -- ── transactions ────────────────────────────────────────────────────────────
 -- Immutable, append-only audit trail. Never UPDATE/DELETE; corrections are new
 -- offsetting rows. amount: positive = credit, negative = debit.
---   event_type: PAYOUT | RENT | RENT_MISSED | RENT_RECOVERED | RENT_REVERSAL |
+--   event_type: PAYOUT | RENT | RENT_MISSED | RENT_DUE | RENT_RECOVERED | RENT_REVERSAL |
 --               RENT_WAIVED (last billed day set by hand; amount 0, days = days
 --               settled without money — see routes/persons.set_rent_meter) |
 --               DEPOSIT_APPLIED (security deposit vs debt on EV closure) |

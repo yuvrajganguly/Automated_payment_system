@@ -295,7 +295,7 @@ def rent_with_no_vehicle(conn) -> list[dict]:
     rows = conn.execute(
         "SELECT t.person_id, p.display_name, COUNT(*) AS n, SUM(t.amount) AS amount "
         "FROM transactions t JOIN person_registry p ON p.person_id = t.person_id "
-        "WHERE t.event_type IN ('RENT', 'RENT_MISSED') "
+        "WHERE t.event_type IN ('RENT', 'RENT_MISSED','RENT_DUE') "
         "  AND NOT EXISTS (SELECT 1 FROM ev_assignments a WHERE a.person_id = t.person_id) "
         "GROUP BY t.person_id, p.display_name"
     ).fetchall()

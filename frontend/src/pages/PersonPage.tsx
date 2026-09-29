@@ -268,6 +268,7 @@ export function PersonPage() {
         />
       )}
 
+      {isAdmin && <RentPaidInCashCard personId={person.person_id} onPosted={load} />}
       {isAdmin && <SetLastBilledDayCard personId={person.person_id} onPosted={load} />}
       {isAdmin && <AdjustmentForm personId={person.person_id} onPosted={load} />}
       {isAdmin && <WriteOffArrearsCard personId={person.person_id} onPosted={load} />}
@@ -355,6 +356,61 @@ function PersonTimeline({ personId }: { personId: number }) {
           </ol>
         </div>
       )}
+    </div>
+  )
+}
+
+function RentPaidInCashCard({ personId, onPosted }: { personId: number; onPosted: () => void }) {
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(todayISO())
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [tone, setTone] = useState<'ok' | 'err'>('ok')
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const r = await api.post<{ applied_to_arrears: number; applied_to_rent: number }>(
+        '/ledger/rent-payment', { person_id: personId, amount: Number(amount), paid_on: paidOn },
+      )
+      setTone('ok')
+      const parts = []
+      if (r.applied_to_arrears) parts.push(`₹${r.applied_to_arrears} against arrears`)
+      if (r.applied_to_rent) parts.push(`₹${r.applied_to_rent} for the current week`)
+      setMsg(parts.length ? `Recorded: ${parts.join(', ')}.` : 'Recorded.')
+      setAmount(''); onPosted()
+    } catch (err) {
+      setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="panel p-4 mt-6 border-l-[3px] border-l-amber-400">
+      <h3 className="font-semibold mb-1">Rent paid in cash</h3>
+      <p className="text-xs text-slate-500 mb-3">
+        Records money the rider handed over outside a payout — the only way rent reaches the books for
+        a rider whose company pays him directly. Applied to EV arrears first (including this week's rent
+        due), then to the current week. The balance does not move; the receipt is logged under your name.
+      </p>
+      <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
+        <label className="block text-sm">
+          <span className="block text-xs">Amount (₹) *</span>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="1" step="1"
+                 className="border rounded px-3 py-1.5 w-32" />
+        </label>
+        <label className="block text-sm">
+          <span className="block text-xs">Paid on</span>
+          <input value={paidOn} onChange={(e) => setPaidOn(e.target.value)} type="date" max={todayISO()}
+                 className="border rounded px-3 py-1.5" />
+        </label>
+        <button type="submit" disabled={busy || !(Number(amount) > 0)}
+                className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
+          {busy ? 'Saving…' : 'Record cash receipt'}
+        </button>
+        {msg && (
+          <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>
+        )}
+      </form>
     </div>
   )
 }

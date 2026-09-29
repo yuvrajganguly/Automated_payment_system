@@ -70,6 +70,7 @@ export const WORKSPACES: Workspace[] = [
     label: 'Money',
     pages: [
       { to: '/arrears', label: 'Arrears' },
+      { to: '/rent-due', label: 'Rent due' },
       { to: '/cod', label: 'COD' },
       { to: '/payments', label: 'Payments' },
       { to: '/transactions', label: 'Transactions' },

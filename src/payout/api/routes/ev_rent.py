@@ -52,7 +52,7 @@ def ev_rent_details(
 ) -> list[dict]:
     cos = _split_companies(companies) or ([company] if company else [])
     where = (
-        "t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
+        "t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED','RENT_DUE', "
         "                  'RENT_RECOVERED', 'XC_RENT_RECOVERED')"
         " AND t.company IS NOT NULL AND t.company <> ''"
     )
@@ -77,7 +77,7 @@ def ev_rent_details(
         where += (
             " AND (t.company, t.cycle_end) IN "
             "(SELECT t2.company, MAX(t2.cycle_end) FROM transactions t2 "
-            " WHERE t2.event_type IN ('RENT','RENT_MISSED') "
+            " WHERE t2.event_type IN ('RENT','RENT_MISSED','RENT_DUE') "
             " GROUP BY t2.company)"
         )
 
@@ -97,13 +97,13 @@ def ev_rent_details(
             f"                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "  # noqa: E501
             f"       SUM(CASE WHEN t.event_type IN ('XC_RENT_RECOVERED','RENT_RECOVERED') "
             f"                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "  # noqa: E501
-            f"       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
+            f"       SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
             f"       COUNT(DISTINCT t.person_id) AS rider_count "
             f"FROM transactions t "
             f"WHERE {where} "
             f"GROUP BY t.company, t.cycle_start, t.cycle_end "
             f"HAVING SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) > 0 "
-            f"    OR SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) > 0 "
+            f"    OR SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE') THEN -t.amount ELSE 0 END) > 0 "  # noqa: E501
             f"ORDER BY t.cycle_end ASC, t.company",
             params,
         ).fetchall()
@@ -155,14 +155,14 @@ def ev_rent_details(
                 "                                                   THEN  t.amount ELSE 0 END) AS collected_rent, "  # noqa: E501
                 "       SUM(CASE WHEN t.event_type IN ('XC_RENT_RECOVERED','RENT_RECOVERED') "
                 "                                                   THEN  t.amount ELSE 0 END) AS prior_recovered, "  # noqa: E501
-                "       SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
+                "       SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')    THEN -t.amount ELSE 0 END) AS arrears_rent, "  # noqa: E501
                 "       MAX(CASE WHEN t.event_type='RENT'           THEN t.days END) AS days_billed, "  # noqa: E501
                 "       MAX((SELECT rm.hub FROM rider_master rm "
                 "          WHERE rm.person_id = t.person_id AND rm.company = t.company "
                 "          LIMIT 1)) AS hub "
                 "FROM transactions t "
                 "LEFT JOIN person_registry pr ON pr.person_id = t.person_id "
-                "WHERE t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED', "
+                "WHERE t.event_type IN ('RENT', 'RENT_COLLECTED', 'RENT_MISSED','RENT_DUE', "
                 "                       'XC_RENT_RECOVERED', 'RENT_RECOVERED') "
                 "  AND t.company = ? AND t.cycle_start = ? AND t.cycle_end = ? "
                 "GROUP BY t.person_id, t.rider_id, pr.display_name "

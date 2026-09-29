@@ -194,7 +194,7 @@ def _load(conn, period_start: str, period_end: str) -> dict[str, Any]:
     for r in conn.execute(
         "SELECT person_id, event_type, amount, cycle_start, cycle_end, created_by "
         "FROM transactions WHERE event_type IN "
-        "  ('RENT','RENT_COLLECTED','RENT_MISSED','RENT_RECOVERED','RENT_REVERSAL')"
+        "  ('RENT','RENT_COLLECTED','RENT_MISSED','RENT_DUE','RENT_RECOVERED','RENT_REVERSAL')"
     ):
         pid, amt = int(r["person_id"]), abs(int(r["amount"] or 0))
         single = r["cycle_start"] == r["cycle_end"]
@@ -341,9 +341,13 @@ def reconcile(
             """This person's ledger figure, as far as this one unit goes."""
             return round(v * share)
 
-        charged = cut(led.get("RENT", 0) + led.get("RENT_MISSED", 0))
+        charged = cut(led.get("RENT", 0) + led.get("RENT_MISSED", 0) + led.get("RENT_DUE", 0))
         collected = cut(led.get("RENT_COLLECTED", 0) + led.get("RENT_RECOVERED", 0))
-        missed = max(0, cut(led.get("RENT_MISSED", 0)) - cut(led.get("RENT_RECOVERED", 0)))
+        missed = max(
+            0,
+            cut(led.get("RENT_MISSED", 0) + led.get("RENT_DUE", 0))
+            - cut(led.get("RENT_RECOVERED", 0)),
+        )  # noqa: E501
         by_hand = min(missed, cut(man.get("RENT_RECOVERED", 0)))
         missed -= by_hand
         collected += by_hand

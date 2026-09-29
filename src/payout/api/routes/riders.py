@@ -49,7 +49,7 @@ RIDER_OUT_SQL = (
     "rm.person_id, rm.rider_id, rm.company, rm.name, rm.hub, "
     "CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
     "rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
-    "rm.recruited_by"
+    "rm.recruited_by, rm.payment_model"
 )
 
 
@@ -451,7 +451,7 @@ def list_riders(
             f"SELECT rm.rider_id, rm.company, rm.person_id, rm.name, rm.hub, "
             f"       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END AS vehicle, "
             f"       rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
-            f"       rm.recruited_by, COALESCE(hz.zone, ru.zone) AS zone, "
+            f"       rm.recruited_by, rm.payment_model, COALESCE(hz.zone, ru.zone) AS zone, "
             f"       ({_ACTIVE}) AS working, {_LAST_WORKED} AS last_worked_on "
             f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
             params + page_params,
@@ -496,6 +496,17 @@ def update_rider(
         if user.get("role") == "recruiter":
             raise HTTPException(403, "Only admins reassign a rider to a recruiter")
         fields["recruited_by"] = body.recruited_by.strip().lower() or None
+    if body.payment_model is not None:
+        if user.get("role") == "recruiter":
+            raise HTTPException(403, "Only admins set who pays a rider")
+        from payout.domain.payment_model import VALID_MODELS
+
+        pm = body.payment_model.strip().lower()
+        if pm and pm not in VALID_MODELS:
+            raise HTTPException(
+                400, f"payment_model must be one of {', '.join(VALID_MODELS)} or blank"
+            )  # noqa: E501
+        fields["payment_model"] = pm or None
     if body.salary is not None:
         if user.get("role") == "recruiter":
             raise HTTPException(403, "Only admins set salaries")
@@ -581,14 +592,24 @@ def update_rider(
             # and a client that trusts the response — the app does, it folds it
             # straight into its cache — showed the account as the rider's own.
             "SELECT rider_id, company, person_id, name, hub, vehicle, account_no, account_name, "
-            " ifsc, mob_no, is_active, salary, recruited_by FROM rider_master "
+            " ifsc, mob_no, is_active, salary, recruited_by, payment_model FROM rider_master "
             "WHERE rider_id=? AND company=?",
             (rider_id, company),
         ).fetchone()
         changed = diff_fields(
             dict(existing),
             dict(row),
-            ("name", "hub", "vehicle", "account_no", "ifsc", "is_active", "salary", "recruited_by"),
+            (
+                "name",
+                "hub",
+                "vehicle",
+                "account_no",
+                "ifsc",
+                "is_active",
+                "salary",
+                "recruited_by",
+                "payment_model",
+            ),  # noqa: E501
         )
         # The feed says a bank detail changed; it does not carry the number.
         # Every admin reads this log, and an account number in it is a copy of

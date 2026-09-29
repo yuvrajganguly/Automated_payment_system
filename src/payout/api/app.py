@@ -86,6 +86,9 @@ from payout.api.routes import (
     referrals as referral_routes,
 )
 from payout.api.routes import (
+    rent_due as rent_due_routes,
+)
+from payout.api.routes import (
     requests as requests_routes,
 )
 from payout.api.routes import (
@@ -225,6 +228,9 @@ app.include_router(
 app.include_router(cod_routes.router, prefix="/api/cod", tags=["cod"], dependencies=_NO_RECRUITER)
 app.include_router(
     ev_rent_routes.router, prefix="/api/ev-rent", tags=["ev-rent"], dependencies=_NO_RECRUITER
+)
+app.include_router(
+    rent_due_routes.router, prefix="/api/rent-due", tags=["rent-due"], dependencies=_NO_RECRUITER
 )
 app.include_router(
     payments_routes.router, prefix="/api/payments", tags=["payments"], dependencies=_NO_RECRUITER

@@ -162,6 +162,50 @@ def record_missed_rent(
     )
 
 
+def record_rent_due(
+    conn,
+    person_id,
+    amount,
+    cycle_start,
+    cycle_end,
+    *,
+    rider_id="",
+    company="",
+    created_by="rent-due",
+    days=None,
+    remarks=None,
+):
+    """A present rider nobody pays through us: the week's rent goes straight
+    to EV arrears as RENT_DUE (owed, collectable in cash), never RENT_MISSED,
+    which means absent. Returns the transaction id."""
+    if amount <= 0:
+        return None
+    _ensure_arrears(conn, person_id)
+    conn.execute(
+        "UPDATE ev_arrears SET total_missed = total_missed + ?, "
+        "outstanding = outstanding + ?, last_updated=? WHERE person_id=?",
+        (amount, amount, date.today().isoformat(), person_id),
+    )
+    cur = conn.execute(
+        "INSERT INTO transactions (person_id, rider_id, company, cycle_start, cycle_end, "
+        "event_type, amount, balance_after, days, remarks, created_by) "
+        "VALUES (?,?,?,?,?,'RENT_DUE',?,?,?,?,?)",
+        (
+            person_id,
+            rider_id,
+            company,
+            _iso(cycle_start),
+            _iso(cycle_end),
+            -amount,
+            _gen_balance(conn, person_id),
+            days,
+            remarks or "EV rent due (direct-pay rider; collect in cash)",
+            created_by,
+        ),
+    )
+    return cur.lastrowid
+
+
 def record_recovery(
     conn,
     person_id,

@@ -104,7 +104,7 @@ def cmd_rollback(args) -> None:
             # total_recovered = sum of RENT_RECOVERED amounts.
             missed = conn.execute(
                 "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
-                "WHERE person_id=? AND event_type='RENT_MISSED'",
+                "WHERE person_id=? AND event_type IN ('RENT_MISSED','RENT_DUE')",
                 (pid,),
             ).fetchone()["s"]
             recovered = conn.execute(

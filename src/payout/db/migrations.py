@@ -1128,6 +1128,18 @@ def _0038_provider_rate(conn: Any) -> None:
         )
 
 
+def _0039_rider_payment_model(conn: Any) -> None:
+    """Who pays this rider belongs on the rider id, not only on the company.
+
+    Zomato is about to pay riders two different ways at once: the first
+    programme pays them directly and the second will pay us and have us pay
+    them. One ``companies.payment_model`` cannot say both. ``rider_master
+    .payment_model`` overrides it per id; NULL means "whatever the company
+    says", so nothing changes for anybody until the office sets one.
+    """
+    add_column(conn, "rider_master", "payment_model", "TEXT")
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1170,6 +1182,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0036_ev_id_prefix", _0036_ev_id_prefix),
     ("0037_retire_ev_models", _0037_retire_ev_models),
     ("0038_provider_rate", _0038_provider_rate),
+    ("0039_rider_payment_model", _0039_rider_payment_model),
 ]
 
 _TRACKING_DDL = (

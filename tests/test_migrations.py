@@ -25,6 +25,7 @@ _NEW_COLUMNS = [
     ("cod_holds", "hub_code"),
     ("users", "phone"),
     ("companies", "payment_model"),
+    ("rider_master", "payment_model"),
     ("companies", "per_order_rate"),
     ("companies", "salary_expected_days"),
     ("rider_master", "salary"),
@@ -106,6 +107,11 @@ def test_pre_runner_database_gets_every_migration():
     old_schema = old_schema.replace(
         "    closeout_pending INTEGER NOT NULL DEFAULT 0, "
         "-- 1 = closed, deposit not yet settled (ev_closeouts)\n",
+        "",
+    )
+    old_schema = old_schema.replace(
+        "    payment_model TEXT,                        "
+        "-- overrides companies.payment_model for this id; NULL = company default\n",
         "",
     )
     assert "closeout_pending INTEGER" not in old_schema

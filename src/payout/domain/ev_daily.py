@@ -17,6 +17,8 @@ Rules:
         billed   — RENT event for the assigned rider covers this day (rider
                    present, RENT_COLLECTED ≥ RENT)
         missed   — RENT_MISSED event covers this day (rider absent)
+        due      — RENT_DUE event covers this day (direct-pay rider: booked to
+                   arrears, collected in cash)
         recovered — a 'missed' day that was later paid down by RENT_RECOVERED
                     or XC_RENT_RECOVERED
         pending  — billable day inside a cycle that hasn't been processed

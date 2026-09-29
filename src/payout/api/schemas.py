@@ -196,6 +196,7 @@ class RiderOut(BaseModel):
     is_active: bool = True
     salary: int | None = None  # paise per cycle (salary companies); rupeeized out
     recruited_by: str | None = None  # users.email of who onboarded this rider id
+    payment_model: str | None = None  # overrides the company's for this id; None = company default
     zone: str | None = None  # North | South from the hub, None when unassigned
     # Has a paysheet company paid this rider for a cycle ending in the last 12
     # days (payout/domain/worked.py)? `is_active` above is the roster flag an
@@ -225,6 +226,9 @@ class RiderPatch(BaseModel):
     is_active: bool | None = None
     salary: float | None = None  # rupees per cycle (salary companies)
     recruited_by: str | None = None  # admin only: hand the rider to another recruiter
+    payment_model: str | None = (
+        None  # admin only: payout_file | per_order | salary | direct | "" (clear)  # noqa: E501
+    )
     new_rider_id: str | None = None
     new_company: str | None = None
 

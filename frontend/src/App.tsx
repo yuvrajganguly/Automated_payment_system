@@ -45,6 +45,7 @@ const FieldPage = page(() => import('./pages/FieldPage'), 'FieldPage')
 const CompaniesPage = page(() => import('./pages/CompaniesPage'), 'CompaniesPage')
 const CorrectionsPage = page(() => import('./pages/CorrectionsPage'), 'CorrectionsPage')
 const EvRentPage = page(() => import('./pages/EvRentPage'), 'EvRentPage')
+const RentDuePage = page(() => import('./pages/RentDuePage'), 'RentDuePage')
 const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage')
 const RequestsPage = page(() => import('./pages/RequestsPage'), 'RequestsPage')
 const UsersPage = page(() => import('./pages/UsersPage'), 'UsersPage')
@@ -81,6 +82,7 @@ export default function App() {
             <Route path="/adhoc" element={<ProcessPayoutPage />} />
             <Route path="/corrections" element={<CorrectionsPage />} />
             <Route path="/ev-rent" element={<EvRentPage />} />
+            <Route path="/rent-due" element={<RentDuePage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/requests" element={<RequestsPage />} />
             <Route path="/users" element={<UsersPage />} />

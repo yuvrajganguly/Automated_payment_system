@@ -35,7 +35,7 @@ def _first_evidence(conn, person_id, ev_id):
     ).fetchone()["d"]
     txn = conn.execute(
         "SELECT MIN(cycle_start) AS d FROM transactions WHERE person_id=? "
-        "AND event_type IN ('RENT','RENT_MISSED')",
+        "AND event_type IN ('RENT','RENT_MISSED','RENT_DUE')",
         (person_id,),
     ).fetchone()["d"]
     days = [_parse(x) for x in (led, txn) if x]

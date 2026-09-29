@@ -115,7 +115,7 @@ def money_trends(
             f"FROM transactions t "
             f"WHERE t.cycle_end >= ? "
             f"  AND t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_COLLECTED',"
-            f"      'RENT_MISSED','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CARRY') "
+            f"      'RENT_MISSED','RENT_DUE','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CARRY') "
             f"{co_sql}",
             [since_monday] + co_params,
         ).fetchall()
@@ -144,7 +144,7 @@ def money_trends(
             d["rent_charged"] += -amt
         elif et == "RENT_COLLECTED":
             d["rent_collected"] += amt
-        elif et == "RENT_MISSED":
+        elif et in ("RENT_MISSED", "RENT_DUE"):
             d["rent_missed"] += -amt
         elif et in _RECOVERY_EVENTS:
             d["arrears_recovered"] += amt
@@ -256,7 +256,7 @@ def collection_efficiency(
         four_weeks_ago = (today - timedelta(days=27)).isoformat()
         vel = conn.execute(
             "SELECT "
-            "  SUM(CASE WHEN event_type='RENT_MISSED' THEN -amount ELSE 0 END) AS missed, "
+            "  SUM(CASE WHEN event_type IN ('RENT_MISSED','RENT_DUE') THEN -amount ELSE 0 END) AS missed, "  # noqa: E501
             "  SUM(CASE WHEN event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             "      THEN amount ELSE 0 END) AS recovered "
             "FROM transactions t WHERE date(t.created_at) >= ?",
@@ -509,7 +509,7 @@ def _flow_sums(conn, wf: str, wt: str, cos: list[str]) -> dict:
         " SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released, "
         " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
         " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected, "
-        " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) AS rent_missed, "
+        " SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE') THEN -t.amount ELSE 0 END) AS rent_missed, "  # noqa: E501
         " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
         "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
         " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) AS written_off, "
@@ -655,7 +655,7 @@ def money_story_weeks(
             " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
             " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
             "   AS rent_collected, "
-            " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) AS rent_missed, "
+            " SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE') THEN -t.amount ELSE 0 END) AS rent_missed, "  # noqa: E501
             " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
             " SUM(CASE WHEN t.event_type='DUES_CLEARED' THEN t.amount ELSE 0 END) "
@@ -667,7 +667,7 @@ def money_story_weeks(
             " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) AS written_off "
             "FROM transactions t "
             "WHERE t.company <> '' AND t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_COLLECTED',"
-            "  'RENT_MISSED','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CLEARED','DUES_CARRY',"
+            "  'RENT_MISSED','RENT_DUE','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CLEARED','DUES_CARRY',"  # noqa: E501
             "  'RENT_REVERSAL') "
             f"  AND {_TXN_WINDOW}{co_sql} "
             "GROUP BY t.company, t.cycle_start, t.cycle_end "
@@ -711,7 +711,7 @@ def company_profile(company_name: str, _: dict = Depends(get_current_user)) -> d
             " SUM(CASE WHEN event_type='PAYOUT' THEN amount ELSE 0 END) AS gross_payout, "
             " SUM(CASE WHEN event_type='RELEASE' THEN -amount ELSE 0 END) AS released, "
             " SUM(CASE WHEN event_type='RENT_COLLECTED' THEN amount ELSE 0 END) AS rent_collected, "
-            " SUM(CASE WHEN event_type='RENT_MISSED' THEN -amount ELSE 0 END) AS rent_missed, "
+            " SUM(CASE WHEN event_type IN ('RENT_MISSED','RENT_DUE') THEN -amount ELSE 0 END) AS rent_missed, "  # noqa: E501
             " SUM(CASE WHEN event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             "     THEN amount ELSE 0 END) AS arrears_recovered, "
             " SUM(CASE WHEN event_type='DUES_CLEARED' THEN amount ELSE 0 END) "
@@ -776,7 +776,7 @@ def money_story_by(
                 " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
                 " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
                 "   AS rent_collected, "
-                " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) "
+                " SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE') THEN -t.amount ELSE 0 END) "  # noqa: E501
                 "   AS rent_missed, "
                 " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
                 "     THEN t.amount ELSE 0 END) AS arrears_recovered, "
@@ -840,7 +840,7 @@ def money_story_by(
                 " SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "
                 " SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) "
                 "   AS rent_collected, "
-                " SUM(CASE WHEN t.event_type='RENT_MISSED' THEN -t.amount ELSE 0 END) "
+                " SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE') THEN -t.amount ELSE 0 END) "  # noqa: E501
                 "   AS rent_missed, "
                 " SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
                 "     THEN t.amount ELSE 0 END) AS arrears_recovered, "

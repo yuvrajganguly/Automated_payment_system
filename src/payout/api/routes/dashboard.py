@@ -477,10 +477,10 @@ def dashboard_summary(
             SELECT t.cycle_end,
                    SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED')
                             THEN t.amount ELSE 0 END) AS recovered,
-                   SUM(CASE WHEN t.event_type='RENT_MISSED'
+                   SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')
                             THEN -t.amount ELSE 0 END) AS added
             FROM transactions t
-            WHERE t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED','RENT_MISSED')
+            WHERE t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED','RENT_MISSED','RENT_DUE')
               AND t.cycle_end BETWEEN ? AND ?
               {am_chart_co_filter}
             GROUP BY t.cycle_end ORDER BY t.cycle_end ASC
@@ -1084,7 +1084,7 @@ def dashboard_export(
             f" COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS active_riders, "  # noqa: E501
             f" SUM(CASE WHEN t.event_type='RENT'           THEN -t.amount ELSE 0 END) AS rent_charged, "  # noqa: E501
             f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS rent_collected, "  # noqa: E501
-            f" SUM(CASE WHEN t.event_type='RENT_MISSED'    THEN -t.amount ELSE 0 END) AS rent_missed, "  # noqa: E501
+            f" SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')    THEN -t.amount ELSE 0 END) AS rent_missed, "  # noqa: E501
             f" SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             f"          THEN t.amount ELSE 0 END) AS arrears_recovered, "
             f" SUM(CASE WHEN t.event_type='RELEASE'        THEN -t.amount ELSE 0 END) AS payout, "
@@ -1161,12 +1161,12 @@ def dashboard_export(
                 f"          LIMIT 1) AS ev_id, "
                 f"       SUM(CASE WHEN t.event_type='RENT'         THEN -t.amount ELSE 0 END) AS expected, "  # noqa: E501
                 f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN  t.amount ELSE 0 END) AS collected, "  # noqa: E501
-                f"       SUM(CASE WHEN t.event_type='RENT_MISSED'  THEN -t.amount ELSE 0 END) AS missed, "  # noqa: E501
+                f"       SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')  THEN -t.amount ELSE 0 END) AS missed, "  # noqa: E501
                 f"       SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
                 f"                THEN t.amount ELSE 0 END) AS recovered "
                 f"FROM transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
-                f"WHERE t.event_type IN ('RENT','RENT_COLLECTED','RENT_MISSED', "
+                f"WHERE t.event_type IN ('RENT','RENT_COLLECTED','RENT_MISSED','RENT_DUE', "
                 f"                       'RENT_RECOVERED','XC_RENT_RECOVERED') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
                 f"ORDER BY expected DESC, missed DESC",
@@ -1310,7 +1310,7 @@ def dashboard_export(
                 f"FROM ev_assignments ea "
                 f"JOIN transactions t ON t.person_id=ea.person_id "
                 f"JOIN person_registry pr ON pr.person_id=ea.person_id "
-                f"WHERE ea.returned_date IS NULL AND t.event_type='RENT_MISSED' {scope} "
+                f"WHERE ea.returned_date IS NULL AND t.event_type IN ('RENT_MISSED','RENT_DUE') {scope} "  # noqa: E501
                 f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
                 f"ORDER BY missed DESC",
                 scope_params,
