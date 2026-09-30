@@ -252,7 +252,7 @@ def seed_companies(conn: sqlite3.Connection) -> None:
 
 def seed_pincode_rates(conn: sqlite3.Connection) -> None:
     """The Shadowfax card (a fresh database never replays migration 0040)."""
-    from payout.data import shadowfax_ratecard as card
+    from payout.ratecards import shadowfax as card
 
     if not conn.execute("SELECT 1 FROM companies WHERE company_name='Shadowfax'").fetchone():
         return

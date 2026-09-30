@@ -1150,9 +1150,9 @@ def _0040_shadowfax_pincode_rates(conn: Any) -> None:
     Shadowfax files are cumulative snapshots and would otherwise pay a day
     twice. Only Shadowfax is switched, and only if nobody set a model.
     """
-    from payout.data import shadowfax_ratecard as card
     from payout.db.connection import translate_ddl
     from payout.db.schema import SCHEMA
+    from payout.ratecards import shadowfax as card
 
     add_column(conn, "companies", "rate_model", "TEXT")
     for table in ("company_pincode_rates", "payout_order_days"):
