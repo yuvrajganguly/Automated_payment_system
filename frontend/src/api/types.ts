@@ -21,6 +21,8 @@ export interface Company {
   /** Rupees per order (per_order only). */
   per_order_rate?: number | null
   notes?: string | null
+  /** per_order only: 'pincode_ratecard' = paid off company_pincode_rates (Shadowfax). */
+  rate_model?: string | null
   /** Salary model: expected working days per cycle and incentives (rupees). */
   salary_expected_days?: number
   incentive_per_order?: number

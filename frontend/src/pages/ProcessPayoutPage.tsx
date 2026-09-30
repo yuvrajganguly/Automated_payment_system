@@ -1,3 +1,4 @@
+import { ShadowfaxPanel } from '../components/ShadowfaxPanel'
 import { FormEvent, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { usePersistedState } from '../state/usePersistedState'
@@ -84,6 +85,8 @@ export function ProcessPayoutPage() {
   // fresh file pick.
   const [previewedKey, setPreviewedKey] = useState<RunKey | null>(null)
   const selected = companies.find((c) => c.company_name === company)
+  const [typeCounts, setTypeCounts] = useState(false)
+  const bulkFiles = !adHoc && !typeCounts && selected?.payment_model === 'per_order' && selected?.rate_model === 'pincode_ratecard'
   const perOrder = selected?.payment_model === 'per_order'
   const salaried = selected?.payment_model === 'salary'
   const typed = perOrder || salaried
@@ -269,6 +272,21 @@ export function ProcessPayoutPage() {
         {!adHoc && <span className="text-slate-400"> Companies that pay riders directly are not listed — there is nothing to process for them.</span>}
       </p>
 
+      {bulkFiles && (
+        <>
+          <div className="mb-3 text-sm">
+            <label>Company{' '}
+              <select value={company} onChange={(e) => setCompany(e.target.value)} className="border rounded px-2 py-1">
+                {companies.filter((c) => c.is_active && c.payment_model !== 'direct').map((c) => (
+                  <option key={c.company_name} value={c.company_name}>{c.company_name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ShadowfaxPanel company={company} onTypeCounts={() => setTypeCounts(true)} />
+        </>
+      )}
+      {!bulkFiles && (
       <form onSubmit={(e) => submit(false, e)} className="panel p-6 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
@@ -389,7 +407,13 @@ export function ProcessPayoutPage() {
           )}
         </div>
         {error && <p className="text-red-400 mt-3 text-sm">{error}</p>}
+        {selected?.rate_model === 'pincode_ratecard' && typeCounts && (
+          <button type="button" onClick={() => setTypeCounts(false)} className="mt-3 text-xs underline text-slate-400">
+            drop the Vendor_data files instead
+          </button>
+        )}
       </form>
+      )}
 
       {preview && salaryLines && salaryLines.length > 0 && (
         <div className="panel p-6 mb-6">

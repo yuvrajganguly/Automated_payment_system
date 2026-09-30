@@ -1140,6 +1140,54 @@ def _0039_rider_payment_model(conn: Any) -> None:
     add_column(conn, "rider_master", "payment_model", "TEXT")
 
 
+def _0040_shadowfax_pincode_rates(conn: Any) -> None:
+    """Shadowfax pays by delivery pincode and order type, not a flat rate.
+
+    ``companies.rate_model`` switches a per-order company onto
+    ``company_pincode_rates`` (seeded here from the Kolkata LMA card, the
+    same rows the seed writes on a fresh database). ``payout_order_days``
+    records which (rider, order date) a committed cycle paid, because the
+    Shadowfax files are cumulative snapshots and would otherwise pay a day
+    twice. Only Shadowfax is switched, and only if nobody set a model.
+    """
+    from payout.data import shadowfax_ratecard as card
+    from payout.db.connection import translate_ddl
+    from payout.db.schema import SCHEMA
+
+    add_column(conn, "companies", "rate_model", "TEXT")
+    for table in ("company_pincode_rates", "payout_order_days"):
+        start = SCHEMA.index(f"CREATE TABLE IF NOT EXISTS {table}")
+        ddl = SCHEMA[start : SCHEMA.index(");", start) + 2]
+        conn.execute(translate_ddl(ddl) if DB_URL else ddl)
+    if not conn.execute("SELECT 1 FROM companies WHERE company_name='Shadowfax'").fetchone():
+        return
+    conn.execute(
+        "UPDATE companies SET rate_model='pincode_ratecard' "
+        "WHERE company_name='Shadowfax' AND rate_model IS NULL"
+    )
+    have = conn.execute(
+        "SELECT COUNT(*) AS n FROM company_pincode_rates WHERE company='Shadowfax'"
+    ).fetchone()["n"]
+    if not have:
+        for r in card.rows():
+            conn.execute(
+                "INSERT INTO company_pincode_rates (company, pincode, cluster, rvp, cod, ppd, "
+                "sdd, club, effective_from, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "Shadowfax",
+                    r["pincode"],
+                    r["cluster"],
+                    r["rvp"],
+                    r["cod"],
+                    r["ppd"],
+                    r["sdd"],
+                    r["club"],
+                    card.EFFECTIVE_FROM,
+                    "migration 0040",
+                ),
+            )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1183,6 +1231,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0037_retire_ev_models", _0037_retire_ev_models),
     ("0038_provider_rate", _0038_provider_rate),
     ("0039_rider_payment_model", _0039_rider_payment_model),
+    ("0040_shadowfax_pincode_rates", _0040_shadowfax_pincode_rates),
 ]
 
 _TRACKING_DDL = (

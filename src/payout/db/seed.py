@@ -154,8 +154,9 @@ COMPANIES: list[dict] = [
         "is_active": 1,
         "payment_model": "per_order",
         "per_order_rate": 1500,
-        "notes": "No payout file. Order counts come from the Shadowfax dashboard; "
-        "₹15 per order paid by us.",
+        "rate_model": "pincode_ratecard",
+        "notes": "No payout file. Daily Vendor_data downloads, paid by the pincode "
+        "ratecard (Admin → Companies); the per-order rate where a pincode has no rate.",
     },
     {
         "company_name": "Elastic",
@@ -236,15 +237,43 @@ def seed_companies(conn: sqlite3.Connection) -> None:
              payout_column, orders_column, has_hold_sheet, hold_style,
              hold_sheet, hold_key_column, hold_amount_column,
              hold_status_column, is_active, rider_ids_shared_with,
-             payment_model, cadence, per_order_rate, notes)
+             payment_model, cadence, per_order_rate, notes, rate_model)
         VALUES
             (:company_name, :parser_type, :payout_sheet, :rider_id_column,
              :payout_column, :orders_column, :has_hold_sheet, :hold_style,
              :hold_sheet, :hold_key_column, :hold_amount_column,
              :hold_status_column, :is_active, :rider_ids_shared_with,
-             :payment_model, :cadence, :per_order_rate, :notes)
+             :payment_model, :cadence, :per_order_rate, :notes, :rate_model)
         """,
-        [{**_COMPANY_DEFAULTS, **c} for c in COMPANIES],
+        [{**_COMPANY_DEFAULTS, "rate_model": None, **c} for c in COMPANIES],
+    )
+    seed_pincode_rates(conn)
+
+
+def seed_pincode_rates(conn: sqlite3.Connection) -> None:
+    """The Shadowfax card (a fresh database never replays migration 0040)."""
+    from payout.data import shadowfax_ratecard as card
+
+    if not conn.execute("SELECT 1 FROM companies WHERE company_name='Shadowfax'").fetchone():
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO company_pincode_rates (company, pincode, cluster, rvp, cod, ppd, "
+        "sdd, club, effective_from, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                "Shadowfax",
+                r["pincode"],
+                r["cluster"],
+                r["rvp"],
+                r["cod"],
+                r["ppd"],
+                r["sdd"],
+                r["club"],
+                card.EFFECTIVE_FROM,
+                "seed",
+            )
+            for r in card.rows()
+        ],
     )
 
 

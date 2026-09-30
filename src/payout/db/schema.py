@@ -404,7 +404,44 @@ CREATE TABLE IF NOT EXISTS companies (
     -- salary / expected_days off) and the incentives added on top.
     salary_expected_days INTEGER NOT NULL DEFAULT 26,
     incentive_per_order  INTEGER NOT NULL DEFAULT 0,  -- paise per order delivered
-    incentive_per_day    INTEGER NOT NULL DEFAULT 0   -- paise per day present
+    incentive_per_day    INTEGER NOT NULL DEFAULT 0,  -- paise per day present
+    rate_model         TEXT                -- per_order only: NULL = flat per_order_rate; 'pincode_ratecard' = company_pincode_rates
+);
+
+-- ── per-order pay by pincode (Shadowfax) ────────────────────────────────────
+-- What we pay a rider per order of each type, by delivery pincode. Rows with
+-- a later effective_from supersede earlier ones from that date on, so a new
+-- card never rewrites what an old cycle was paid at. Money in paise.
+CREATE TABLE IF NOT EXISTS company_pincode_rates (
+    company        TEXT NOT NULL REFERENCES companies(company_name),
+    pincode        TEXT NOT NULL,
+    cluster        TEXT,
+    rvp            INTEGER NOT NULL,
+    cod            INTEGER NOT NULL,
+    ppd            INTEGER NOT NULL,
+    sdd            INTEGER NOT NULL,
+    club           INTEGER NOT NULL,
+    effective_from TEXT NOT NULL,
+    updated_at     TEXT DEFAULT (datetime('now')),
+    updated_by     TEXT,
+    PRIMARY KEY (company, pincode, effective_from)
+);
+
+-- ── order days already paid (multi-file per-order cycles) ───────────────────
+-- A client that sends cumulative daily snapshots repeats every earlier day of
+-- the month in each file. A committed cycle records the (rider, order_date)
+-- pairs it paid, with what it paid, so a later upload leaves them out and a
+-- revision after payment is reported rather than paid twice.
+CREATE TABLE IF NOT EXISTS payout_order_days (
+    company     TEXT NOT NULL,
+    rider_id    TEXT NOT NULL,
+    order_date  TEXT NOT NULL,
+    orders      INTEGER NOT NULL DEFAULT 0,
+    gross       INTEGER NOT NULL DEFAULT 0,           -- paise paid for the day
+    cycle_start TEXT NOT NULL,
+    cycle_end   TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (company, rider_id, order_date)
 );
 
 -- ── salary_inputs ───────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from payout.api.auth import get_current_user, require_admin
 from payout.api.routes.hubs import HubIn, upsert_hub
@@ -36,7 +36,7 @@ _COLS = (
     "orders_column, has_hold_sheet, hold_style, hold_sheet, hold_key_column, "
     "hold_amount_column, hold_status_column, is_active, rider_ids_shared_with, "
     "payment_model, cadence, per_order_rate, notes, "
-    "salary_expected_days, incentive_per_order, incentive_per_day"
+    "salary_expected_days, incentive_per_order, incentive_per_day, rate_model"
 )
 _EDITABLE = (
     "payment_model",
@@ -58,6 +58,7 @@ _EDITABLE = (
     "salary_expected_days",
     "incentive_per_order",
     "incentive_per_day",
+    "rate_model",
 )
 
 
@@ -78,6 +79,7 @@ def _out(
         cadence=r["cadence"] or "weekly",
         per_order_rate=r["per_order_rate"],
         notes=r["notes"],
+        rate_model=r["rate_model"] if "rate_model" in r.keys() else None,  # noqa: SIM118
         salary_expected_days=int(r["salary_expected_days"] or 26),
         incentive_per_order=int(r["incentive_per_order"] or 0),
         incentive_per_day=int(r["incentive_per_day"] or 0),
@@ -174,7 +176,8 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
                 "as they appear in their file.",
             )
         parser_type = (body.parser_type or name.lower().replace(" ", "_").replace("'", "")).strip()
-        rider_col, payout_col = body.rider_id_column.strip(), body.payout_column.strip()
+        rider_col = (body.rider_id_column or "").strip()
+        payout_col = (body.payout_column or "").strip()
     else:
         parser_type = {"per_order": "orders", "salary": "salary"}.get(model, "none")
         rider_col, payout_col = "rider_id", "payout"
@@ -194,7 +197,7 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
         ):
             raise HTTPException(400, f"rider_ids_shared_with: unknown company '{shared}'")
         conn.execute(
-            f"INSERT INTO companies ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO companies ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 name,
                 parser_type,
@@ -217,6 +220,7 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
                 exp_days,
                 inc_order,
                 inc_day,
+                (body.rate_model or None) if model == "per_order" else None,
             ),
         )
         # Stores given with the company are created now, zone included.
@@ -273,6 +277,10 @@ def update_company(
                 after[k] = v
         model = after["payment_model"] or "payout_file"
         _validate(model, after["cadence"] or "weekly", after["per_order_rate"])
+        if after.get("rate_model") not in (None, "pincode_ratecard"):
+            raise HTTPException(400, "rate_model must be 'pincode_ratecard' or blank")
+        if model != "per_order":
+            after["rate_model"] = None
         if after["parser_type"] == "house":
             # our own layout: the column names are fixed by the parser
             after["rider_id_column"] = after["rider_id_column"] or "person_id"
@@ -356,3 +364,146 @@ def get_next_cycle(company_name: str, _: dict = Depends(get_current_user)) -> di
         "cycle_start": start.isoformat(),
         "cycle_end": end.isoformat(),
     }
+
+
+# ── pincode ratecard (per-order companies with rate_model='pincode_ratecard') ──
+
+_RATE_COLS = ("pincode", "rvp", "cod", "ppd", "sdd", "club")
+
+
+def _current_card(conn, company: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT r.pincode, r.cluster, r.rvp, r.cod, r.ppd, r.sdd, r.club, r.effective_from, "
+        "       r.updated_at, r.updated_by "
+        "FROM company_pincode_rates r "
+        "JOIN (SELECT pincode, MAX(effective_from) AS ef FROM company_pincode_rates "
+        "      WHERE company=? GROUP BY pincode) m ON m.pincode=r.pincode AND m.ef=r.effective_from "  # noqa: E501
+        "WHERE r.company=? ORDER BY r.cluster, r.pincode",
+        (company, company),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/{company_name}/ratecard")
+def get_ratecard(company_name: str, user: dict = Depends(require_admin)) -> dict:
+    with get_connection() as conn:
+        rows = _current_card(conn, company_name)
+    return {"company": company_name, "rates": rows, "pincodes": len(rows)}
+
+
+@router.post("/{company_name}/ratecard")
+async def upload_ratecard(
+    company_name: str,
+    file: UploadFile = File(...),
+    effective_from: str = Form(...),
+    commit: bool = Form(False),
+    user: dict = Depends(require_admin),
+) -> dict:
+    """Replace the card from a CSV/XLSX with cluster, pincode, RVP, COD, PPD,
+    SDD, Club (rupees). Rows go in *as of* ``effective_from``: order dates from
+    then on are paid at them, earlier ones keep the old card. ``commit=false``
+    previews what would change."""
+    import io
+
+    import pandas as pd
+
+    try:
+        eff = date.fromisoformat(effective_from).isoformat()
+    except ValueError as exc:
+        raise HTTPException(400, "effective_from must be YYYY-MM-DD") from exc
+    raw = await file.read()
+    try:
+        df = (
+            pd.read_csv(io.BytesIO(raw))
+            if (file.filename or "").lower().endswith(".csv")
+            else pd.read_excel(io.BytesIO(raw))
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read the file: {exc}") from exc
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    missing = [c for c in _RATE_COLS if c not in cols]
+    if missing:
+        raise HTTPException(400, "Missing column(s): " + ", ".join(missing))
+    new: dict[str, dict] = {}
+    bad = []
+    for i, r in df.iterrows():
+        pin = str(r[cols["pincode"]]).strip().removesuffix(".0")
+        if not pin or pin.lower() == "nan":
+            continue
+        try:
+            rec = {k: to_paise(r[cols[k]]) for k in ("rvp", "cod", "ppd", "sdd", "club")}
+        except (TypeError, ValueError):
+            bad.append(f"row {int(i) + 2} ({pin})")
+            continue
+        if any(v < 0 for v in rec.values()):
+            bad.append(f"row {int(i) + 2} ({pin}): negative rate")
+            continue
+        cl = str(r[cols["cluster"]]).strip() if "cluster" in cols else ""
+        new[pin] = {"pincode": pin, "cluster": "" if cl.lower() == "nan" else cl, **rec}
+    if bad:
+        raise HTTPException(400, "Unreadable rates: " + "; ".join(bad[:10]))
+    if not new:
+        raise HTTPException(400, "No rates in the file")
+    with get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM companies WHERE company_name=?", (company_name,)
+        ).fetchone():
+            raise HTTPException(404, f"Company '{company_name}' not found")
+        old = {r["pincode"]: r for r in _current_card(conn, company_name)}
+        changed = [
+            {
+                "pincode": p,
+                "before": {k: old[p][k] for k in ("rvp", "cod", "ppd", "sdd", "club")},
+                "after": {k: v[k] for k in ("rvp", "cod", "ppd", "sdd", "club")},
+            }
+            for p, v in new.items()
+            if p in old and any(old[p][k] != v[k] for k in ("rvp", "cod", "ppd", "sdd", "club"))
+        ]
+        added = sorted(p for p in new if p not in old)
+        summary: dict = {
+            "effective_from": eff,
+            "pincodes": len(new),
+            "added": added,
+            "removed": sorted(p for p in old if p not in new),
+            "changed_count": len(changed),
+            "changed": changed[:50],
+            "committed": False,
+        }
+        if not commit:
+            return summary
+        conn.execute(
+            "DELETE FROM company_pincode_rates WHERE company=? AND effective_from=?",
+            (company_name, eff),
+        )
+        for v in new.values():
+            conn.execute(
+                "INSERT INTO company_pincode_rates (company, pincode, cluster, rvp, cod, ppd, sdd, "
+                "club, effective_from, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    company_name,
+                    v["pincode"],
+                    v["cluster"],
+                    v["rvp"],
+                    v["cod"],
+                    v["ppd"],
+                    v["sdd"],
+                    v["club"],
+                    eff,
+                    user["email"],
+                ),
+            )
+        record_activity(
+            conn,
+            user,
+            "company.ratecard",
+            entity_type="company",
+            entity_id=company_name,
+            label=f"Pincode ratecard from {eff}: {len(new)} pincodes "
+            f"({len(added)} new, {len(changed)} changed)",
+            details={
+                k: summary[k]
+                for k in ("effective_from", "pincodes", "added", "removed", "changed_count")
+            },
+        )
+        conn.commit()
+    return {**summary, "committed": True}

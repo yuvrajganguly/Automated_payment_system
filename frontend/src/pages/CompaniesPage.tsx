@@ -407,6 +407,7 @@ function Th({ children }: { children?: React.ReactNode }) {
 interface Draft {
   payment_model: Model
   house_sheet: boolean
+  pincode_rates: boolean
   cadence: Cadence
   per_order_rate: string
   salary_expected_days: string
@@ -425,14 +426,15 @@ interface Draft {
   hold_status_column: string
 }
 const blank: Draft = {
-  payment_model: 'direct', house_sheet: false, cadence: 'weekly', per_order_rate: '',
+  payment_model: 'direct', house_sheet: false, pincode_rates: false, cadence: 'weekly', per_order_rate: '',
   salary_expected_days: '26', incentive_per_order: '', incentive_per_day: '', notes: '',
   rider_ids_shared_with: '', payout_sheet: '', rider_id_column: '', payout_column: '',
   orders_column: '', hold_style: '', hold_sheet: '', hold_key_column: '', hold_amount_column: '',
   hold_status_column: '',
 }
 const fromCompany = (c: Company): Draft => ({
-  payment_model: modelOf(c), house_sheet: c.parser_type === 'house', cadence: cadenceOf(c),
+  payment_model: modelOf(c), house_sheet: c.parser_type === 'house',
+  pincode_rates: c.rate_model === 'pincode_ratecard', cadence: cadenceOf(c),
   per_order_rate: c.per_order_rate != null ? String(c.per_order_rate) : '',
   salary_expected_days: String(c.salary_expected_days ?? 26),
   incentive_per_order: c.incentive_per_order ? String(c.incentive_per_order) : '',
@@ -449,6 +451,7 @@ const toBody = (d: Draft) => ({
   // 'house' = our own Person ID · Gross · Rent · Net sheet; anything else keeps
   // whatever parser_type the row already has (the server fills a default).
   ...(d.payment_model === 'payout_file' ? { parser_type: d.house_sheet ? 'house' : undefined } : {}),
+  rate_model: d.payment_model === 'per_order' && d.pincode_rates ? 'pincode_ratecard' : null,
   cadence: d.cadence,
   per_order_rate: d.payment_model === 'per_order' && d.per_order_rate !== '' ? Number(d.per_order_rate) : null,
   salary_expected_days: d.salary_expected_days !== '' ? Number(d.salary_expected_days) : 26,
@@ -502,10 +505,19 @@ function DraftFields({ d, set, companies, self }: {
           </select>
         </Field>
         {d.payment_model === 'per_order' ? (
-          <Field label="Rate per order (₹)" hint="Payout = orders × rate; rent is deducted as usual.">
-            <input type="number" min={0} step="0.5" value={d.per_order_rate}
-                   onChange={(e) => set({ per_order_rate: e.target.value })} className={input} required />
-          </Field>
+          <>
+            <Field label="How is an order priced?"
+                   hint="The pincode ratecard pays each order type at its delivery pincode's rate (Shadowfax); the flat rate below then covers pincodes the card lacks.">
+              <select value={d.pincode_rates ? 'card' : 'flat'} onChange={(e) => set({ pincode_rates: e.target.value === 'card' })} className={input}>
+                <option value="flat">Flat rate per order</option>
+                <option value="card">Pincode ratecard (Vendor_data files)</option>
+              </select>
+            </Field>
+            <Field label={d.pincode_rates ? 'Fallback rate per order (₹)' : 'Rate per order (₹)'} hint="Payout = orders × rate; rent is deducted as usual.">
+              <input type="number" min={0} step="0.5" value={d.per_order_rate}
+                     onChange={(e) => set({ per_order_rate: e.target.value })} className={input} required />
+            </Field>
+          </>
         ) : (
           <Field label="Reuses rider ids of" hint="e.g. Nykaa pays Kaptan riders under their Kaptan ids.">
             <select value={d.rider_ids_shared_with} onChange={(e) => set({ rider_ids_shared_with: e.target.value })} className={input}>
@@ -706,6 +718,7 @@ function EditCompanyForm({ company, companies, onSaved }: {
   return (
     <form onSubmit={(e) => void save(e)}>
       <DraftFields d={d} set={set} companies={companies} self={company.company_name} />
+      {company.rate_model === 'pincode_ratecard' && <RatecardCard company={company.company_name} />}
       <div className="flex flex-wrap items-center gap-3 mt-4">
         <button type="submit" disabled={!!busy}
                 className="bg-brand hover:bg-brand-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50">
@@ -718,5 +731,64 @@ function EditCompanyForm({ company, companies, onSaved }: {
         {error && <span className="text-sm text-red-400">{error}</span>}
       </div>
     </form>
+  )
+}
+
+
+/** The pincode ratecard: see what is in force, upload a replacement as of a
+ *  date (preview first). Earlier order dates keep the card they were paid at. */
+function RatecardCard({ company }: { company: string }) {
+  type Rate = { pincode: string; cluster: string; ppd: number; cod: number; rvp: number; sdd: number; club: number; effective_from: string }
+  type Preview = { effective_from: string; pincodes: number; added: string[]; removed: string[]; changed_count: number; committed: boolean }
+  const [rates, setRates] = useState<Rate[] | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [eff, setEff] = useState('')
+  const [pv, setPv] = useState<Preview | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    try { setRates((await api.get<{ rates: Rate[] }>(`/companies/${encodeURIComponent(company)}/ratecard`)).rates) }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Failed') }
+  }
+  async function send(commit: boolean) {
+    if (!file || !eff) return
+    setBusy(true); setMsg(null)
+    try {
+      const fd = new FormData(); fd.append('file', file); fd.append('effective_from', eff); fd.append('commit', commit ? 'true' : 'false')
+      const r = await api.postForm<Preview>(`/companies/${encodeURIComponent(company)}/ratecard`, fd)
+      setPv(r)
+      if (commit) { setMsg(`Saved: ${r.pincodes} pincodes from ${r.effective_from}.`); setFile(null); setPv(null); void load() }
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-4 border-t border-edge-soft pt-3">
+      <div className="text-xs font-semibold text-slate-600 mb-2">Pincode ratecard</div>
+      {rates === null
+        ? <button type="button" onClick={() => void load()} className="text-xs underline">Show the card in force</button>
+        : (
+          <div className="max-h-56 overflow-auto text-xs mb-2">
+            <table className="w-full">
+              <thead><tr className="text-left text-slate-500"><th>Cluster</th><th>Pincode</th><th>PPD</th><th>COD</th><th>RVP</th><th>SDD</th><th>Club</th><th>From</th></tr></thead>
+              <tbody>{rates.map((r) => (
+                <tr key={r.pincode}><td>{r.cluster}</td><td>{r.pincode}</td><td>{r.ppd}</td><td>{r.cod}</td><td>{r.rvp}</td><td>{r.sdd}</td><td>{r.club}</td><td>{r.effective_from}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      <div className="flex flex-wrap gap-2 items-end text-xs mt-2">
+        <input type="file" accept=".csv,.xlsx" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setPv(null) }} />
+        <label>In force from <input type="date" value={eff} onChange={(e) => { setEff(e.target.value); setPv(null) }} className="border rounded px-2 py-1" /></label>
+        <button type="button" disabled={busy || !file || !eff} onClick={() => void send(false)} className="border px-2 py-1 rounded disabled:opacity-50">Preview</button>
+        <button type="button" disabled={busy || !pv} onClick={() => void send(true)} className="border px-2 py-1 rounded disabled:opacity-50">Replace the card</button>
+      </div>
+      <p className="text-xs text-slate-500 mt-1">Columns: cluster, pincode, RVP, COD, PPD, SDD, Club (₹ per order).</p>
+      {pv && !pv.committed && (
+        <p className="text-xs mt-1">{pv.pincodes} pincodes · {pv.added.length} new · {pv.changed_count} changed · {pv.removed.length} not in the file (they keep their old rate)</p>
+      )}
+      {msg && <p className="text-xs mt-1">{msg}</p>}
+    </div>
   )
 }

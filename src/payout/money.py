@@ -67,6 +67,22 @@ def split_evenly(total_paise: int, n: int) -> list[int]:
 MONEY_KEYS = frozenset(
     {
         "amount",
+        # Shadowfax per-order pricing (domain/shadowfax.py)
+        "sfx_payout",
+        "rider_pay",
+        "ztp_penalty",
+        "penalty",
+        "revised_pay",
+        "paid_gross",
+        "rate_ppd",
+        "rate_cod",
+        "rate_rvp",
+        "rate_sdd",
+        "rate_club",
+        "rvp",
+        "ppd",
+        "sdd",
+        "club",
         "applied_amount",
         "balance",
         "balance_after",

@@ -551,6 +551,7 @@ def process_cycle(
     parsed=None,
     ad_hoc=False,
     label=None,
+    before_commit=None,
 ) -> CycleResult:
     """Run one company cycle. Input is either ``file_bytes`` (the company's
     payout file, read through its parser config) or a ready ``ParseResult``
@@ -1525,6 +1526,10 @@ def process_cycle(
         # it: an ad-hoc run reported success and wrote nothing. Whether the
         # transaction lands is a decision about `commit`, and nothing else.
         if commit:
+            # A caller's own bookkeeping for this cycle (Shadowfax records the
+            # order days it paid) lands in the same transaction or not at all.
+            if before_commit is not None:
+                before_commit(conn)
             conn.commit()
         else:
             conn.rollback()

@@ -282,17 +282,62 @@ _SHEET_NAME_ALIASES = ("name", "rider name", "rider_name")
 @router.post("/parse-sheet")
 async def parse_attendance_sheet(
     company: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
     _: dict = Depends(require_admin),
 ) -> dict:
     """Read an attendance / orders sheet the office keeps (xlsx or csv) into
     rows the Process Payout table can take: {rider_id, name, days_present,
     orders}. Column headers are matched loosely; unmatched rider ids are
-    reported so the operator can fix the sheet rather than lose rows."""
+    reported so the operator can fix the sheet rather than lose rows.
+
+    For a company on the pincode ratecard (Shadowfax) it takes ``files`` — the
+    daily Vendor_data downloads — and answers what they hold: each file's
+    date and rows, which file each order date came from, and the cycle dates
+    to suggest (earliest..latest order date, after the last committed cycle).
+    """
     import pandas as pd
 
     from payout.parsers.base import match_column
 
+    uploads = [f for f in (files or []) if f is not None] + ([file] if file is not None else [])
+    with get_connection() as conn:
+        co = conn.execute(
+            "SELECT rate_model FROM companies WHERE company_name=?", (company,)
+        ).fetchone()
+        last = conn.execute(
+            "SELECT MAX(cycle_end) AS e FROM company_cycles WHERE company=?", (company,)
+        ).fetchone()
+    if co and co["rate_model"] == "pincode_ratecard":
+        from payout.domain import shadowfax
+
+        if not uploads:
+            raise HTTPException(400, "No files")
+        try:
+            batch = shadowfax.read_files(
+                [(u.filename or "file.xlsx", await u.read()) for u in uploads]
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        start, end = shadowfax.suggest_cycle(
+            batch, str(last["e"])[:10] if last and last["e"] else None
+        )
+        return {
+            "kind": "shadowfax",
+            "files": [f.__dict__ for f in batch.files],
+            "order_dates": sorted(
+                ({"order_date": od, "source_file": src} for od, src in batch.date_source.items()),
+                key=lambda x: x["order_date"],
+            ),
+            "riders_count": len({k[0] for k in batch.rows}),
+            "ztp_count": len(batch.ztp),
+            "suggested_cycle_start": start,
+            "suggested_cycle_end": end,
+            "last_cycle_end": str(last["e"])[:10] if last and last["e"] else None,
+        }
+    if not uploads:
+        raise HTTPException(400, "No file")
+    file = uploads[0]
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Empty file")
@@ -365,9 +410,17 @@ async def run_cycle(
     orders: str | None = Form(None),
     attendance: str | None = Form(None),
     file: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
+    ztp_apply: str | None = Form(None),
     user: dict = Depends(require_admin),
 ) -> dict:
     """Process a company cycle.
+
+    A per-order company on the pincode ratecard (Shadowfax) sends ``files`` —
+    every daily Vendor_data download for the cycle, in one go — instead of
+    typed counts; see domain/shadowfax.py. ``ztp_apply`` is a JSON list of
+    rider ids whose Shadowfax ZTP penalties should be passed on (off unless
+    listed).
 
     Payout-file companies send `file` (their .xlsx). Per-order companies send
     `orders` instead — a JSON list of {"rider_id", "orders"} typed off the
@@ -417,7 +470,8 @@ async def run_cycle(
     with get_connection() as conn:
         co = conn.execute(
             "SELECT payment_model, per_order_rate, is_active, salary_expected_days, "
-            " incentive_per_order, incentive_per_day, parser_type FROM companies WHERE company_name=?",  # noqa: E501
+            " incentive_per_order, incentive_per_day, parser_type, rate_model "
+            "FROM companies WHERE company_name=?",
             (company,),
         ).fetchone()
         if not co or not co["is_active"]:
@@ -435,7 +489,35 @@ async def run_cycle(
             f"{company} pays its riders directly — there is no payout to process. "
             "Change how it pays under Admin → Companies if that is wrong.",
         )
-    if model == "per_order":
+    sfx = None
+    if model == "per_order" and co["rate_model"] == "pincode_ratecard" and not orders:
+        from payout.domain import shadowfax
+
+        uploads = [f for f in (files or []) if f is not None] + ([file] if file is not None else [])
+        if not uploads:
+            raise HTTPException(
+                400,
+                f"{company} is paid per order — drop the Vendor_data files for this cycle, "
+                "or enter the order counts.",
+            )
+        blobs = [(u.filename or "file.xlsx", await u.read()) for u in uploads]
+        try:
+            batch = shadowfax.read_files(blobs)
+            with get_connection() as conn:
+                sfx = shadowfax.price(
+                    conn, company, batch, cycle_start, cycle_end, fallback_rate=co["per_order_rate"]
+                )
+            sfx._files = batch.files  # type: ignore[attr-defined]  # for the preview
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not sfx.records:
+            raise HTTPException(
+                400,
+                "No orders to pay in these files for this cycle"
+                + (" — every day in it was already paid." if sfx.already_paid else "."),
+            )
+        parsed = shadowfax.to_parse_result(company, sfx)
+    elif model == "per_order":
         with get_connection() as conn:
             parsed = _orders_to_parse_result(conn, company, orders, co["per_order_rate"])
     elif model == "salary":
@@ -448,6 +530,8 @@ async def run_cycle(
             raise HTTPException(status_code=400, detail="Empty file upload")
 
     cycle_overrides = _parse_overrides(overrides)
+    if sfx is not None:
+        _shadowfax_overrides(company, sfx, cycle_overrides, ztp_apply)
     try:
         result = process_cycle(
             company=company,
@@ -461,6 +545,11 @@ async def run_cycle(
             force=force,
             ad_hoc=ad_hoc,
             label=label,
+            before_commit=(
+                (lambda c: _record_days(c, company, cycle_start, cycle_end, sfx))
+                if sfx is not None
+                else None
+            ),
         )
     except CycleAlreadyCommitted as exc:
         # Guard lives in the engine's transaction now (was a racy pre-check here).
@@ -484,16 +573,224 @@ async def run_cycle(
         except ValueError:
             pass  # the engine already reported the parse failure
 
+    if sfx is not None:
+        _shadowfax_after_run(company, cycle_start, cycle_end, sfx, result, commit)
+
     response: dict = {"result": _serialize(result)}
+    if sfx is not None:
+        response["shadowfax"] = _shadowfax_payload(sfx, result)
     if salary_lines:
         response["salary_lines"] = salary_lines
         if commit and result.committed:
             _record_salary_inputs(company, cycle_start, cycle_end, salary_lines, user)
     if commit:
         buf = build_output(result)
+        if sfx is not None:
+            buf = _shadowfax_sheets(buf, sfx)
         response["xlsx"] = {
             "filename": build_output_filename(company, cycle_start, cycle_end),
             "content_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
             "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         }
     return response
+
+
+# ── Shadowfax (per-order on the pincode ratecard) ───────────────────────────
+
+
+def _shadowfax_overrides(company, sfx, ov, ztp_apply: str | None) -> None:
+    """Riders with no bank account are held (their net stays a balance, not
+    released) unless the operator forced a release; ZTP penalties listed in
+    ``ztp_apply`` become ADJUSTMENT rows with the AWBs in the reason."""
+    from payout.domain.engine import RiderOverride
+
+    with get_connection() as conn:
+        rids = [r.rider_id for r in sfx.records]
+        if rids:
+            marks = ",".join("?" * len(rids))
+            for r in conn.execute(
+                f"SELECT rider_id FROM rider_master WHERE company=? AND rider_id IN ({marks}) "
+                "AND COALESCE(TRIM(account_no), '') = ''",
+                (company, *rids),
+            ).fetchall():
+                cur = ov.per_rider.get(r["rider_id"]) or RiderOverride()
+                if not cur.force_release:
+                    cur.force_hold = True
+                ov.per_rider[r["rider_id"]] = cur
+                for x in sfx.riders:
+                    if x["rider_id"] == r["rider_id"]:
+                        x["bank"] = "missing — held"
+    try:
+        chosen = set(json.loads(ztp_apply)) if ztp_apply else set()
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "ztp_apply must be a JSON list of rider ids") from exc
+    for rid in chosen:
+        rows = [z for z in sfx.ztp if z["rider_id"] == str(rid)]
+        total = sum(z["penalty"] for z in rows)
+        if total > 0:
+            ov.adjustments.append(
+                {
+                    "rider_id": str(rid),
+                    "amount": -total,
+                    "reason": "Shadowfax ZTP penalty — AWB "
+                    + ", ".join(z["awb_number"] for z in rows),
+                }
+            )
+
+
+def _record_days(conn, company, cycle_start, cycle_end, sfx) -> None:
+    from payout.domain import shadowfax
+
+    shadowfax.record_paid_days(conn, company, cycle_start, cycle_end, sfx.day_rows)
+
+
+def _shadowfax_after_run(company, cycle_start, cycle_end, sfx, result, commit: bool) -> None:
+    """Map Shadowfax hubs onto ours for the onboarding list and the preview —
+    display only; rider_master.hub is never written from the file."""
+    from payout.domain import shadowfax
+
+    with get_connection() as conn:
+        ours = {
+            shadowfax.norm_hub(r["hub"]): r["hub"]
+            for r in conn.execute(
+                "SELECT DISTINCT hub FROM rider_master WHERE company=? AND hub IS NOT NULL",
+                (company,),
+            ).fetchall()
+        }
+        by_rid = {r["rider_id"]: r for r in sfx.riders}
+        for u in result.unknown_riders:
+            src = by_rid.get(str(u.get("rider_id")))
+            if src:
+                u["hub"] = ours.get(shadowfax.norm_hub(src["file_hub"]), "") or u.get("hub", "")
+                u["gross"] = src["gross"]
+                u["orders"] = src["orders"]
+        for x in sfx.riders:
+            x["hub"] = ours.get(shadowfax.norm_hub(x["file_hub"]), "")
+            x.setdefault("bank", "ok")
+
+
+def _shadowfax_payload(sfx, result) -> dict:
+    rows = {r.rider_id: r for r in result.pay_rows + result.dues_rows}
+    riders = []
+    for x in sfx.riders:
+        r = rows.get(x["rider_id"])
+        riders.append(
+            {
+                **x,
+                "rent": getattr(r, "rent", 0) if r else 0,
+                "released": getattr(r, "released", 0) if r else 0,
+                "known": r is not None,
+            }
+        )
+    return {
+        "files": [f.__dict__ for f in sorted(sfx_files(sfx), key=lambda f: f.file_date)],
+        "order_dates": sfx.order_dates,
+        "riders": riders,
+        "already_paid": sfx.already_paid,
+        "revised_after_payment": sfx.revised,
+        "ztp": sfx.ztp,
+        "totals": sfx.totals,
+        "ratecard_used": sfx.ratecard_used,
+    }
+
+
+def sfx_files(sfx):
+    return getattr(sfx, "_files", [])
+
+
+def _shadowfax_sheets(buf, sfx):
+    """Two sheets on the standard workbook: every rider × day × pincode line
+    with the rates used, and the part of the ratecard that was used."""
+    import io as _io
+
+    from openpyxl import load_workbook
+
+    from payout.exports import add_styled_sheet
+
+    wb = load_workbook(buf)
+    add_styled_sheet(
+        wb,
+        sheet_name="Shadowfax detail",
+        headers=(
+            "Rider ID",
+            "Name",
+            "Order date",
+            "Pincode",
+            "Cluster",
+            "PPD",
+            "COD",
+            "RVP",
+            "SDD",
+            "Club",
+            "FM",
+            "RTS",
+            "Orders",
+            "PPD rate",
+            "COD rate",
+            "RVP rate",
+            "SDD rate",
+            "Club rate",
+            "Rider pay",
+            "Shadowfax payout",
+            "Margin",
+            "Flags",
+            "From file",
+        ),
+        rows=[
+            (
+                d["rider_id"],
+                d["name"],
+                d["order_date"],
+                d["pincode"],
+                d["cluster"],
+                d["ppd_orders"],
+                d["cod_orders"],
+                d["rvp_orders"],
+                d["sdd_orders"],
+                d["club_orders"],
+                d["fm_orders"],
+                d["rts_orders"],
+                d["orders"],
+                d["rate_ppd"],
+                d["rate_cod"],
+                d["rate_rvp"],
+                d["rate_sdd"],
+                d["rate_club"],
+                d["rider_pay"],
+                d["sfx_payout"],
+                d["margin"],
+                "; ".join(d["flags"]),
+                d["source_file"],
+            )
+            for d in sfx.detail
+        ],
+        numeric_cols=tuple(range(6, 22)),
+        totals_cols=(6, 7, 8, 9, 10, 11, 12, 13, 19, 20, 21),
+        money_cols=(14, 15, 16, 17, 18, 19, 20, 21),
+        left_align_cols=(1, 2, 3, 4, 5, 22, 23),
+    )
+    add_styled_sheet(
+        wb,
+        sheet_name="Ratecard used",
+        headers=("Pincode", "Cluster", "Effective from", "PPD", "COD", "RVP", "SDD", "Club"),
+        rows=[
+            (
+                r["pincode"],
+                r["cluster"],
+                r["effective_from"],
+                r["rate_ppd"],
+                r["rate_cod"],
+                r["rate_rvp"],
+                r["rate_sdd"],
+                r["rate_club"],
+            )
+            for r in sfx.ratecard_used
+        ],
+        numeric_cols=(4, 5, 6, 7, 8),
+        money_cols=(4, 5, 6, 7, 8),
+        left_align_cols=(1, 2, 3),
+    )
+    out = _io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out

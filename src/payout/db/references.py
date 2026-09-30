@@ -88,6 +88,7 @@ RIDER_REFS: tuple[tuple[str, str, str], ...] = (
     ("transactions", "rider_id", "company"),
     ("cod_holds", "rider_id", "company"),
     ("salary_inputs", "rider_id", "company"),
+    ("payout_order_days", "rider_id", "company"),  # Shadowfax days already paid
     ("person_registry", "deduction_rider_id", "deduction_company"),
 )
 

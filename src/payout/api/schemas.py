@@ -67,6 +67,7 @@ class CompanyOut(BaseModel):
     salary_expected_days: int = 26
     incentive_per_order: int = 0  # paise; rupeeized on the way out
     incentive_per_day: int = 0
+    rate_model: str | None = None  # per_order: None = flat rate; 'pincode_ratecard'
     payout_sheet: str | None = None
     rider_id_column: str | None = None
     orders_column: str | None = None
@@ -98,6 +99,7 @@ class CompanyIn(BaseModel):
     salary_expected_days: int | None = None
     incentive_per_order: float | None = None  # rupees
     incentive_per_day: float | None = None  # rupees
+    rate_model: str | None = None  # per_order only: 'pincode_ratecard' or blank
     rider_ids_shared_with: str | None = None
     parser_type: str | None = None
     payout_sheet: str | None = None
@@ -121,6 +123,7 @@ class CompanyPatch(BaseModel):
     salary_expected_days: int | None = None
     incentive_per_order: float | None = None  # rupees
     incentive_per_day: float | None = None  # rupees
+    rate_model: str | None = None  # per_order only: 'pincode_ratecard' or blank
     rider_ids_shared_with: str | None = None
     is_active: bool | None = None
     parser_type: str | None = None
