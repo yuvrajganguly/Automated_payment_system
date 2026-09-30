@@ -417,7 +417,7 @@ async def run_cycle(
     with get_connection() as conn:
         co = conn.execute(
             "SELECT payment_model, per_order_rate, is_active, salary_expected_days, "
-            " incentive_per_order, incentive_per_day FROM companies WHERE company_name=?",
+            " incentive_per_order, incentive_per_day, parser_type FROM companies WHERE company_name=?",  # noqa: E501
             (company,),
         ).fetchone()
         if not co or not co["is_active"]:
@@ -467,6 +467,22 @@ async def run_cycle(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if file_bytes is not None and co["parser_type"] == "house":
+        # The office's own sheet carries a Rent charged and a Net payout column.
+        # They are checked against what the engine computed, never used: the
+        # ledger's rent comes from the vehicle's days, and a difference is
+        # something the operator should see before committing.
+        from payout.parsers import parse_file
+        from payout.parsers.house import check_sheet_against_engine
+
+        try:
+            sheet = parse_file(company, file_bytes)
+            result.warnings.extend(
+                check_sheet_against_engine(sheet.records, result.pay_rows + result.dues_rows)
+            )
+        except ValueError:
+            pass  # the engine already reported the parse failure
 
     response: dict = {"result": _serialize(result)}
     if salary_lines:

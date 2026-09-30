@@ -25,6 +25,11 @@ class RiderRecord:
     # the operator who each unknown rider_id is (rather than just a bare ID).
     name: str | None = None
     hub: str | None = None
+    # The house sheet's own Rent charged / Net payout (paise), carried only so
+    # the cycle preview can show them beside the engine's figures. Never used
+    # to compute anything.
+    sheet_rent: int | None = None
+    sheet_net: int | None = None
     # Store/hub CODE (Spencer's store_ids, e.g. "h069") when the file carries
     # one next to the hub name. Teaches the code → name map used to label COD
     # rows, which only ever state the code.

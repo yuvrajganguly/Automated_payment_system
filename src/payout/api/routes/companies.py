@@ -163,6 +163,10 @@ def create_company(body: CompanyIn, user: dict = Depends(require_admin)) -> Comp
     _validate(body.payment_model, body.cadence, rate)
     model = body.payment_model
     if model == "payout_file":
+        if (body.parser_type or "").strip() == "house":
+            # our own layout: the parser fixes the column names
+            body.rider_id_column = body.rider_id_column or "person_id"
+            body.payout_column = body.payout_column or "gross"
         if not (body.rider_id_column or "").strip() or not (body.payout_column or "").strip():
             raise HTTPException(
                 400,
@@ -269,6 +273,10 @@ def update_company(
                 after[k] = v
         model = after["payment_model"] or "payout_file"
         _validate(model, after["cadence"] or "weekly", after["per_order_rate"])
+        if after["parser_type"] == "house":
+            # our own layout: the column names are fixed by the parser
+            after["rider_id_column"] = after["rider_id_column"] or "person_id"
+            after["payout_column"] = after["payout_column"] or "gross"
         if model == "payout_file" and not (after["rider_id_column"] and after["payout_column"]):
             raise HTTPException(
                 400, "A payout-file company needs the rider-id column and the payout column."

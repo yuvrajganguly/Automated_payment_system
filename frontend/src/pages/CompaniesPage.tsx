@@ -406,6 +406,7 @@ function Th({ children }: { children?: React.ReactNode }) {
 
 interface Draft {
   payment_model: Model
+  house_sheet: boolean
   cadence: Cadence
   per_order_rate: string
   salary_expected_days: string
@@ -424,14 +425,14 @@ interface Draft {
   hold_status_column: string
 }
 const blank: Draft = {
-  payment_model: 'direct', cadence: 'weekly', per_order_rate: '',
+  payment_model: 'direct', house_sheet: false, cadence: 'weekly', per_order_rate: '',
   salary_expected_days: '26', incentive_per_order: '', incentive_per_day: '', notes: '',
   rider_ids_shared_with: '', payout_sheet: '', rider_id_column: '', payout_column: '',
   orders_column: '', hold_style: '', hold_sheet: '', hold_key_column: '', hold_amount_column: '',
   hold_status_column: '',
 }
 const fromCompany = (c: Company): Draft => ({
-  payment_model: modelOf(c), cadence: cadenceOf(c),
+  payment_model: modelOf(c), house_sheet: c.parser_type === 'house', cadence: cadenceOf(c),
   per_order_rate: c.per_order_rate != null ? String(c.per_order_rate) : '',
   salary_expected_days: String(c.salary_expected_days ?? 26),
   incentive_per_order: c.incentive_per_order ? String(c.incentive_per_order) : '',
@@ -445,6 +446,9 @@ const fromCompany = (c: Company): Draft => ({
 })
 const toBody = (d: Draft) => ({
   payment_model: d.payment_model,
+  // 'house' = our own Person ID · Gross · Rent · Net sheet; anything else keeps
+  // whatever parser_type the row already has (the server fills a default).
+  ...(d.payment_model === 'payout_file' ? { parser_type: d.house_sheet ? 'house' : undefined } : {}),
   cadence: d.cadence,
   per_order_rate: d.payment_model === 'per_order' && d.per_order_rate !== '' ? Number(d.per_order_rate) : null,
   salary_expected_days: d.salary_expected_days !== '' ? Number(d.salary_expected_days) : 26,
@@ -535,6 +539,16 @@ function DraftFields({ d, set, companies, self }: {
       )}
 
       {d.payment_model === 'payout_file' && (
+        <Field label="Whose layout is the file?"
+               hint="No file from them? Choose ours and upload Person ID · Gross payout · Rent charged · Net payout on Process Payout. Rent and net are checked against the engine, never obeyed.">
+          <select value={d.house_sheet ? 'house' : 'client'}
+                  onChange={(e) => set({ house_sheet: e.target.value === 'house' })} className={input}>
+            <option value="client">The client's own file (columns below)</option>
+            <option value="house">Our house sheet — we compute the payout ourselves</option>
+          </select>
+        </Field>
+      )}
+      {d.payment_model === 'payout_file' && !d.house_sheet && (
         <div className="mt-3">
           <div className="text-xs font-semibold text-slate-600 mb-2">Their file — column headers exactly as written in it</div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">

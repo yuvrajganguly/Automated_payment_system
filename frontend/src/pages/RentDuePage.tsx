@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { api, saveBlob } from '../api/client'
 import { useApi } from '../hooks/useApi'
 import { useAuth } from '../auth/AuthContext'
@@ -51,6 +51,23 @@ export function RentDuePage() {
   const { data, error, loading, reload } = useApi<Preview>(`/rent-due/preview?week_end=${weekEnd}`, [weekEnd])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function upload(f: File) {
+    setBusy(true); setMsg(null)
+    try {
+      const fd = new FormData(); fd.append('file', f)
+      const r = await api.postForm<{ count: number; amount: number; skipped: number; failed: { row: number; person_id: string; error: string }[] }>(
+        '/rent-due/collection/upload', fd,
+      )
+      const bad = r.failed.length ? ` ${r.failed.length} row${r.failed.length === 1 ? '' : 's'} failed: ` +
+        r.failed.slice(0, 3).map((x) => `row ${x.row} (${x.person_id}) — ${x.error}`).join('; ') : ''
+      setMsg(`Booked ${r.count} receipt${r.count === 1 ? '' : 's'}, ₹${money(r.amount)}; ${r.skipped} row${r.skipped === 1 ? '' : 's'} left blank.${bad}`)
+      reload()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Failed')
+    } finally { setBusy(false); if (fileRef.current) fileRef.current.value = '' }
+  }
 
   async function book() {
     if (!data) return
@@ -117,6 +134,13 @@ export function RentDuePage() {
                     className="border px-3 py-1.5 rounded disabled:opacity-50">
               Collection sheet (.xlsx)
             </button>
+            {isAdmin && (
+              <label className={'border px-3 py-1.5 rounded cursor-pointer ' + (busy ? 'opacity-50' : '')}>
+                Upload filled sheet
+                <input ref={fileRef} type="file" accept=".xlsx" className="hidden" disabled={busy}
+                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f) }} />
+              </label>
+            )}
             {msg && <span className="text-xs text-slate-400">{msg}</span>}
           </div>
 

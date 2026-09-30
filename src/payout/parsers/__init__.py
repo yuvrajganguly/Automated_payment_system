@@ -19,7 +19,10 @@ from payout.parsers.generic import parse_with_config
 
 # Optional per-type overrides for files a config can't fully describe.
 # Maps companies.parser_type -> callable(file_bytes, config) -> ParseResult.
-_OVERRIDES: dict[str, object] = {}
+from payout.parsers.house import PARSER_TYPE as _HOUSE
+from payout.parsers.house import parse_house_sheet
+
+_OVERRIDES: dict[str, object] = {_HOUSE: parse_house_sheet}
 
 
 def _load_company_config(company_name: str) -> sqlite3.Row:
