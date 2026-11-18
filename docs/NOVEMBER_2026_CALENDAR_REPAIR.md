@@ -21,7 +21,10 @@ and financial state remain available for the operator's manual reconciliation.
 The retained Blitz runs resume consecutive Sunday–Saturday weeks from
 4–10 October through 1–7 November. The retained Myntra runs resume consecutive
 Monday–Sunday weeks from 12–18 October through 2–8 November. Jiffy ends on
-7 November. Next starts are 8 November for Jiffy/Blitz and 9 November for Myntra.
+7 November. Two newer Jiffy/Blitz runs entered on 17 November were subsequently
+confirmed by the operator as belonging to 8–14 November (originally entered as
+11–17 November). Both are retained with corrected dates. Final next starts are
+15 November for Jiffy/Blitz and 9 November for Myntra.
 
 ## Company consolidation
 
@@ -37,7 +40,7 @@ recreate Nykaa or Kaptan after consolidation.
 1. Take and verify a `pg_dump -Fc` backup outside the repository.
 2. Use the deployed environment and current package source to run
    `python scripts/repair_november_calendar.py --dry-run`.
-3. Inspect the result. The verified incident plan reports 12 calendar changes,
+3. Inspect the result. The complete incident plan reports 14 calendar changes,
    2 companies consolidated, 17 duplicate roster rows collapsed, and
    `money_unchanged: true`.
 4. Run `python scripts/repair_november_calendar.py --apply --backup PATH`.

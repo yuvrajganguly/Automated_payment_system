@@ -66,6 +66,12 @@ def repair(conn):
         for old_start, old_end, new_start, new_end in windows:
             changes += correct_cycle(conn, company, old_start, old_end, (new_start, new_end))
     merge = consolidate_blitz(conn)
+    # Runs entered while the original repair was pending; the operator
+    # confirmed that both belong to the next 8–14 November week.
+    for company in ("Jiffy", "Blitz"):
+        changes += correct_cycle(
+            conn, company, "2026-11-11", "2026-11-17", ("2026-11-08", "2026-11-14")
+        )
     if money_fingerprint(conn) != before:
         raise RuntimeError("Financial state changed; refusing to commit")
     return {"calendar_changes": changes, "merge": merge, "money_unchanged": True}
