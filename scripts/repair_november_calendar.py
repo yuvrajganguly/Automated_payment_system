@@ -1,6 +1,6 @@
 """November 2026 incident: metadata only; --dry-run before --apply --backup PATH.
 
-Run after schema migration 0042. Stop processing during the maintenance window.
+Pending schema migrations run inside the same transaction as the repair.
 """
 
 import argparse
@@ -9,8 +9,10 @@ import json
 from pathlib import Path
 
 from payout.company_consolidation import consolidate_blitz
+from payout.config import DB_URL
 from payout.cycle_calendar import correct_cycle
 from payout.db import get_connection
+from payout.db.migrations import run_migrations
 
 
 def money_fingerprint(conn):
@@ -83,6 +85,13 @@ def main():
     conn = get_connection()
     try:
         conn.execute("BEGIN")
+        if DB_URL:
+            # PostgreSQL-only maintenance lock; normal app SQL remains portable.
+            conn.execute(
+                "LOCK TABLE transactions, balances, ev_arrears, ev_assignments, "
+                "rider_master, companies, company_cycles IN SHARE ROW EXCLUSIVE MODE"
+            )
+        run_migrations(conn, fresh_database=False)
         report = repair(conn)
         if args.apply:
             conn.commit()
