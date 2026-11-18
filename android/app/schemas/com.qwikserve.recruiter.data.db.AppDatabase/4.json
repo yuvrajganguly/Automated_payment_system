@@ -1,0 +1,125 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "4a40d69758297e46a6d34d0a096c6444",
+    "entities": [
+      {
+        "tableName": "riders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`riderId` TEXT NOT NULL, `company` TEXT NOT NULL, `personId` INTEGER NOT NULL, `name` TEXT, `hub` TEXT, `vehicle` TEXT, `mobNo` TEXT, `accountNo` TEXT, `accountName` TEXT, `ifsc` TEXT, `isActive` INTEGER NOT NULL, `recruitedBy` TEXT, `zone` TEXT, `working` INTEGER, `lastWorkedOn` TEXT, `haystack` TEXT NOT NULL, PRIMARY KEY(`riderId`, `company`))",
+        "fields": [
+          {
+            "fieldPath": "riderId",
+            "columnName": "riderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "company",
+            "columnName": "company",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personId",
+            "columnName": "personId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hub",
+            "columnName": "hub",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "vehicle",
+            "columnName": "vehicle",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mobNo",
+            "columnName": "mobNo",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accountNo",
+            "columnName": "accountNo",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "accountName",
+            "columnName": "accountName",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ifsc",
+            "columnName": "ifsc",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recruitedBy",
+            "columnName": "recruitedBy",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "zone",
+            "columnName": "zone",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "working",
+            "columnName": "working",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastWorkedOn",
+            "columnName": "lastWorkedOn",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "haystack",
+            "columnName": "haystack",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "riderId",
+            "company"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4a40d69758297e46a6d34d0a096c6444')"
+    ]
+  }
+}

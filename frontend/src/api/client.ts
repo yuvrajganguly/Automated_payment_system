@@ -1,4 +1,4 @@
-import type { TokenResponse } from './types'
+import type { RunResponse, TokenResponse } from './types'
 
 const BASE = '/api'
 
@@ -94,7 +94,13 @@ export function saveBlob({ blob, filename }: Download): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  // Let the browser start reading the blob before releasing it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function savePayoutWorkbook(xlsx: NonNullable<RunResponse['xlsx']>): void {
+  const bytes = Uint8Array.from(atob(xlsx.content_base64), (c) => c.charCodeAt(0))
+  saveBlob({ blob: new Blob([bytes], { type: xlsx.mime }), filename: xlsx.filename })
 }
 
 export const api = {

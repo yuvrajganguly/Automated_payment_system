@@ -57,6 +57,7 @@ EV_REFS: tuple[tuple[str, str], ...] = (
 # UNIQUE constraint. Renaming a company means updating all of them in one
 # transaction; miss one and its rows point at a company that no longer exists.
 COMPANY_REFS: tuple[tuple[str, str], ...] = (
+    ("cycle_reporting_adjustments", "company"),
     ("person_registry", "deduction_company"),
     ("rider_master", "company"),  # part of PK (rider_id, company)
     ("transactions", "company"),

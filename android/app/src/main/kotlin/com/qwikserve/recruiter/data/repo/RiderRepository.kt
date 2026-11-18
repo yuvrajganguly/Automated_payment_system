@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Read-cached, write-online. The roster (a few hundred rows) is pulled whole
+ * Read-cached, write-online. Every page of the permitted roster is pulled
  * and kept in Room; every list and search reads Room, and [refresh] runs
  * behind the screen. Writes go straight to the server and re-sync.
  */
@@ -29,7 +29,8 @@ class RiderRepository @Inject constructor(
         mine: String? = null,
         zone: String? = null,
         working: Boolean? = null,
-    ): Flow<List<RiderEntity>> = dao.search(q.trim().lowercase(), mine, zone, working)
+        includeInactive: Boolean = false,
+    ): Flow<List<RiderEntity>> = dao.search(q.trim().lowercase(), mine, zone, working, includeInactive)
 
     fun forPerson(personId: Long): Flow<List<RiderEntity>> = dao.forPerson(personId)
 
@@ -37,9 +38,8 @@ class RiderRepository @Inject constructor(
 
     /** Pull the whole roster (active and inactive) and replace the cache. */
     suspend fun refresh() {
-        val res = api.riders(limit = 2000)
-        val body = res.body() ?: throw IllegalStateException("HTTP ${res.code()}")
-        val rows = body.map { it.toEntity() }
+        val rows = loadRiderPages { limit, offset -> api.riders(limit = limit, offset = offset) }
+            .map { it.toEntity() }
         db.withTransaction {
             dao.clear()
             dao.upsertAll(rows)

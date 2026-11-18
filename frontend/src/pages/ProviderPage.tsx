@@ -16,6 +16,7 @@
  *      discrepancy.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useUrlString } from '../state/useUrlState'
 import { api, saveBlob } from '../api/client'
 import { addDaysISO, addMonthsISO, endOfMonthISO, startOfMonthISO, startOfWeekISO, todayISO } from '../lib/dates'
@@ -449,9 +450,10 @@ export function ProviderPage({ provider, cadence }: Props) {
       {/* Empty-state — no rate card for this provider */}
       {t.no_models_registered && (
         <div className="bg-amber-500/10 border border-amber-400/30 text-amber-200 px-4 py-3 rounded text-sm">
-          No EV models registered under <b>{provider}</b> yet. Add at least
-          one model on the rate card (Settings → EV models) before any EVs
-          can be tagged as {provider}.
+          No EV models registered under <b>{provider}</b> yet.{' '}
+          {canUpload
+            ? <>Add a model in <Link to="/system?tab=evmodels" className="underline">Admin → System → EV Models</Link>.</>
+            : 'Ask an admin to add a model.'}
         </div>
       )}
 

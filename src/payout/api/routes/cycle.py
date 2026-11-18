@@ -11,6 +11,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from payout.api.auth import require_admin
+from payout.api.routes import cycle_history
 from payout.api.schemas import RiderOverrideIn
 from payout.db import get_connection
 from payout.domain.engine import (
@@ -19,10 +20,12 @@ from payout.domain.engine import (
     RiderOverride,
     process_cycle,
 )
+from payout.exports import XLSX_MIME
 from payout.money import to_paise
 from payout.output import build_output, build_output_filename
 
 router = APIRouter()
+router.include_router(cycle_history.router)
 
 
 def _json_safe(value):
@@ -236,34 +239,32 @@ def _salary_to_parse_result(conn, company: str, raw: str | None, co) -> tuple[ob
     return parsed, lines
 
 
-def _record_salary_inputs(company, cycle_start, cycle_end, lines, user) -> None:
-    """Keep what was marked for the cycle (after a successful commit)."""
-    with get_connection() as conn:
+def _record_salary_inputs(conn, company, cycle_start, cycle_end, lines, user) -> None:
+    """Keep what was marked in the same transaction as the payout."""
+    conn.execute(
+        "DELETE FROM salary_inputs WHERE company=? AND cycle_start=? AND cycle_end=?",
+        (company, cycle_start.isoformat(), cycle_end.isoformat()),
+    )
+    for ln in lines:
         conn.execute(
-            "DELETE FROM salary_inputs WHERE company=? AND cycle_start=? AND cycle_end=?",
-            (company, cycle_start.isoformat(), cycle_end.isoformat()),
+            "INSERT INTO salary_inputs (company, cycle_start, cycle_end, rider_id, "
+            " person_id, days_present, orders, salary, base_pay, incentives, payout, "
+            " created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                company,
+                cycle_start.isoformat(),
+                cycle_end.isoformat(),
+                ln["rider_id"],
+                ln["person_id"],
+                ln["days_present"],
+                ln["orders"],
+                ln["salary"],
+                ln["base_pay"],
+                ln["incentives"],
+                ln["payout"],
+                user["email"],
+            ),
         )
-        for ln in lines:
-            conn.execute(
-                "INSERT INTO salary_inputs (company, cycle_start, cycle_end, rider_id, "
-                " person_id, days_present, orders, salary, base_pay, incentives, payout, "
-                " created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    company,
-                    cycle_start.isoformat(),
-                    cycle_end.isoformat(),
-                    ln["rider_id"],
-                    ln["person_id"],
-                    ln["days_present"],
-                    ln["orders"],
-                    ln["salary"],
-                    ln["base_pay"],
-                    ln["incentives"],
-                    ln["payout"],
-                    user["email"],
-                ),
-            )
-        conn.commit()
 
 
 _SHEET_ID_ALIASES = ("rider_id", "rider id", "id", "worker code", "rider", "fe id", "employee id")
@@ -532,6 +533,31 @@ async def run_cycle(
     cycle_overrides = _parse_overrides(overrides)
     if sfx is not None:
         _shadowfax_overrides(company, sfx, cycle_overrides, ztp_apply)
+    response: dict = {}
+
+    def save_output(conn, result, run_id):
+        if salary_lines:
+            _record_salary_inputs(conn, company, cycle_start, cycle_end, salary_lines, user)
+        buf = build_output(result, conn=conn)
+        if sfx is not None:
+            buf = _shadowfax_sheets(buf, sfx)
+        filename = build_output_filename(company, cycle_start, cycle_end)
+        content = buf.getvalue()
+        owner = "adhoc_id" if ad_hoc else "cycle_id"
+        conn.execute(
+            f"INSERT INTO payout_workbooks ({owner}, cycle_start, filename, content) "
+            f"VALUES (?,?,?,?) ON CONFLICT({owner}) DO UPDATE SET "
+            "cycle_start=excluded.cycle_start, filename=excluded.filename, "
+            "content=excluded.content",
+            (run_id, cycle_start.isoformat(), filename, content),
+        )
+        response["run"] = {"kind": "ad_hoc" if ad_hoc else "cycle", "id": run_id}
+        response["xlsx"] = {
+            "filename": filename,
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "mime": XLSX_MIME,
+        }
+
     try:
         result = process_cycle(
             company=company,
@@ -545,6 +571,7 @@ async def run_cycle(
             force=force,
             ad_hoc=ad_hoc,
             label=label,
+            save_output=save_output,
             before_commit=(
                 (lambda c: _record_days(c, company, cycle_start, cycle_end, sfx))
                 if sfx is not None
@@ -576,22 +603,11 @@ async def run_cycle(
     if sfx is not None:
         _shadowfax_after_run(company, cycle_start, cycle_end, sfx, result, commit)
 
-    response: dict = {"result": _serialize(result)}
+    response["result"] = _serialize(result)
     if sfx is not None:
         response["shadowfax"] = _shadowfax_payload(sfx, result)
     if salary_lines:
         response["salary_lines"] = salary_lines
-        if commit and result.committed:
-            _record_salary_inputs(company, cycle_start, cycle_end, salary_lines, user)
-    if commit:
-        buf = build_output(result)
-        if sfx is not None:
-            buf = _shadowfax_sheets(buf, sfx)
-        response["xlsx"] = {
-            "filename": build_output_filename(company, cycle_start, cycle_end),
-            "content_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
-            "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }
     return response
 
 

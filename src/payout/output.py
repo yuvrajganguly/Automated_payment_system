@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing, nullcontext
 from datetime import date
 from io import BytesIO
 
@@ -551,20 +552,17 @@ def _audit_sheet(wb, conn, cs, ce):
     _auto_width(ws)
 
 
-def build_output(cycle_result) -> BytesIO:
-    """Build the styled .xlsx for a committed CycleResult."""
+def build_output(cycle_result, conn=None) -> BytesIO:
+    """Build the XLSX using the run's transaction if it is still open."""
     wb = Workbook()
     wb.remove(wb.active)
-    conn = get_connection()
-    try:
+    with closing(get_connection()) if conn is None else nullcontext(conn) as conn:
         _pay_sheet(wb, cycle_result.pay_rows)
         _dues_sheet(wb, cycle_result.dues_rows)
         _arrears_sheet(wb, conn, cycle_result.cycle_start, cycle_result.cycle_end)
         _hold_sheet(wb, conn, cycle_result)
         _inactive_sheet(wb, cycle_result.inactive_rows)
         _audit_sheet(wb, conn, cycle_result.cycle_start, cycle_result.cycle_end)
-    finally:
-        conn.close()
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)

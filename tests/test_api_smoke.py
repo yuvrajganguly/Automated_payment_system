@@ -111,6 +111,7 @@ def smoke():
                 "SELECT rider_id, company FROM rider_master LIMIT 1"
             ).fetchone()
             provider = conn.execute("SELECT provider FROM ev_models LIMIT 1").fetchone()[0]
+            run_id = conn.execute("SELECT id FROM company_cycles LIMIT 1").fetchone()[0]
         subs = {
             "{person_id}": str(pid),
             "{ev_id}": str(ev),
@@ -125,6 +126,8 @@ def smoke():
             "{request_id}": "1",
             "{assignment_id}": "1",
             "{maint_id}": "1",
+            "{kind}": "cycle",
+            "{run_id}": str(run_id),
         }
         yield client, app, subs
 

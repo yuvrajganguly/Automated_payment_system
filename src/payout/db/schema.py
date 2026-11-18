@@ -207,6 +207,29 @@ CREATE INDEX IF NOT EXISTS idx_txn_person_cycle
 CREATE INDEX IF NOT EXISTS idx_txn_rent_guard
     ON transactions (person_id, event_type, cycle_start, cycle_end);
 
+-- Reporting corrections never rewrite the append-only financial ledger.
+CREATE TABLE IF NOT EXISTS cycle_reporting_adjustments (
+    company TEXT NOT NULL,
+    original_start TEXT NOT NULL,
+    original_end TEXT NOT NULL,
+    corrected_start TEXT,
+    corrected_end TEXT,
+    excluded INTEGER NOT NULL DEFAULT 0,
+    through_transaction_id INTEGER NOT NULL,
+    recorded_through TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    PRIMARY KEY (company, original_start, original_end)
+);
+CREATE VIEW IF NOT EXISTS reporting_transactions AS
+SELECT t.id, t.person_id, t.rider_id, t.company,
+       COALESCE(a.corrected_start, t.cycle_start) AS cycle_start,
+       COALESCE(a.corrected_end, t.cycle_end) AS cycle_end,
+       t.event_type, t.amount, t.balance_after, t.days, t.remarks, t.created_at, t.created_by
+FROM transactions t LEFT JOIN cycle_reporting_adjustments a
+ON a.company=t.company AND a.original_start=t.cycle_start AND a.original_end=t.cycle_end
+AND t.id<=a.through_transaction_id
+WHERE COALESCE(a.excluded,0)=0;
+
 -- ── balances ────────────────────────────────────────────────────────────────
 -- General rolling balance per person (negative = dues). EV arrears tracked
 -- separately in ev_arrears. ``pending_xc_rent`` is a separate slot used for
@@ -606,6 +629,16 @@ CREATE TABLE IF NOT EXISTS company_cycles (
 );
 CREATE INDEX IF NOT EXISTS idx_company_cycles_bucket
     ON company_cycles (week_bucket DESC);
+
+-- The exact XLSX sent on commit, kept separately from dashboard run metadata.
+CREATE TABLE IF NOT EXISTS payout_workbooks (
+    cycle_id    INTEGER UNIQUE REFERENCES company_cycles(id) ON DELETE CASCADE,
+    adhoc_id    INTEGER UNIQUE REFERENCES adhoc_runs(id) ON DELETE CASCADE,
+    cycle_start TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    content     BLOB NOT NULL,
+    CHECK ((cycle_id IS NULL) <> (adhoc_id IS NULL))
+);
 
 -- ── ev_daily_ledger ─────────────────────────────────────────────────────────
 -- Day-level source of truth for "what we owe the EV provider" and "what we

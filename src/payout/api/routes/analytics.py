@@ -112,7 +112,7 @@ def money_trends(
     with get_connection() as conn:
         rows = conn.execute(
             f"SELECT t.cycle_end, t.event_type, t.amount, t.company "
-            f"FROM transactions t "
+            f"FROM reporting_transactions t "
             f"WHERE t.cycle_end >= ? "
             f"  AND t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_COLLECTED',"
             f"      'RENT_MISSED','RENT_DUE','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CARRY') "
@@ -259,7 +259,7 @@ def collection_efficiency(
             "  SUM(CASE WHEN event_type IN ('RENT_MISSED','RENT_DUE') THEN -amount ELSE 0 END) AS missed, "  # noqa: E501
             "  SUM(CASE WHEN event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
             "      THEN amount ELSE 0 END) AS recovered "
-            "FROM transactions t WHERE date(t.created_at) >= ?",
+            "FROM reporting_transactions t WHERE date(t.created_at) >= ?",
             [four_weeks_ago],
         ).fetchone()
 
@@ -400,21 +400,21 @@ def rider_analytics(
 
     with get_connection() as conn:
         pay_rows = conn.execute(
-            f"SELECT DISTINCT t.person_id, t.cycle_end FROM transactions t "
+            f"SELECT DISTINCT t.person_id, t.cycle_end FROM reporting_transactions t "
             f"WHERE t.event_type='PAYOUT' AND t.cycle_end >= ? {co_sql}",
             [since] + co_params,
         ).fetchall()
         firsts = {
             r["person_id"]: r["first_end"]
             for r in conn.execute(
-                "SELECT person_id, MIN(cycle_end) AS first_end FROM transactions "
+                "SELECT person_id, MIN(cycle_end) AS first_end FROM reporting_transactions "
                 "WHERE event_type='PAYOUT' GROUP BY person_id"
             ).fetchall()
         }
         # look-back for churn: who was paid in the 4 weeks before the window
         lookback = (date.fromisoformat(since) - timedelta(weeks=4)).isoformat()
         prior_rows = conn.execute(
-            f"SELECT DISTINCT t.person_id, t.cycle_end FROM transactions t "
+            f"SELECT DISTINCT t.person_id, t.cycle_end FROM reporting_transactions t "
             f"WHERE t.event_type='PAYOUT' AND t.cycle_end >= ? AND t.cycle_end < ? {co_sql}",
             [lookback, since] + co_params,
         ).fetchall()
@@ -424,7 +424,8 @@ def rider_analytics(
             for r in conn.execute(
                 f"SELECT t.person_id, pr.display_name, SUM(-t.amount) AS released, "
                 f"       COUNT(DISTINCT t.cycle_end) AS cycles "
-                f"FROM transactions t JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"FROM reporting_transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type='RELEASE' AND t.cycle_end >= ? {co_sql} "
                 f"GROUP BY t.person_id, pr.display_name ORDER BY released DESC LIMIT 10",
                 [since] + co_params,
@@ -437,7 +438,8 @@ def rider_analytics(
                 f"       COALESCE((SELECT -b.current_balance FROM balances b "
                 f"                 WHERE b.person_id=t.person_id AND b.current_balance<0), 0) "
                 f"         AS dues "
-                f"FROM transactions t JOIN person_registry pr ON pr.person_id=t.person_id "
+                f"FROM reporting_transactions t "
+                f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type='DUES_CARRY' AND t.amount < 0 AND t.cycle_end >= ? {co_sql} "
                 f"GROUP BY t.person_id, pr.display_name ORDER BY dues_delta DESC LIMIT 10",
                 [since] + co_params,
@@ -520,7 +522,7 @@ def _flow_sums(conn, wf: str, wt: str, cos: list[str]) -> dict:
         "   AS credit_offset, "
         " SUM(CASE WHEN t.event_type='ADJUSTMENT' "
         "      AND t.remarks LIKE 'Refund — EV%' THEN t.amount ELSE 0 END) AS refunded "
-        "FROM transactions t "
+        "FROM reporting_transactions t "
         "JOIN person_registry pr ON pr.person_id = t.person_id "
         f"WHERE {_TXN_WINDOW}{co_sql}",
         [wt, wf, *co_args],
@@ -638,7 +640,8 @@ def money_story_weeks(
         if all_time:
             co_sql, co_args = _co_clause(cos, "company")
             first = conn.execute(
-                f"SELECT MIN(cycle_start) FROM transactions WHERE company <> ''{co_sql}", co_args
+                f"SELECT MIN(cycle_start) FROM reporting_transactions WHERE company <> ''{co_sql}",
+                co_args,
             ).fetchone()[0]
             wf, wt = first or date.today().isoformat(), date.today().isoformat()
             if wf > wt:
@@ -665,7 +668,7 @@ def money_story_weeks(
             " SUM(CASE WHEN t.event_type='DUES_CARRY' AND t.balance_after < 0 "
             "     THEN -t.balance_after ELSE 0 END) AS carried_forward, "
             " SUM(CASE WHEN t.event_type='RENT_REVERSAL' THEN t.amount ELSE 0 END) AS written_off "
-            "FROM transactions t "
+            "FROM reporting_transactions t "
             "WHERE t.company <> '' AND t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_COLLECTED',"
             "  'RENT_MISSED','RENT_DUE','RENT_RECOVERED','XC_RENT_RECOVERED','DUES_CLEARED','DUES_CARRY',"  # noqa: E501
             "  'RENT_REVERSAL') "
@@ -679,9 +682,17 @@ def money_story_weeks(
         cod = {
             (r["company"], r["cycle_start"], r["cycle_end"]): int(r["held"] or 0)
             for r in conn.execute(
-                "SELECT ch.company, ch.cycle_start, ch.cycle_end, SUM(ch.amount) AS held "
-                f"FROM cod_holds ch WHERE {_COD_WINDOW} "
-                "GROUP BY ch.company, ch.cycle_start, ch.cycle_end",
+                "SELECT ch.company, COALESCE(a.corrected_start,ch.cycle_start) AS cycle_start, "
+                "COALESCE(a.corrected_end,ch.cycle_end) AS cycle_end, SUM(ch.amount) AS held "
+                "FROM cod_holds ch LEFT JOIN cycle_reporting_adjustments a "
+                "ON a.company=ch.company AND a.original_start=ch.cycle_start "
+                "AND a.original_end=ch.cycle_end "
+                "AND ch.created_at<=a.recorded_through "
+                "WHERE COALESCE(a.excluded,0)=0 "
+                "AND COALESCE(a.corrected_start,ch.cycle_start)<=? "
+                "AND COALESCE(a.corrected_end,ch.cycle_end)>=? "
+                "GROUP BY ch.company, COALESCE(a.corrected_start,ch.cycle_start), "
+                "COALESCE(a.corrected_end,ch.cycle_end)",
                 [wt, wf],
             )
         }
@@ -717,7 +728,7 @@ def company_profile(company_name: str, _: dict = Depends(get_current_user)) -> d
             " SUM(CASE WHEN event_type='DUES_CLEARED' THEN amount ELSE 0 END) "
             "   AS prior_dues_collected, "
             " SUM(CASE WHEN event_type='RENT_REVERSAL' THEN amount ELSE 0 END) AS written_off "
-            "FROM transactions WHERE company=?",
+            "FROM reporting_transactions WHERE company=?",
             (company_name,),
         ).fetchone()
         active = conn.execute(
@@ -728,6 +739,14 @@ def company_profile(company_name: str, _: dict = Depends(get_current_user)) -> d
         ).fetchone()[0]
         out = dict(co)
         out.update(dict(life))
+        calendar = conn.execute(
+            "SELECT COUNT(*) AS cycles, MIN(cycle_start) AS first_cycle, "
+            "MAX(cycle_end) AS last_cycle FROM company_cycles WHERE company=?",
+            (company_name,),
+        ).fetchone()
+        if calendar["cycles"]:
+            # Adjustments and short rent windows are ledger events, not payout runs.
+            out.update(dict(calendar))
         for k in (
             "gross_payout",
             "released",
@@ -789,7 +808,7 @@ def money_story_by(
                 " SUM(CASE WHEN t.event_type='DUES_CARRY' AND t.balance_after < 0 "
                 "     THEN -t.balance_after ELSE 0 END) AS carried_forward, "
                 " COUNT(DISTINCT CASE WHEN t.event_type='PAYOUT' THEN t.person_id END) AS riders "
-                "FROM transactions t "
+                "FROM reporting_transactions t "
                 "JOIN person_registry pr ON pr.person_id = t.person_id "
                 f"WHERE {_TXN_WINDOW}{co_sql} "
                 f"GROUP BY {_CO_EXPR} ORDER BY rent_charged DESC",
@@ -866,7 +885,7 @@ def money_story_by(
                 " COALESCE(MAX(b.current_balance), 0) AS balance, "
                 " MAX(CASE WHEN oa.person_id IS NOT NULL THEN 1 ELSE 0 END) AS has_open_ev, "
                 " MAX(CASE WHEN ra.person_id IS NOT NULL THEN 1 ELSE 0 END) AS ever_returned "
-                "FROM transactions t "
+                "FROM reporting_transactions t "
                 "JOIN person_registry pr ON pr.person_id = t.person_id "
                 "LEFT JOIN ev_arrears ea ON ea.person_id = t.person_id "
                 "LEFT JOIN balances b ON b.person_id = t.person_id "
@@ -924,7 +943,7 @@ def money_story_by(
             # Write-offs per EV, from the heal's machine-formatted remarks.
             wo: dict[str, int] = {}
             for r in conn.execute(
-                "SELECT t.amount, t.remarks FROM transactions t "
+                "SELECT t.amount, t.remarks FROM reporting_transactions t "
                 f"WHERE t.event_type='RENT_REVERSAL' AND {_TXN_WINDOW}",
                 [wt, wf],
             ):

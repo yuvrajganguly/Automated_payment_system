@@ -453,7 +453,7 @@ def list_riders(
             f"       rm.account_no, rm.account_name, rm.ifsc, rm.mob_no, rm.is_active, rm.salary, "
             f"       rm.recruited_by, rm.payment_model, COALESCE(hz.zone, ru.zone) AS zone, "
             f"       ({_ACTIVE}) AS working, {_LAST_WORKED} AS last_worked_on "
-            f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company{page}",
+            f"{base} WHERE {' AND '.join(where)} ORDER BY rm.name, rm.company, rm.rider_id{page}",
             params + page_params,
         ).fetchall()
     response.headers["X-Total-Count"] = str(int(total))

@@ -28,6 +28,7 @@ function usePrefetchRoutes() {
 
 const ForgotPasswordPage = page(() => import('./pages/ForgotPasswordPage'), 'ForgotPasswordPage')
 const ProcessPayoutPage = page(() => import('./pages/ProcessPayoutPage'), 'ProcessPayoutPage')
+const ProcessedPayoutsPage = page(() => import('./pages/ProcessedPayoutsPage'), 'ProcessedPayoutsPage')
 const RidersPage = page(() => import('./pages/RidersPage'), 'RidersPage')
 const PersonPage = page(() => import('./pages/PersonPage'), 'PersonPage')
 const EVsPage = page(() => import('./pages/EVsPage'), 'EVsPage')
@@ -52,7 +53,6 @@ const UsersPage = page(() => import('./pages/UsersPage'), 'UsersPage')
 const SystemPage = page(() => import('./pages/SystemPage'), 'SystemPage')
 const ChecksPage = page(() => import('./pages/ChecksPage'), 'ChecksPage')
 const RaftPage = page(() => import('./pages/RaftPage'), 'RaftPage')
-const BlivePage = page(() => import('./pages/BlivePage'), 'BlivePage')
 
 export default function App() {
   usePrefetchRoutes()
@@ -80,6 +80,7 @@ export default function App() {
             <Route path="/hubs" element={<HubsPage />} />
             <Route path="/field" element={<FieldPage />} />
             <Route path="/adhoc" element={<ProcessPayoutPage />} />
+            <Route path="/payout-history" element={<ProcessedPayoutsPage />} />
             <Route path="/corrections" element={<CorrectionsPage />} />
             <Route path="/ev-rent" element={<EvRentPage />} />
             <Route path="/rent-due" element={<RentDuePage />} />
@@ -89,7 +90,6 @@ export default function App() {
             <Route path="/system" element={<SystemPage />} />
             <Route path="/checks" element={<ChecksPage />} />
             <Route path="/raft"  element={<RaftPage />} />
-            <Route path="/blive" element={<BlivePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Route>

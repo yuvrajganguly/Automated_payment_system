@@ -1,12 +1,13 @@
 import { ShadowfaxPanel } from '../components/ShadowfaxPanel'
 import { FormEvent, useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { usePersistedState } from '../state/usePersistedState'
-import { api } from '../api/client'
+import { api, savePayoutWorkbook } from '../api/client'
+import { PayoutDownload } from '../components/PayoutDownload'
 import { Spinner } from '../components/Spinner'
 import { addDaysISO, todayISO } from '../lib/dates'
 import { money as fmt } from '../lib/format'
-import type { Company, CycleResult, InactiveRow, RiderOut, RiderResultRow, RunResponse, SalaryLine } from '../api/types'
+import type { Company, CycleResult, InactiveRow, PayoutRunRef, RiderOut, RiderResultRow, RunResponse, SalaryLine } from '../api/types'
 
 const isoToday = (offset = 0) => addDaysISO(todayISO(), offset)
 
@@ -25,19 +26,6 @@ const attendanceKey = (a: Attendance, salaries: Record<string, string>) =>
 const sameKey = (a: RunKey | null, b: RunKey) =>
   !!a && a.company === b.company && a.cycleStart === b.cycleStart && a.cycleEnd === b.cycleEnd &&
   a.input === b.input
-
-function downloadBase64(b64: string, filename: string, mime: string) {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-  const blob = new Blob([bytes], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
-}
 
 /**
  * Process Payout, and — with `adHoc` — the surge mode beside it.
@@ -76,6 +64,7 @@ export function ProcessPayoutPage() {
   const [salaryLines, setSalaryLines] = useState<SalaryLine[] | null>(null)
   const [sheetNote, setSheetNote] = useState<string | null>(null)
   const [preview, setPreview] = useState<CycleResult | null>(null)
+  const [committedRun, setCommittedRun] = useState<PayoutRunRef | null>(null)
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [onboardOpen, setOnboardOpen] = useState(false)
@@ -123,7 +112,7 @@ export function ProcessPayoutPage() {
 
   // When the company changes, fetch the next cycle's start/end and auto-fill the date inputs.
   useEffect(() => {
-    if (!company) return
+    if (!company || adHoc) return
     api
       .get<{ cycle_start: string; cycle_end: string; last_cycle_end: string | null }>(
         '/companies/' + encodeURIComponent(company) + '/next-cycle'
@@ -135,13 +124,13 @@ export function ProcessPayoutPage() {
       .catch(() => {
         // Non-fatal: keep whatever defaults are already in the inputs.
       })
-  }, [company])
+  }, [company, adHoc])
 
   // Per-order company: load its active riders so the counts can be typed
   // against names, not bare ids. Counts reset when the company changes.
   useEffect(() => {
     setOrders({}); setAttendance({}); setSalaries({}); setSalaryLines(null); setSheetNote(null)
-    setOrderRiders([]); setPreview(null); setPreviewedKey(null)
+    setOrderRiders([]); setPreview(null); setPreviewedKey(null); setCommittedRun(null)
     if (!company || !typed) return
     api.get<RiderOut[]>('/riders?company=' + encodeURIComponent(company) + '&active=true')
       .then((rs) => {
@@ -240,11 +229,18 @@ export function ProcessPayoutPage() {
       setPreview(r.result)
       setSalaryLines(r.salary_lines ?? null)
       setPreviewedKey(key)
-      if (commit && r.xlsx) {
-        downloadBase64(r.xlsx.content_base64, r.xlsx.filename, r.xlsx.mime)
+      setCommittedRun(r.run ?? null)
+      if (r.result.committed && r.xlsx) {
+        try {
+          savePayoutWorkbook(r.xlsx)
+        } catch {
+          setError('Payout committed. The workbook download could not start. Download it from Processed payouts.')
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process')
+      const message = err instanceof Error ? err.message : 'Failed to process'
+      if (commit) setPreviewedKey(null)
+      setError(commit ? message + ' Check Processed payouts before trying again.' : message)
     } finally {
       setBusy(null)
     }
@@ -461,6 +457,9 @@ export function ProcessPayoutPage() {
             <span className={'text-xs px-2 py-0.5 rounded ' + (preview.committed ? 'bg-emerald-500/20' : 'bg-slate-200')}>
               {preview.committed ? 'WRITTEN' : 'DRY RUN'}
             </span>
+            {preview.committed && committedRun && <PayoutDownload run={committedRun} />}
+            {preview.committed && <Link to={'/payout-history?company=' + encodeURIComponent(preview.company)}
+              className="text-sm text-brand underline">View processed payouts</Link>}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">

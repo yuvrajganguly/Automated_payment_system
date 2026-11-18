@@ -1188,6 +1188,28 @@ def _0040_shadowfax_pincode_rates(conn: Any) -> None:
             )
 
 
+def _0041_payout_workbooks(conn: Any) -> None:
+    from payout.db.connection import translate_ddl
+    from payout.db.schema import SCHEMA
+
+    start = SCHEMA.index("CREATE TABLE IF NOT EXISTS payout_workbooks")
+    ddl = SCHEMA[start : SCHEMA.index(");", start) + 2]
+    conn.execute(translate_ddl(ddl) if DB_URL else ddl)
+
+
+def _0042_cycle_reporting_adjustments(conn: Any) -> None:
+    from payout.db.connection import translate_ddl
+    from payout.db.schema import SCHEMA
+
+    for marker in (
+        "CREATE TABLE IF NOT EXISTS cycle_reporting_adjustments",
+        "CREATE VIEW IF NOT EXISTS reporting_transactions",
+    ):
+        start = SCHEMA.index(marker)
+        ddl = SCHEMA[start : SCHEMA.index(";", start) + 1]
+        conn.execute(translate_ddl(ddl) if DB_URL else ddl)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1232,6 +1254,8 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0038_provider_rate", _0038_provider_rate),
     ("0039_rider_payment_model", _0039_rider_payment_model),
     ("0040_shadowfax_pincode_rates", _0040_shadowfax_pincode_rates),
+    ("0041_payout_workbooks", _0041_payout_workbooks),
+    ("0042_cycle_reporting_adjustments", _0042_cycle_reporting_adjustments),
 ]
 
 _TRACKING_DDL = (

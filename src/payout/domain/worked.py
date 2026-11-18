@@ -146,7 +146,7 @@ def worked_person_sql(person_col: str) -> str:
     """
     events = ", ".join(f"'{e}'" for e in EARNING_EVENTS)
     appeared = (
-        "AND EXISTS (SELECT 1 FROM transactions _t "
+        "AND EXISTS (SELECT 1 FROM reporting_transactions _t "
         "            WHERE _t.person_id = _rm.person_id "
         "              AND _t.company = _rm.company "
         f"             AND _t.event_type IN ({events}) "
@@ -177,7 +177,7 @@ def last_worked_sql(person_col: str) -> str:
     """
     events = ", ".join(f"'{e}'" for e in EARNING_EVENTS)
     return (
-        "(SELECT MAX(_wt.cycle_end) FROM transactions _wt "
+        "(SELECT MAX(_wt.cycle_end) FROM reporting_transactions _wt "
         "LEFT JOIN companies _wc ON _wc.company_name = _wt.company "
         f"WHERE _wt.person_id = {person_col} "
         f"AND _wt.event_type IN ({events}) "

@@ -105,3 +105,7 @@ secrets/*
 
 # the Android app's data layer is source, not data files
 !android/app/src/main/kotlin/com/qwikserve/recruiter/data/
+!android/app/src/test/kotlin/com/qwikserve/recruiter/data/
+
+# Generic report code contains no rider data.
+!src/payout/cycle_recovery.py

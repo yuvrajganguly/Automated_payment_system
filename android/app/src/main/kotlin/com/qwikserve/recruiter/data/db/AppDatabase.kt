@@ -45,16 +45,24 @@ interface RiderDao {
      * everyone), one zone ([zone] = "North" / "South", or null) and one
      * activity state ([working] = true / false, or null for both). A row that
      * predates the server sending the flag counts as idle rather than
-     * vanishing from both halves of the filter.
+     * vanishing from both halves of the filter. Explicit rider searches may
+     * include inactive ids; assignment and referral pickers remain active-only.
      */
     @Query(
-        "SELECT * FROM riders WHERE isActive = 1 AND (:q = '' OR haystack LIKE '%' || :q || '%') " +
+        "SELECT * FROM riders WHERE (isActive = 1 OR :includeInactive) " +
+            "AND (:q = '' OR haystack LIKE '%' || :q || '%') " +
             "AND (:mine IS NULL OR recruitedBy = :mine) " +
             "AND (:zone IS NULL OR zone = :zone) " +
             "AND (:working IS NULL OR COALESCE(working, 0) = :working) " +
             "ORDER BY name COLLATE NOCASE, company",
     )
-    fun search(q: String, mine: String?, zone: String?, working: Boolean?): Flow<List<RiderEntity>>
+    fun search(
+        q: String,
+        mine: String?,
+        zone: String?,
+        working: Boolean?,
+        includeInactive: Boolean,
+    ): Flow<List<RiderEntity>>
 
     @Query("SELECT * FROM riders WHERE personId = :personId ORDER BY company")
     fun forPerson(personId: Long): Flow<List<RiderEntity>>

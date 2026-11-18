@@ -60,6 +60,20 @@ rest of the roster, so the filter and the "last worked 4 Sep" line on each row
 work with no signal, exactly like the zone and Mine/All ones. A rider nobody
 has ever paid reads "never worked" rather than showing an empty space.
 
+Rider lookup: the list and searches include active and inactive roster ids.
+Inactive records are labelled
+**inactive id**; the Mine/All, zone and Working filters still apply. EV and
+referral pickers remain active-only. A missing rider who triggers an
+"already exists" warning may be inactive, outside the recruiter's zone,
+or assigned to a store that the office has not zoned yet. Refresh before
+creating another record; the office should check the existing rider's store
+and zone if it is still absent.
+
+Roster sync follows `limit`/`offset` and `X-Total-Count` through every page,
+including inactive ids. Room is replaced only after every page succeeds;
+failed or inconsistent pages preserve the previous cache. Failed refreshes
+show a warning even when saved results are available.
+
 A rider's page ends with their **timeline** — `GET /app/person/{id}/timeline`,
 newest first: added, EV handed over, taken back, sent for repair, brought back,
 deposit closed out, return date amended, document uploaded. It is the console's

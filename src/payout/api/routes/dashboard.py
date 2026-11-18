@@ -190,7 +190,7 @@ def dashboard_summary(
         active_pids = {
             r["person_id"]
             for r in conn.execute(
-                f"SELECT DISTINCT t.person_id FROM transactions t "
+                f"SELECT DISTINCT t.person_id FROM reporting_transactions t "
                 f"WHERE t.event_type='PAYOUT' {scope}",
                 scope_params,
             ).fetchall()
@@ -203,7 +203,7 @@ def dashboard_summary(
         companies_ran = [
             r["company"]
             for r in conn.execute(
-                f"SELECT DISTINCT t.company FROM transactions t "
+                f"SELECT DISTINCT t.company FROM reporting_transactions t "
                 f"WHERE t.event_type='PAYOUT' {scope}",
                 scope_params,
             ).fetchall()
@@ -287,7 +287,7 @@ def dashboard_summary(
             f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
             f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
             f"          THEN t.amount ELSE 0 END) AS manual_rent "
-            f"FROM transactions t WHERE 1=1 {scope}",
+            f"FROM reporting_transactions t WHERE 1=1 {scope}",
             scope_params,
         ).fetchone()
         arrears_recov = float(sums["arrears_recovered"] or 0)
@@ -306,7 +306,7 @@ def dashboard_summary(
                 f"  SELECT t.person_id, "
                 f"    SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) "
                 f"    - SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS shortfall "  # noqa: E501
-                f"  FROM transactions t WHERE 1=1 {scope} "
+                f"  FROM reporting_transactions t WHERE 1=1 {scope} "
                 f"  GROUP BY t.person_id"
                 f") WHERE shortfall > 0",
                 scope_params,
@@ -377,7 +377,7 @@ def dashboard_summary(
             "total_payout": round(
                 float(
                     conn.execute(
-                        "SELECT COALESCE(SUM(-amount), 0) AS s FROM transactions "
+                        "SELECT COALESCE(SUM(-amount), 0) AS s FROM reporting_transactions "
                         "WHERE event_type='RELEASE'"
                     ).fetchone()["s"]
                 ),
@@ -479,7 +479,7 @@ def dashboard_summary(
                             THEN t.amount ELSE 0 END) AS recovered,
                    SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')
                             THEN -t.amount ELSE 0 END) AS added
-            FROM transactions t
+            FROM reporting_transactions t
             WHERE t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED','RENT_MISSED','RENT_DUE')
               AND t.cycle_end BETWEEN ? AND ?
               {am_chart_co_filter}
@@ -642,7 +642,7 @@ def dashboard_breakdown(
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS payout, "
                 f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "  # noqa: E501
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
@@ -671,7 +671,7 @@ def dashboard_breakdown(
                 f"JOIN rider_master rm ON rm.person_id=pr.person_id AND rm.is_active=1 "
                 f"WHERE 1=1 {co_filter} "
                 f"  AND NOT EXISTS ("
-                f"    SELECT 1 FROM transactions t "
+                f"    SELECT 1 FROM reporting_transactions t "
                 f"    WHERE t.person_id=pr.person_id "
                 f"      AND t.event_type='PAYOUT' "
                 f"      AND date(t.created_at) BETWEEN ? AND ?"
@@ -856,7 +856,7 @@ def dashboard_breakdown(
                 f"SELECT t.person_id, pr.display_name AS name, "
                 f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent_charged, "  # noqa: E501
                 f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS rent_collected "  # noqa: E501
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('RENT','RENT_COLLECTED') {scope} "
                 f"GROUP BY t.person_id, pr.display_name "
@@ -875,7 +875,7 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       t.event_type, SUM(t.amount) AS amount "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company, t.event_type "
@@ -889,7 +889,7 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       t.amount, t.created_by, t.remarks "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type='RENT_COLLECTED' "
                 f"  AND t.created_by IS NOT NULL "
@@ -925,7 +925,7 @@ def dashboard_breakdown(
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(CASE WHEN t.event_type='PAYOUT' THEN t.amount ELSE 0 END) AS payout, "
                 f"       SUM(CASE WHEN t.event_type='RELEASE' THEN -t.amount ELSE 0 END) AS released "  # noqa: E501
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE') {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
@@ -944,7 +944,7 @@ def dashboard_breakdown(
             sql = (
                 f"SELECT t.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(-t.amount) AS released "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type='RELEASE' {scope} "
                 f"GROUP BY t.person_id, pr.display_name, t.company "
@@ -1092,7 +1092,7 @@ def dashboard_export(
             f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
             f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
             f"          THEN t.amount ELSE 0 END) AS manual_rent "
-            f"FROM transactions t WHERE 1=1 {scope}",
+            f"FROM reporting_transactions t WHERE 1=1 {scope}",
             scope_params,
         ).fetchone()
         cod_filter = "1=1"
@@ -1164,7 +1164,7 @@ def dashboard_export(
                 f"       SUM(CASE WHEN t.event_type IN ('RENT_MISSED','RENT_DUE')  THEN -t.amount ELSE 0 END) AS missed, "  # noqa: E501
                 f"       SUM(CASE WHEN t.event_type IN ('RENT_RECOVERED','XC_RENT_RECOVERED') "
                 f"                THEN t.amount ELSE 0 END) AS recovered "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('RENT','RENT_COLLECTED','RENT_MISSED','RENT_DUE', "
                 f"                       'RENT_RECOVERED','XC_RENT_RECOVERED') {scope} "
@@ -1273,7 +1273,7 @@ def dashboard_export(
                 f"       SUM(CASE WHEN t.event_type='RENT' THEN -t.amount ELSE 0 END) AS rent, "
                 f"       SUM(CASE WHEN t.event_type='RENT_COLLECTED' THEN t.amount ELSE 0 END) AS collected "  # noqa: E501
                 f"FROM ev_assignments ea "
-                f"JOIN transactions t ON t.person_id=ea.person_id "
+                f"JOIN reporting_transactions t ON t.person_id=ea.person_id "
                 f"JOIN person_registry pr ON pr.person_id=ea.person_id "
                 f"WHERE ea.returned_date IS NULL AND t.event_type='RENT' {scope} "
                 f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
@@ -1308,7 +1308,7 @@ def dashboard_export(
                 f"SELECT ea.ev_id, ea.person_id, pr.display_name AS name, t.company, "
                 f"       SUM(-t.amount) AS missed "
                 f"FROM ev_assignments ea "
-                f"JOIN transactions t ON t.person_id=ea.person_id "
+                f"JOIN reporting_transactions t ON t.person_id=ea.person_id "
                 f"JOIN person_registry pr ON pr.person_id=ea.person_id "
                 f"WHERE ea.returned_date IS NULL AND t.event_type IN ('RENT_MISSED','RENT_DUE') {scope} "  # noqa: E501
                 f"GROUP BY ea.ev_id, ea.person_id, pr.display_name, t.company "
@@ -1342,7 +1342,7 @@ def dashboard_export(
                 f" SUM(CASE WHEN t.event_type='RENT_COLLECTED' AND "
                 f"          (t.created_by IS NOT NULL AND t.created_by NOT IN ('engine','auto')) "
                 f"          THEN t.amount ELSE 0 END) AS manual_rent "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type IN ('PAYOUT','RELEASE','RENT','RENT_RECOVERED', "
                 f"                       'XC_RENT_RECOVERED','RENT_COLLECTED') {scope} "
@@ -1395,7 +1395,7 @@ def dashboard_export(
                 f"SELECT t.id, t.person_id, pr.display_name AS name, t.company, "
                 f"       t.cycle_start, t.cycle_end, t.amount, t.remarks, "
                 f"       t.created_by, t.created_at "
-                f"FROM transactions t "
+                f"FROM reporting_transactions t "
                 f"JOIN person_registry pr ON pr.person_id=t.person_id "
                 f"WHERE t.event_type='RENT_COLLECTED' AND t.created_by IS NOT NULL "
                 f"  AND t.created_by NOT IN ('engine','auto') {scope} "

@@ -1,5 +1,8 @@
 import { DragEvent, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { api, savePayoutWorkbook } from '../api/client'
+import type { RunResponse } from '../api/types'
+import { PayoutDownload } from './PayoutDownload'
+import { Link } from 'react-router-dom'
 import { money } from '../lib/format'
 
 /** Process Payout for a per-order company on the pincode ratecard (Shadowfax).
@@ -31,16 +34,10 @@ type RunResp = {
   result: { warnings: string[]; unknown_riders: { rider_id: string; name: string; hub: string; gross?: number; orders?: number }[]
             pay_rows: { rider_id: string; is_hold: boolean; released: number }[]; dues_rows: { rider_id: string; is_hold: boolean; released: number }[] }
   shadowfax: Detail
-  xlsx?: { filename: string; content_base64: string; mime: string }
+  xlsx?: RunResponse['xlsx']
+  run?: RunResponse['run']
 }
 type Scan = { files: SourceFile[]; suggested_cycle_start: string | null; suggested_cycle_end: string | null; last_cycle_end: string | null }
-
-function downloadBase64(b64: string, filename: string, mime: string) {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
-  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
 
 export function ShadowfaxPanel({ company, onTypeCounts }: { company: string; onTypeCounts: () => void }) {
   const [files, setFiles] = useState<File[]>([])
@@ -87,10 +84,20 @@ export function ShadowfaxPanel({ company, onTypeCounts }: { company: string; onT
       const r = await api.postForm<RunResp>('/cycles/run', fd)
       setData(r)
       if (commit) {
-        if (r.xlsx) downloadBase64(r.xlsx.content_base64, r.xlsx.filename, r.xlsx.mime)
         setDone(`Committed ${company} ${start} → ${end}.`); setPreviewKey('')
-      } else setPreviewKey(key)
-    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+        if (r.xlsx) {
+          try {
+            savePayoutWorkbook(r.xlsx)
+          } catch {
+            setError('The workbook download could not start. Download it from Processed payouts.')
+          }
+        }
+      } else { setDone(null); setPreviewKey(key) }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to process'
+      if (commit) setPreviewKey('')
+      setError(commit ? message + ' Check Processed payouts before trying again.' : message)
+    }
     finally { setBusy(false) }
   }
 
@@ -148,7 +155,11 @@ export function ShadowfaxPanel({ company, onTypeCounts }: { company: string; onT
         </button>
       </div>
       {error && <p className="text-red-400 mt-3 text-sm">{error}</p>}
-      {done && <p className="text-emerald-300 mt-3 text-sm">{done}</p>}
+      {done && <div className="flex items-center gap-3 flex-wrap mt-3 text-sm">
+        <span className="text-emerald-300">{done}</span>
+        {data?.run && <PayoutDownload run={data.run} />}
+        <Link to={'/payout-history?company=' + encodeURIComponent(company)} className="text-brand underline">View processed payouts</Link>
+      </div>}
 
       {s && data && (
         <div className="mt-6 space-y-5">

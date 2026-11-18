@@ -143,6 +143,54 @@ def test_the_bootstrap_offers_one_zone_only(client, board):
     ]
 
 
+# ── roster search and pagination ────────────────────────────────────────────
+
+
+def test_roster_pages_have_a_stable_order_for_matching_names(db, client):
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    for rid in ("NTS-C", "NTS-A", "NTS-B"):
+        pid = make_person(db, "Existing Rider")
+        make_rider(db, pid, rid, "Jiffy", "Existing Rider")
+    db.execute("UPDATE rider_master SET recruited_by='north@t.test'")
+    db.commit()
+
+    ids = []
+    for offset in range(3):
+        page = client.get("/api/riders", params={"limit": 1, "offset": offset}, headers=north)
+        assert page.status_code == 200, page.text
+        assert page.headers["X-Total-Count"] == "3"
+        ids.extend(r["rider_id"] for r in page.json())
+    assert ids == ["NTS-A", "NTS-B", "NTS-C"]
+
+
+def test_inactive_existing_rider_is_searchable_only_within_the_zone(db, client):
+    north = _hdr(client, "north@t.test", "Recruit-pass-1")
+    south = _hdr(client, "south@t.test", "Recruit-pass-2")
+    pid = make_person(db, "Existing Rider")
+    make_rider(db, pid, "NTS-TEST", "Jiffy", "Existing Rider")
+    db.execute("UPDATE rider_master SET hub='NTS', is_active=0")
+    db.execute("INSERT INTO company_hubs (company, hub, zone) VALUES ('Jiffy', 'NTS', 'North')")
+    db.commit()
+
+    for query in ("Existing Rider", "NTS-TEST"):
+        found = client.get("/api/riders", params={"q": query}, headers=north)
+        assert found.status_code == 200, found.text
+        assert [r["person_id"] for r in found.json()] == [pid]
+        assert found.json()[0]["is_active"] is False
+        assert client.get("/api/riders", params={"q": query}, headers=south).json() == []
+        assert (
+            client.get("/api/riders", params={"q": query, "active": True}, headers=north).json()
+            == []
+        )
+
+    duplicate = client.post(
+        "/api/riders", json={"company": "Jiffy", "name": "Existing Rider"}, headers=north
+    )
+    assert duplicate.status_code == 409
+    assert "already exists" in duplicate.json()["detail"]
+    assert db.execute("SELECT COUNT(*) FROM person_registry").fetchone()[0] == 1
+
+
 # ── counting people, not rider ids ───────────────────────────────────────────
 
 

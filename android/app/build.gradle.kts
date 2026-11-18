@@ -43,6 +43,9 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -85,5 +88,6 @@ dependencies {
     implementation(libs.security.crypto)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
     debugImplementation(libs.compose.ui.tooling)
 }

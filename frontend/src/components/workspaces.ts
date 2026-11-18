@@ -31,6 +31,7 @@ export const WORKSPACES: Workspace[] = [
     pages: [
       { to: '/', label: 'Process Payout', end: true },
       { to: '/adhoc', label: 'Ad-hoc Payout' },
+      { to: '/payout-history', label: 'Processed payouts', adminOnly: true },
       { to: '/corrections', label: 'Corrections' },
     ],
     noRecruiter: true,
@@ -62,8 +63,8 @@ export const WORKSPACES: Workspace[] = [
     pages: [
       { to: '/evs', label: 'EVs' },
       { to: '/ev-rent', label: 'Rent Ledger' },
+      { to: '/raft', label: 'Raft', adminOnly: true },
     ],
-    extra: ['/raft', '/blive'],
   },
   {
     key: 'money',
@@ -97,7 +98,7 @@ export const WORKSPACES: Workspace[] = [
 /** Recruiters see riders and the fleet, never money: '/inactive' and the
  * rent ledger / provider pages are money views. */
 const RECRUITER_HIDDEN_PAGES = new Set(['/inactive', '/ev-rent'])
-const RECRUITER_HIDDEN_PREFIXES = ['/raft', '/blive']
+const RECRUITER_HIDDEN_PREFIXES = ['/raft']
 /** Routes every role may open regardless of workspace (own account). */
 const ALWAYS_ALLOWED = new Set(['/settings', '/requests'])
 

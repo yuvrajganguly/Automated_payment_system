@@ -104,6 +104,16 @@ GET   /companies                          company list (for the company picker)
 owned by another person is refused with `409` naming the owner. Deleting riders, merging/splitting people and onboarding unknown
 ids from payout files are admin-only.
 
+Roster sync must page until `X-Total-Count` is reached (`limit` is capped at
+2,000), with no `active` filter so inactive ids are cached too. Pages are
+ordered by name, company, then rider id to break equal-name ties. The Android
+Riders tab includes inactive ids both when browsing and searching, and labels them;
+its other filters still apply. Duplicate checks cover existing records
+regardless of active status or zone, so "already exists" does not imply the
+record is in this recruiter's visible roster. If refreshing and clearing
+list filters do not find it, the office must check the existing record's
+store/zone. Search does not bypass the zone fence.
+
 ## Zones, stores and the to-do list
 
 ```

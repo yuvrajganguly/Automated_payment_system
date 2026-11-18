@@ -552,6 +552,7 @@ def process_cycle(
     ad_hoc=False,
     label=None,
     before_commit=None,
+    save_output=None,
 ) -> CycleResult:
     """Run one company cycle. Input is either ``file_bytes`` (the company's
     payout file, read through its parser config) or a ready ``ParseResult``
@@ -605,7 +606,7 @@ def process_cycle(
                     "DELETE FROM adhoc_runs WHERE company=? AND file_digest=?", (company, digest)
                 )
             try:
-                conn.execute(
+                adhoc_claim = conn.execute(
                     "INSERT INTO adhoc_runs (company, ran_on, label, file_digest, riders, "
                     "total_paid, created_by) VALUES (?,?,?,?,?,?,?)",
                     (
@@ -618,11 +619,12 @@ def process_cycle(
                         created_by,
                     ),
                 )
+                run_id = adhoc_claim.lastrowid
             except Exception as exc:  # unique index → already processed
                 raise CycleAlreadyCommitted(
                     f"This exact ad-hoc file has already been processed for {company} "
-                    f"({len(parsed.records)} riders, {to_rupees(paid):,.0f}). Re-processing "
-                    "would pay them twice. Pass force=true to override intentionally."
+                    f"({len(parsed.records)} riders, {to_rupees(paid):,.0f}). "
+                    "Open Operate → Processed payouts to download its record."
                 ) from exc
         elif commit:
             # Re-commit guard, inside THIS transaction. A committed cycle owns
@@ -630,21 +632,23 @@ def process_cycle(
             # commit of the same cycle fails on the primary key instead of both
             # runs passing a check made in a separate connection.
             dup = conn.execute(
-                "SELECT 1 FROM company_cycles WHERE company=? AND cycle_start=? AND cycle_end=?",
+                "SELECT id FROM company_cycles WHERE company=? AND cycle_start=? AND cycle_end=?",
                 (company, _iso(cycle_start), _iso(cycle_end)),
             ).fetchone()
             if dup and not force:
                 raise CycleAlreadyCommitted(
                     f"{company} {_iso(cycle_start)}..{_iso(cycle_end)} has already been "
-                    "committed. Re-committing would double-count payouts. "
-                    "Pass force=true to override intentionally."
+                    "committed. Open Operate → Processed payouts to download its record."
                 )
             if not dup:
-                conn.execute(
+                cycle_claim = conn.execute(
                     "INSERT INTO company_cycles (company, cycle_start, cycle_end, "
                     "week_bucket, processed_by) VALUES (?,?,?,?,?)",
                     (company, _iso(cycle_start), _iso(cycle_end), "", created_by),
                 )
+                run_id = cycle_claim.lastrowid
+            else:
+                run_id = dup["id"]
 
         # Hub codes: what this file teaches (store_ids → store_names) plus what
         # earlier files taught, so COD rows — which only state the code — get
@@ -1530,6 +1534,8 @@ def process_cycle(
             # order days it paid) lands in the same transaction or not at all.
             if before_commit is not None:
                 before_commit(conn)
+            if save_output is not None:
+                save_output(conn, result, run_id)
             conn.commit()
         else:
             conn.rollback()

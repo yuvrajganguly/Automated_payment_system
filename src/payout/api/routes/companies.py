@@ -337,7 +337,7 @@ def update_company(
 def get_next_cycle(company_name: str, _: dict = Depends(get_current_user)) -> dict:
     """Return the next (cycle_start, cycle_end) for the given company.
 
-    Reads MAX(cycle_end) from the transactions table for this company. If the
+    Reads the latest committed cycle, falling back to legacy ledger history. If the
     company has no history yet, anchors on today using the company's cadence.
     """
     with get_connection() as conn:
@@ -347,9 +347,10 @@ def get_next_cycle(company_name: str, _: dict = Depends(get_current_user)) -> di
         if not row:
             raise HTTPException(404, f"Unknown company: {company_name!r}")
         latest = conn.execute(
-            "SELECT MAX(cycle_end) AS last_end FROM transactions "
+            "SELECT COALESCE((SELECT MAX(cycle_end) FROM company_cycles WHERE company=?), "
+            "MAX(cycle_end)) AS last_end FROM reporting_transactions "
             "WHERE company = ? AND event_type IN ('PAYOUT','RENT','RENT_MISSED','RENT_DUE','RENT_RECOVERED','DUES_CARRY')",  # noqa: E501
-            (company_name,),
+            (company_name, company_name),
         ).fetchone()
     last_end: date | None = None
     if latest and latest["last_end"]:

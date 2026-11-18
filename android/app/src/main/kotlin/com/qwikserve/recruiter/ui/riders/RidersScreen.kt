@@ -46,6 +46,7 @@ import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.common.shortDate
 import com.qwikserve.recruiter.ui.theme.Qwik
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,6 +103,7 @@ private data class PersonRow(
     val hub: String?,
     val zone: String?,
     val hasEv: Boolean,
+    val isActive: Boolean,
     val working: Boolean?,
     val lastWorkedOn: String?,
 )
@@ -118,6 +120,7 @@ private fun List<RiderEntity>.byPerson(): List<PersonRow> {
             hub = rows.firstNotNullOfOrNull { it.hub?.takeIf(String::isNotBlank) },
             zone = rows.firstNotNullOfOrNull { it.zone?.takeIf(String::isNotBlank) },
             hasEv = rows.any { it.vehicle == "EV" },
+            isActive = rows.any { it.isActive },
             // Working is a property of the person on the server, so every row
             // carries the same answer; ORed anyway so a half-synced cache
             // cannot report somebody idle who is not.
@@ -165,6 +168,9 @@ class RidersViewModel @Inject constructor(
                     // theirs, so filtering again here can only subtract.
                     zone = if (f.scope == Scope.ALL && f.zone != "All" && !fenced) f.zone else null,
                     working = f.activity.working,
+                    // An inactive id still exists and blocks duplicate onboarding.
+                    // Keep it visible in the roster without widening the zone.
+                    includeInactive = true,
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -183,8 +189,14 @@ class RidersViewModel @Inject constructor(
             try {
                 repo.refresh()
                 hasCache = true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: IOException) {
-                error = if (hasCache == true) null else "Can't reach the server — pull down to try again."
+                error = if (hasCache == true) {
+                    "Can't refresh riders — showing saved results, which may be out of date. Pull down to retry."
+                } else {
+                    "Can't reach the server — pull down to try again."
+                }
             } catch (e: Exception) {
                 error = e.message ?: "Could not load riders"
             } finally {
@@ -244,6 +256,13 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 )
             }
             SearchField(q, onChange = { vm.query.value = it }, placeholder = "Name, rider id, phone or hub")
+            if (q.isNotBlank()) {
+                Text(
+                    "This view includes inactive riders.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Qwik.N700,
+                )
+            }
         }
         Rule()
         if (vm.error != null) Note(vm.error!!, color = Qwik.Accent700)
@@ -252,7 +271,12 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 vm.hasCache == false && riders.isEmpty() && vm.refreshing -> SkeletonList()
                 riders.isEmpty() -> Note(
                     when {
-                        q.isNotBlank() -> "No rider matches \"$q\"."
+                        q.isNotBlank() -> buildString {
+                            append("No rider matches \"$q\" in this view.")
+                            if (scope == Scope.MINE) append(" Try All riders.")
+                            if (activity != Activity.ALL) append(" Set Working to All.")
+                            append(" Pull down to refresh. If they already exist, ask the office to check their store and zone.")
+                        }
                         activity == Activity.WORKING ->
                             "Nobody here was in their company's last payout. Try All."
                         activity == Activity.IDLE ->
@@ -292,7 +316,14 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                                         }
                                         if (r.hasEv) Tag("EV", accent = true)
                                     }
-                                    Tag(if (r.working == true) "working" else "idle", accent = r.working == true)
+                                    Tag(
+                                        when {
+                                            !r.isActive -> "inactive id"
+                                            r.working == true -> "working"
+                                            else -> "idle"
+                                        },
+                                        accent = r.isActive && r.working == true,
+                                    )
                                 }
                             },
                         )

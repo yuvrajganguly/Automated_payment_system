@@ -11,6 +11,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { Spinner } from '../components/Spinner'
 import { moneyWhole } from '../lib/format'
+import { useAuth } from '../auth/AuthContext'
 
 interface Header {
   company_name: string
@@ -59,6 +60,7 @@ const cell = 'px-3 py-2 text-right tabular-nums whitespace-nowrap'
 const cellL = 'px-3 py-2 whitespace-nowrap'
 
 export function CompanyPage() {
+  const { user } = useAuth()
   const { name = '' } = useParams<{ name: string }>()
   const enc = encodeURIComponent(name)
   const head = useApi<Header>('/dashboard/story/company/' + enc)
@@ -76,6 +78,9 @@ export function CompanyPage() {
       <div className="flex flex-wrap gap-4 text-sm">
         <Link to="/dashboard?tab=companies" className="text-brand underline">← Back to Companies</Link>
         <Link to="/companies" className="text-slate-500 hover:text-brand-300">Manage companies</Link>
+        {(user?.role === 'admin' || user?.role === 'creator') && (
+          <Link to={'/payout-history?company=' + enc} className="text-brand underline">Download processed payouts</Link>
+        )}
       </div>
       <h1 className="text-2xl font-bold mt-2 mb-1">
         {h.company_name}

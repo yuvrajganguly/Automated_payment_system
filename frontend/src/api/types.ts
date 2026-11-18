@@ -108,9 +108,24 @@ export interface CycleResult {
 
 export interface RunResponse {
   result: CycleResult
+  run?: PayoutRunRef
   xlsx?: { filename: string; content_base64: string; mime: string }
   /** Salary companies: the per-rider working the payout came from (rupees). */
   salary_lines?: SalaryLine[]
+}
+
+export interface PayoutRunRef {
+  id: number
+  kind: 'cycle' | 'ad_hoc'
+}
+
+export interface ProcessedPayout extends PayoutRunRef {
+  company: string
+  cycle_start: string | null
+  cycle_end: string
+  label: string | null
+  processed_at: string
+  report: 'original' | 'ledger' | 'summary'
 }
 
 export interface SalaryLine {

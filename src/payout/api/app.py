@@ -80,6 +80,9 @@ from payout.api.routes import (
     providers as providers_routes,
 )
 from payout.api.routes import (
+    public as public_routes,
+)
+from payout.api.routes import (
     recruiters as recruiter_routes,
 )
 from payout.api.routes import (
@@ -265,6 +268,7 @@ app.include_router(activity_routes.router, prefix="/api/activity", tags=["activi
 app.include_router(recruiter_routes.router, prefix="/api/recruiters", tags=["recruiters"])
 app.include_router(users_routes.router, prefix="/api/users", tags=["users"])
 app.include_router(creator_routes.router, prefix="/api/creator", tags=["creator"])
+app.include_router(public_routes.router, prefix="/api/public", tags=["public"])
 
 
 @app.get("/openapi.json", include_in_schema=False)

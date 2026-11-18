@@ -230,6 +230,9 @@ def seed_ev_models(conn: sqlite3.Connection) -> None:
 
 
 def seed_companies(conn: sqlite3.Connection) -> None:
+    # An operator may consolidate the legacy companies into Blitz. Do not
+    # recreate the retired names on the next application startup.
+    consolidated = conn.execute("SELECT 1 FROM companies WHERE company_name='Blitz'").fetchone()
     conn.executemany(
         """
         INSERT OR IGNORE INTO companies
@@ -245,7 +248,11 @@ def seed_companies(conn: sqlite3.Connection) -> None:
              :hold_status_column, :is_active, :rider_ids_shared_with,
              :payment_model, :cadence, :per_order_rate, :notes, :rate_model)
         """,
-        [{**_COMPANY_DEFAULTS, "rate_model": None, **c} for c in COMPANIES],
+        [
+            {**_COMPANY_DEFAULTS, "rate_model": None, **c}
+            for c in COMPANIES
+            if not (consolidated and c["company_name"] in ("Kaptan", "Nykaa"))
+        ],
     )
     seed_pincode_rates(conn)
 
