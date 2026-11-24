@@ -69,7 +69,7 @@ export const supportTopics = [
 // these figures (supplied by Qwikserve, November 2026) are shown.
 export const riderStats = {
   api: "https://app.qwikserve.in/api/public/rider-stats",
-  fallbackTotal: 1103,
+  fallbackTotal: 1073,
   fallbackActive: 504,
   fallbackNote: "As of November 2026.",
 };

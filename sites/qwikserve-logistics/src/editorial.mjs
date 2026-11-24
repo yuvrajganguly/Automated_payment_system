@@ -8,7 +8,7 @@ export const rentalCopy = "EV rental is available only to riders working under Q
 // shorter and compact marks taller, so every logo carries similar visual weight.
 const logos = [
   ["Spencer’s", "spencers", 457, 107], ["Myntra", "myntra", 238, 250], ["DealShare", "dealshare", 233, 260],
-  ["Zomato", "zomato", 260, 260, 38], ["Shadowfax", "shadowfax", 452, 143], ["Delhivery", "delhivery", 352, 104],
+  ["Zomato", "zomato", 472, 100], ["Shadowfax", "shadowfax", 452, 143], ["Delhivery", "delhivery", 352, 104],
   ["Blue Dart", "blue-dart", 456, 86], ["Nykaa", "nykaa", 469, 158], ["Meadow", "meadow", 399, 260],
 ];
 const logoHeight = (w, h, fixed) => fixed || Math.round(Math.min(48, 48 * Math.pow(w / h, -0.42)));
@@ -83,7 +83,7 @@ export function homePage() {
       ["people","Support after deployment","Rider support and team leaders stay in touch once riders are at your hub."],
     ].map(([ic,h,b])=>`<article data-reveal>${icon(ic)}<h3>${h}</h3><p>${b}</p></article>`).join("")}</div>
   </section>
-  <section class="section container field-notes"><div>${scene("recruiter","Recruitment desk")}</div><div>
+  <section class="section container field-notes"><div>${slideshow("prep","Before a rider reaches your hub")}</div><div>
     ${eyebrow("FROM THE FIELD")}<h2>Before a rider<br><em>reaches your hub.</em></h2>
     <p>A recruiter starts with the reporting point, the shift and the kind of delivery work involved. Those details shape the conversations with prospective riders and the briefing before they arrive.</p>
     ${link("See the four stages of recruitment","/partners/#process")}
@@ -152,6 +152,19 @@ export const journeys = {
     ["journey-hub","Day 3","Briefed at the hub","The rider meets the team leader and learns the reporting point."],
     ["journey-road","Day 4","The first shift","Out on your routes, on their own bike or a rental EV."],
     ["journey-door","Every day after","At the doorstep","Support stays one call away, for the rider and for your hub."],
+  ],
+  prep: [
+    ["journey-brief","Before day one","The reporting point","We start from your hub’s address, shift pattern and headcount."],
+    ["journey-call","Before day one","A recruiter calls","Riders hear about the work, the hours and the vehicle first."],
+    ["journey-forms","Before day one","Documents in order","Onboarding is completed and checked before anyone travels."],
+    ["journey-hub","Day one","Briefed at your hub","Riders arrive knowing who to ask for and what the shift involves."],
+  ],
+  lastmile: [
+    ["journey-brief","01","A local brief","Every requirement starts with one reporting point and its shifts."],
+    ["journey-source","02","Riders from the neighbourhood","People who live near the hub and know its streets."],
+    ["journey-ready","03","Through the hub","Parcels picked, scanned and loaded at the start of the shift."],
+    ["journey-rain","04","Whatever the weather","Team leaders keep riders supported through the working day."],
+    ["journey-door","05","The last mile","The order reaches the customer’s door."],
   ],
   brief: [
     ["journey-brief","Step 1","Your brief","Reporting point, shift pattern and headcount, in one conversation."],
