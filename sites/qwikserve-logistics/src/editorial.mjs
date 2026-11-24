@@ -65,7 +65,7 @@ export function homePage() {
   <section class="section container experience-ledger" aria-label="Company experience">
     <div>${eyebrow("QWIKSERVE IN NUMBERS")}<h2>Our work <br>on the ground.</h2>${link("Experience & highlights","/highlights/")}</div>
     <dl data-stat-api="${riderStats.api}"><div><dt data-stat="riders_total">${formatCount(riderStats.fallbackTotal)}</dt><dd>Riders onboarded with Qwikserve.</dd></div>
-    <div><dt>2018</dt><dd>Founded in August, with our head office in Kolkata.</dd></div></dl>
+    <div><dt>2019</dt><dd>Founded in August, with our head office in Kolkata.</dd></div></dl>
     <p class="stat-note" data-stat-note>${riderStats.fallbackNote}</p>
   </section>
   <section class="section offers-section"><div class="container">
@@ -75,7 +75,7 @@ export function homePage() {
   <section class="section container why-section" id="why-qwikserve">
     ${sectionTitle("WHY QWIKSERVE","One team from<br><em>first call to first shift.</em>","The right riders, on every shift. Here is what that means for your operation.")}
     <div class="team-grid">${[
-      ["clock","Working since 2018","Recruiting and deploying delivery manpower from our Kolkata head office since August 2018."],
+      ["clock","Working since 2019","Recruiting and deploying delivery manpower from our Kolkata head office since August 2019."],
       ["route","End-to-end","Sourcing, screening, onboarding, deployment and support are handled by one team, not handed between agencies."],
       ["search","Field and phone reach","Field recruiters and telecallers reach riders in the neighbourhoods your hubs serve."],
       ["parcel","Many kinds of delivery","Experience across quick commerce, e-commerce, food, courier, retail, pharmacy and hyperlocal operations."],
@@ -128,6 +128,9 @@ export function evTeaser() {
 // file is missing falls back to an existing photo so the build never breaks.
 import { existsSync as fileExists } from "node:fs";
 const fieldPhotos = {
+  33136687:["A rider on a scooter riding through monsoon rain","India"],
+  11091214:["A Qwikserve rider in a red T-shirt beside parked motorbikes at a Kolkata street hub","Kolkata"],
+  28928633:["A rider on a scooter in a busy market street","Punjab"],
   12203733:["A rider on his scooter checking a message on his phone","India"],
   4487383:["Two workers carrying a parcel down a stocked hub aisle","Hub"],
   24976284:["A helmeted rider on a scooter heading out on a city road","India"],
@@ -166,13 +169,13 @@ export const journeys = {
     [33628086,"Rain or shine","Riders who turn up for the shift, whatever the weather."],
     [39948199,"Parcels","Briefed on the load before the first run."],
     [25810543,"Late shifts","Night slots and late dispatches staffed like any other."],
-    [28624791,"Bulk drops","Heavier retail and grocery runs covered too."],
+    [12333458,"Bulk drops","Heavier retail and grocery runs, carried on two wheels."],
   ],
   brief: [
     [7580860,"Your brief","A recruiter takes your reporting point, shifts and headcount."],
-    [38107476,"Your hub","We plan around when goods arrive at your hub."],
+    [11091214,"Your hub","Riders reporting at your hub, ready for the shift."],
     [39351202,"Your shifts","Sorting and dispatch windows set how many riders you need."],
-    [36569208,"Your routes","Riders who know the streets your hub serves."],
+    [28928633,"Your routes","Riders who know the streets your hub serves."],
   ],
   join: [
     [12203733,"Contact us","Call, WhatsApp or send the form. A recruiter calls you back about your area and vehicle."],
@@ -183,13 +186,13 @@ export const journeys = {
   prep: [
     [14335349,"Found nearby","Field recruiters and telecallers reach riders where they live."],
     [12333458,"Vehicle sorted","Own bike, or a rental EV for riders working with us."],
-    [36569208,"Briefed","Shift times, the reporting point and the kind of load."],
-    [13652096,"Ready","Riders arrive knowing who to ask for at the hub."],
+    [33136687,"Briefed","Shift times, the reporting point and the kind of load."],
+    [29469905,"Ready","Riders arrive knowing who to ask for at the hub."],
   ],
   lastmile: [
-    [38107477,"Kolkata first","Our head office and home ground since 2018."],
+    [19673703,"Kolkata first","Our head office and home ground since 2019."],
     [21923095,"Any load","From parcels and food to bulk retail drops."],
-    [19673703,"Any hour","Early-morning and late-night slots covered."],
+    [25810543,"Any hour","Early-morning and late-night slots covered."],
     [33224085,"The last mile","Getting it to the door is the job that matters."],
   ],
 };

@@ -337,3 +337,11 @@ body {overflow-x:clip;}
   .join-show .field-frame {order:-1;}
   .join-steps {order:2;}
 }
+
+/* ---------- 14. About: Our story ---------------------------------------- */
+.about-opening h1 {font-size:clamp(46px,5vw,72px);}
+.story-photo {border-radius:20px;aspect-ratio:3/2;}
+.story-prose-grid {display:grid;grid-template-columns:1fr 1fr;gap:22px 56px;max-width:1080px;}
+.story-prose-grid p {font-size:17.5px;line-height:1.75;color:#4f4749;}
+.story-prose-grid p:first-child {grid-column:1/-1;font-size:20px;line-height:1.65;color:var(--ink);max-width:860px;}
+@media (max-width:760px) {.story-prose-grid {grid-template-columns:1fr;} .story-prose-grid p:first-child {font-size:18px;}}

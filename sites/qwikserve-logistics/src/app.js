@@ -1,4 +1,4 @@
-import "./motion.js?v=3";
+import "./motion.js?v=4";
 import { prepareEnquiry, ENQUIRY_ENDPOINT } from "./form-model.js?v=5";
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const event = (name, detail = {}) => document.dispatchEvent(new CustomEvent("qwikserve:" + name, {detail}));

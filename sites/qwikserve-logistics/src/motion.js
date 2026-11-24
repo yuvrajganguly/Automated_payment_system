@@ -184,7 +184,7 @@ document.querySelectorAll("[data-slideshow]").forEach(show => {
   }
   function schedule() {
     clearTimeout(timer); timer = 0;
-    const run = visible && !held && !chosen && !motion.matches && !document.hidden;
+    const run = visible && !document.hidden;
     show.classList.toggle("is-playing", run);
     if (run) { show.classList.remove("tick"); void show.offsetWidth; show.classList.add("tick"); timer = setTimeout(() => go(index + 1), DURATION); }
     else show.classList.remove("tick");
@@ -193,12 +193,10 @@ document.querySelectorAll("[data-slideshow]").forEach(show => {
     t.addEventListener("click", () => go(i, true));
     t.addEventListener("keydown", e => { const d = {ArrowRight:1, ArrowDown:1, ArrowLeft:-1, ArrowUp:-1}[e.key]; if (d) { e.preventDefault(); go(index + d, true); tabs[index].focus(); } });
   });
-  show.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { held = true; schedule(); } });
-  show.addEventListener("pointerleave", () => { held = false; schedule(); });
   let touch;
   show.addEventListener("touchstart", e => { touch = e.touches[0]; }, {passive:true});
   show.addEventListener("touchend", e => { if (!touch) return; const dx = e.changedTouches[0].clientX - touch.clientX; if (Math.abs(dx) > 45) go(index + (dx < 0 ? 1 : -1), true); touch = null; }, {passive:true});
   document.addEventListener("visibilitychange", schedule);
-  new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; schedule(); }, {threshold:.4}).observe(show);
+  new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; schedule(); }, {threshold:.2}).observe(show);
   go(0);
 });
