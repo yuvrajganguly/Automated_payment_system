@@ -1,0 +1,333 @@
+/* ==========================================================================
+   Polish layer (Nov 2026): smoother loading, glass surfaces, hover-only
+   animated borders, a measured green accent, and the new sections
+   (operations, EVs, EV brand teaser, About “What we do”, form states).
+   Loaded last, so it refines the earlier stylesheets without rewriting them.
+   ========================================================================== */
+:root {
+  --green:#1b7a52; --green-2:#2b9a68; --green-soft:#eaf5ee; --green-line:#cfe6d8;
+  --glass:rgb(255 255 255 / .6); --glass-strong:rgb(255 255 255 / .78);
+  --glass-edge:rgb(255 255 255 / .85);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --shadow-soft:0 1px 0 rgb(255 255 255 / .9) inset,0 22px 48px -34px rgb(45 25 25 / .45);
+}
+html {scroll-behavior:smooth;}
+body {text-rendering:optimizeLegibility;}
+
+/* ---------- 1. Smooth section loading ----------------------------------
+   The head script adds .js-reveal before first paint, so a section is
+   hidden once and then eases in when it scrolls into view. No flash. */
+@keyframes qs-failsafe {to {opacity:1;translate:0 0;filter:none;}}
+.js-reveal main > section:not(.field-hero):not(.is-visible),
+.js-reveal main > div.container:not(.is-visible),
+.js-reveal main [data-reveal]:not(.is-visible) {
+  opacity:0;translate:0 22px;filter:blur(3px);
+  animation:qs-failsafe .6s var(--ease-out) 2.5s forwards; /* if JS never runs */
+}
+.js-reveal .is-visible {
+  opacity:1;translate:none;filter:none;animation:none;
+  transition:opacity .85s var(--ease-out),translate .85s var(--ease-out),filter .85s var(--ease-out);
+  transition-delay:var(--reveal-delay,0ms);
+}
+/* Retire the earlier enter animations: they restarted from opacity 0
+   after the element had already painted, which read as a flicker. */
+.revealed,.offer-card.revealed,.scene-frame.revealed img {animation:none!important;}
+.panel-active {animation:qs-panel .45s var(--ease-out) both;}
+@keyframes qs-panel {from {opacity:0;translate:0 8px;}to {opacity:1;translate:0 0;}}
+/* Hero copy settles in once, gently */
+.field-hero .film-intro > * {animation:qs-rise .9s var(--ease-out) both;}
+.field-hero .film-intro > :nth-child(2) {animation-delay:.12s;}
+.field-hero .film-intro > :nth-child(3) {animation-delay:.24s;}
+@keyframes qs-rise {from {opacity:0;translate:0 18px;}to {opacity:1;translate:0 0;}}
+img {transition:opacity .5s ease;}
+
+/* ---------- 2. Glass surfaces -------------------------------------------- */
+.header {background:rgb(255 255 255 / .66);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);}
+.header.is-scrolled {background:rgb(255 255 255 / .78);box-shadow:0 10px 30px -24px rgb(40 20 20 / .5);}
+.mobile-nav {background:var(--glass-strong);-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);border-color:var(--glass-edge);}
+
+.ops-section,.ev-section,.what-we-do,.founder-section,.about-story,#process,#coverage,.faq-section,.support-workspace,.ev-teaser {position:relative;}
+.ops-section,.what-we-do,.ev-section {
+  background-image:
+    radial-gradient(36% 55% at 8% 12%,rgb(255 210 204 / .55),transparent 70%),
+    radial-gradient(34% 55% at 94% 88%,rgb(198 230 212 / .7),transparent 70%);
+}
+/* Container-width sections can't carry a background wash without a hard
+   edge at the container's side, so the glow is painted full-bleed instead. */
+.why-section,.promise-section,.contact-routes,#coverage,.about-story,#sectors,.founder-section,.faq-section {background-image:none;}
+:is(.why-section,.about-story,.founder-section,#coverage)::after {
+  content:"";position:absolute;z-index:-1;pointer-events:none;top:0;bottom:0;left:50%;width:100vw;translate:-50% 0;
+  background:radial-gradient(30% 45% at 8% 30%,rgb(255 214 208 / .45),transparent 70%),radial-gradient(28% 45% at 92% 75%,rgb(198 230 212 / .55),transparent 70%);
+}
+.why-section,.about-story,.founder-section,#coverage {isolation:isolate;}
+body {overflow-x:clip;}
+
+.qs-glass,.glass-panel,
+.offer-card,.promise-grid article,.location-grid article,.contact-card,.story-card,.service-card,
+.team-grid article,.ops-card,.service-pillar,.founder-card,.story-blocks > div,.scope-line,
+.industry-explorer,.support-workspace,.enquiry-form,.ev-brand-note,.already-rider {
+  background:var(--glass);
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  border:1px solid var(--glass-edge);box-shadow:var(--shadow-soft);
+}
+.team-grid article {border-radius:18px;padding:26px 26px 28px;border-top:1px solid var(--glass-edge);}
+.story-blocks > div {border-radius:18px;padding:26px;}
+.scope-line {border-radius:16px;padding:20px 22px;margin-top:14px;}
+.scope-line:first-of-type {margin-top:24px;}
+.enquiry-form {border-radius:22px;}
+
+/* ---------- 3. Animated borders, on hover only ---------------------------
+   One conic ring, still at rest (so nothing repaints while you read) and
+   travelling round the card while it is hovered or focused. */
+@property --qs-angle {syntax:'<angle>';inherits:false;initial-value:0deg;}
+@keyframes qs-ring {to {--qs-angle:360deg;}}
+.offer-card,.promise-grid article,.location-grid article,.contact-card,.story-card,.service-card,.guide-view,
+.riders-section .review-card,.team-grid article,.ops-card,.service-pillar,.founder-card,.story-blocks > div,
+.ev-brand-note,.scope-line,.industry-explorer,.enquiry-form {position:relative;isolation:isolate;}
+.offer-card::before,.promise-grid article::before,.location-grid article::before,.contact-card::before,.story-card::before,
+.service-card::before,.guide-view::before,.riders-section .review-card::before,
+.team-grid article::before,.ops-card::before,.service-pillar::before,.founder-card::before,.story-blocks > div::before,
+.ev-brand-note::before,.scope-line::before {
+  content:"";position:absolute;inset:-1px;z-index:2;border-radius:inherit;padding:1.5px;pointer-events:none;
+  background:conic-gradient(from var(--qs-angle),transparent 0 50%,rgb(217 35 54 / .9) 64%,#f4aaa2 72%,var(--green-2) 86%,transparent 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+  opacity:0;animation:qs-ring 3.2s linear infinite;animation-play-state:paused;transition:opacity .45s ease;
+}
+:is(.offer-card,.promise-grid article,.location-grid article,.contact-card,.story-card,.service-card,.guide-view,.riders-section .review-card,
+.team-grid article,.ops-card,.service-pillar,.founder-card,.story-blocks > div,.ev-brand-note,.scope-line):is(:hover,:focus-visible,:focus-within)::before {
+  opacity:1;animation-play-state:running;
+}
+.team-grid article,.ops-card,.service-pillar,.story-blocks > div,.contact-card,.story-card,.offer-card,.location-grid article,.promise-grid article,.ev-brand-note {
+  transition:translate .45s var(--ease-out),box-shadow .45s var(--ease-out),background-color .45s;
+}
+:is(.team-grid article,.ops-card,.service-pillar,.story-blocks > div,.contact-card,.story-card,.offer-card,.location-grid article,.promise-grid article):hover {
+  translate:0 -4px;background:var(--glass-strong);box-shadow:0 1px 0 #fff inset,0 28px 50px -32px rgb(45 25 25 / .5);
+}
+.offer-card:hover,.offer-card:focus-visible,.contact-card:hover,.service-card:hover,.story-card:hover {transform:none;}
+.offer-card:after {display:none;}
+
+/* ---------- 4. Green, used with restraint --------------------------------
+   Red stays the brand voice; green marks “done”, growth and electric. */
+.eyebrow>span {background:var(--green-2);box-shadow:0 0 0 4px rgb(43 154 104 / .14);}
+.check-list .icon,.ev-list .icon {color:var(--green);}
+.text-link {border-bottom-color:rgb(27 122 82 / .28);transition:border-color .3s,color .3s;}
+.text-link:hover {border-bottom-color:var(--green);}
+.button.secondary:hover {border-color:var(--green-line);background:var(--green-soft);color:#14523a;}
+.button.primary {box-shadow:0 10px 24px -14px rgb(217 35 54 / .8);}
+.button.primary:hover {box-shadow:0 14px 28px -14px rgb(217 35 54 / .85);}
+.team-grid article > .icon,.ops-icon,.pillar-icon {color:var(--green);}
+.team-grid article:nth-child(odd) > .icon {color:var(--red);}
+.faq-list summary .icon {color:var(--green);}
+.field input:focus,.field select:focus,.field textarea:focus {outline:none;border-color:var(--green-2);box-shadow:0 0 0 4px rgb(43 154 104 / .14);}
+.field input,.field select,.field textarea {background:rgb(255 255 255 / .8);border-radius:10px;transition:border-color .25s,box-shadow .25s;}
+.inline-link {color:var(--green);font-weight:600;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;}
+.inline-link:hover {color:#14523a;}
+
+/* ---------- 5. Manage your overall operations (Partners) ---------------- */
+.ops-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.ops-card {border-radius:20px;padding:28px 26px 30px;}
+.ops-index {position:absolute;top:22px;right:24px;font:600 13px/1 'DM Sans',sans-serif;letter-spacing:.08em;color:#a59a96;}
+.ops-icon,.pillar-icon {display:inline-flex;width:50px;height:50px;align-items:center;justify-content:center;border-radius:14px;background:var(--green-soft);border:1px solid var(--green-line);margin-bottom:22px;}
+.ops-card:nth-child(3n+2) .ops-icon {background:#fff0ee;border-color:#ffd9d4;color:var(--red);}
+.ops-card h3 {font-size:22px;}
+.ops-card p {font-size:16px;margin-top:12px;line-height:1.6;}
+.ops-footer {margin-top:26px;display:flex;align-items:center;justify-content:space-between;gap:30px;padding:24px 28px;border-radius:20px;
+  background:linear-gradient(120deg,rgb(27 122 82 / .92),rgb(20 82 58 / .95));color:#fff;box-shadow:0 26px 50px -30px rgb(20 82 58 / .8);}
+.ops-footer p {color:#d5efe1;font-size:17px;max-width:720px;}
+.ops-footer b {color:#fff;}
+.ops-footer .button.primary {background:#fff;color:var(--green);box-shadow:none;flex:none;}
+.ops-footer .button.primary:hover {background:#f1fbf5;}
+
+/* ---------- 6. EV sections ------------------------------------------------ */
+.ev-list {list-style:none;display:grid;gap:14px;margin:26px 0;}
+.ev-list li {display:flex;gap:14px;align-items:flex-start;font-size:16px;color:var(--muted);line-height:1.6;}
+.ev-list li b {color:var(--ink);}
+.ev-list .icon {flex:none;width:22px;height:22px;margin-top:2px;}
+.ev-badge {display:inline-flex;align-items:center;gap:8px;font:700 12px/1 'DM Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--green);background:var(--green-soft);border:1px solid var(--green-line);padding:7px 11px;border-radius:99px;white-space:nowrap;}
+.ev-badge i {width:7px;height:7px;border-radius:50%;background:var(--green-2);box-shadow:0 0 0 0 rgb(43 154 104 / .6);animation:qs-pulse 2.2s ease-out infinite;}
+@keyframes qs-pulse {70% {box-shadow:0 0 0 8px rgb(43 154 104 / 0);}100% {box-shadow:0 0 0 0 rgb(43 154 104 / 0);}}
+.ev-brand-note {display:flex;align-items:center;gap:16px;padding:16px 18px;border-radius:16px;margin:8px 0 26px;font-size:15px;line-height:1.55;color:var(--muted);}
+.ev-brand-note b {color:var(--ink);}
+.ev-brand-note > .icon {flex:none;width:18px;height:18px;color:var(--green);transition:translate .3s;}
+.ev-brand-note:hover > .icon {translate:4px 0;}
+.vehicle-band .ev-brand-note {margin-top:22px;}
+
+/* Home: “our own EV brand” teaser */
+.ev-teaser {padding:40px 0 100px;}
+.ev-teaser-card {position:relative;overflow:hidden;isolation:isolate;border-radius:30px;padding:56px 60px;display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:center;
+  background:linear-gradient(135deg,#0f2d21 0%,#14432f 48%,#1b5a3f 100%);color:#fff;box-shadow:0 40px 80px -50px rgb(10 45 30 / .9);}
+.ev-teaser-card::before {content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;z-index:2;pointer-events:none;
+  background:conic-gradient(from var(--qs-angle),transparent 0 40%,#6ee7a8 60%,#ff8a8f 75%,transparent 90%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+  animation:qs-ring 6s linear infinite;opacity:.75;}
+.ev-teaser-glow {position:absolute;inset:auto -10% -40% auto;width:60%;aspect-ratio:1;border-radius:50%;z-index:-1;
+  background:radial-gradient(circle,rgb(80 220 150 / .35),transparent 65%);filter:blur(10px);}
+.ev-teaser-card .ev-badge {background:rgb(255 255 255 / .1);border-color:rgb(255 255 255 / .22);color:#bff3d6;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);}
+.ev-teaser-card h2 {color:#fff;margin-top:22px;font-size:clamp(36px,4.2vw,56px);}
+.ev-teaser-card h2 em {color:#7fe3ae;}
+.ev-teaser-card p {color:#c9e4d6;font-size:17px;max-width:520px;margin-top:20px;}
+.ev-points {list-style:none;display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 28px;}
+.ev-points li {display:flex;align-items:center;gap:9px;padding:9px 14px;border-radius:12px;font-size:14px;font-weight:600;
+  background:rgb(255 255 255 / .08);border:1px solid rgb(255 255 255 / .16);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
+.ev-points .icon {width:18px;height:18px;color:#7fe3ae;}
+.ev-actions {display:flex;flex-wrap:wrap;gap:26px;}
+.ev-teaser-card .text-link {color:#fff;border-bottom-color:rgb(127 227 174 / .45);}
+.ev-teaser-card .text-link:hover {border-bottom-color:#7fe3ae;}
+.ev-teaser-visual {position:relative;display:flex;justify-content:center;}
+.ev-orb {position:relative;width:min(340px,80%);aspect-ratio:1;display:grid;place-items:center;}
+.ev-orbit {position:absolute;border-radius:50%;border:1px solid rgb(191 243 214 / .22);}
+.ev-orbit.o1 {inset:0;}
+.ev-orbit.o2 {inset:13%;border-color:rgb(191 243 214 / .3);}
+.ev-orbit.o3 {inset:26%;border:1.5px solid transparent;background:conic-gradient(from var(--qs-angle),transparent 0 55%,#7fe3ae 80%,#ff8a8f 92%,transparent) border-box;
+  -webkit-mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:qs-ring 4s linear infinite;}
+.ev-orbit.o1::after,.ev-orbit.o2::after {content:"";position:absolute;width:10px;height:10px;border-radius:50%;background:#7fe3ae;box-shadow:0 0 18px 4px rgb(127 227 174 / .55);top:50%;left:-5px;translate:0 -50%;}
+.ev-orbit.o1 {animation:qs-turn 18s linear infinite;}
+.ev-orbit.o2 {animation:qs-turn 11s linear infinite reverse;}
+.ev-orbit.o2::after {background:#ffb3b6;box-shadow:0 0 16px 3px rgb(255 138 143 / .5);width:8px;height:8px;left:-4px;}
+@keyframes qs-turn {to {rotate:360deg;}}
+.ev-core {position:relative;width:34%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(circle at 35% 30%,rgb(255 255 255 / .28),rgb(255 255 255 / .06));border:1px solid rgb(255 255 255 / .28);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 0 60px rgb(80 220 150 / .35),inset 0 1px 0 rgb(255 255 255 / .35);}
+.ev-core svg {width:44%;fill:#ffd166;stroke:none;filter:drop-shadow(0 0 12px rgb(255 209 102 / .7));animation:qs-bolt 2.8s ease-in-out infinite;}
+.ev-charge {position:absolute;bottom:4%;left:50%;translate:-50% 0;width:46%;height:8px;border-radius:99px;background:rgb(255 255 255 / .12);overflow:hidden;}
+.ev-charge b {display:block;height:100%;width:30%;border-radius:inherit;background:linear-gradient(90deg,#2b9a68,#7fe3ae);animation:qs-fill 3.6s var(--ease-out) infinite;}
+@keyframes qs-fill {0% {width:12%;}70%,100% {width:100%;}}
+@keyframes qs-bolt {0%,100% {opacity:.65;}50% {opacity:1;}}
+
+/* ---------- 7. About: opening, story, “What we do” ---------------------- */
+.about-opening {display:grid;grid-template-columns:1fr 1fr;gap:70px;align-items:center;padding:70px 0 40px;}
+.about-opening h1 {font-size:clamp(42px,4.4vw,62px);line-height:1.04;}
+.about-opening-copy > p:not(.eyebrow) {font-size:18px;max-width:470px;margin-top:24px;}
+.about-opening .about-art {background:none;border:0;}
+.story-blocks {display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+.story-blocks h3 {font-size:22px;}
+.story-blocks p {font-size:16px;margin-top:12px;}
+.story-year {display:inline-block;font:700 12px/1 'DM Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--green);
+  background:var(--green-soft);border:1px solid var(--green-line);padding:6px 10px;border-radius:99px;margin-bottom:16px;}
+.story-blocks > div:first-child .story-year {color:var(--red);background:#fff0ee;border-color:#ffd9d4;}
+.founder-card {border-radius:26px;}
+.service-pair {display:grid;grid-template-columns:1fr 1fr;gap:22px;}
+.service-pillar {border-radius:24px;padding:36px 36px 34px;}
+.service-pillar .small-label {color:var(--red);margin-bottom:14px;}
+.service-pillar:nth-child(2) .small-label {color:var(--green);}
+.service-pillar:nth-child(2) .pillar-icon {background:#fff0ee;border-color:#ffd9d4;color:var(--red);}
+.service-pillar h3 {font-size:28px;max-width:440px;}
+.service-pillar > p {font-size:16.5px;margin-top:16px;}
+.service-pillar .check-list {margin:22px 0 26px;}
+.pillar-links {display:flex;flex-wrap:wrap;gap:24px;}
+
+/* ---------- 8. Single-location coverage ---------------------------------- */
+.coverage-layout {grid-template-columns:1fr!important;}
+.coverage-layout .location-grid {grid-template-columns:1fr!important;}
+.coverage-layout .location-grid article {display:grid;grid-template-columns:auto 1fr;column-gap:28px;align-items:center;padding:28px 32px;border-radius:20px;}
+.coverage-layout .location-mark {grid-row:span 3;margin:0;width:64px;height:64px;border-radius:18px;justify-content:center;background:var(--green-soft);border:1px solid var(--green-line);color:var(--green);}
+.coverage-layout .location-mark span {display:none;}
+.coverage-layout .location-grid p {margin-top:8px;}
+.coverage-layout .location-grid strong {color:var(--green);}
+
+/* ---------- 9. Enquiry form: sending, sent, fallback --------------------- */
+.hp-field {position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden;}
+.form-submit {position:relative;min-width:220px;}
+.form-submit .submit-busy {display:none;width:16px;height:16px;border-radius:50%;border:2px solid rgb(255 255 255 / .4);border-top-color:#fff;animation:qs-spin .8s linear infinite;}
+.form-submit.is-busy .submit-busy {display:inline-block;}
+.form-submit.is-busy > .icon {display:none;}
+.form-submit:disabled {opacity:.85;cursor:progress;transform:none;}
+@keyframes qs-spin {to {rotate:360deg;}}
+.form-status {text-align:left;padding:8px 2px 4px;animation:qs-panel .55s var(--ease-out) both;}
+.form-status:focus {outline:none;}
+.status-mark {display:inline-flex;width:56px;height:56px;border-radius:50%;align-items:center;justify-content:center;
+  background:var(--green-soft);border:1px solid var(--green-line);color:var(--green);margin-bottom:20px;}
+.status-mark .icon {width:26px;height:26px;stroke-width:2.2;}
+.form-success .status-mark {animation:qs-pop .6s var(--ease-out) .1s both;}
+@keyframes qs-pop {from {scale:.6;opacity:0;}to {scale:1;opacity:1;}}
+.status-mark.warn {background:#fff4ec;border-color:#ffdcc6;color:#b4521d;}
+.form-status h4 {font-size:24px;line-height:1.2;}
+.form-status > p {font-size:16px;margin:12px 0 22px;max-width:460px;}
+.form-status .draft-actions .button {min-height:44px;font-size:15px;gap:12px;padding:10px 16px;}
+.draft-preview {margin-top:18px;}
+.draft-preview summary {cursor:pointer;font-size:14px;font-weight:600;color:var(--muted);}
+.draft-preview .draft-text {margin-top:10px;font:14px/1.7 'DM Sans',sans-serif;}
+.copy-status {font-size:14px;color:var(--green);margin-top:12px;}
+.form-notice .icon {color:var(--green);}
+
+/* ---------- 10. Small screens ------------------------------------------- */
+@media (max-width:1020px) {
+  .ops-grid,.story-blocks {grid-template-columns:1fr 1fr;}
+  .ev-teaser-card {grid-template-columns:1fr;padding:44px 36px;}
+  .ev-teaser-visual {order:-1;}
+  .ev-orb {width:min(230px,70%);}
+}
+@media (max-width:760px) {
+  .ops-grid,.story-blocks,.service-pair {grid-template-columns:1fr;}
+  .ops-footer {flex-direction:column;align-items:flex-start;}
+  .about-opening {grid-template-columns:1fr;gap:30px;padding:40px 0 10px;}
+  .service-pillar {padding:28px 24px;}
+  .ev-teaser {padding:20px 0 70px;}
+  .ev-teaser-card {padding:34px 24px;border-radius:24px;}
+  .coverage-layout .location-grid article {grid-template-columns:1fr;row-gap:6px;}
+  .coverage-layout .location-mark {grid-row:auto;margin-bottom:12px;}
+  .form-submit {width:100%;}
+}
+@media (hover:none) {
+  :is(.team-grid article,.ops-card,.service-pillar,.story-blocks > div,.contact-card,.story-card,.offer-card,.location-grid article,.promise-grid article):hover {translate:none;}
+}
+@media (prefers-reduced-motion:reduce) {
+  .js-reveal main > section,.js-reveal main > div.container,.js-reveal main [data-reveal] {opacity:1!important;translate:none!important;filter:none!important;animation:none!important;transition:none!important;}
+  .field-hero .film-intro > *,.ev-badge i,.ev-teaser-card::before,.ev-orbit,.ev-core svg,.ev-charge b {animation:none!important;}
+  :is(.offer-card,.promise-grid article,.location-grid article,.contact-card,.story-card,.service-card,.guide-view,.riders-section .review-card,
+  .team-grid article,.ops-card,.service-pillar,.founder-card,.story-blocks > div,.ev-brand-note,.scope-line)::before {animation:none!important;}
+}
+
+/* ---------- 11. Rider-journey slideshows (Partners) ---------------------- */
+.journey-show {position:relative;margin:0;border-radius:24px;overflow:hidden;isolation:isolate;background:#1d1718;aspect-ratio:1.32;box-shadow:0 30px 60px -36px rgb(40 20 20 / .6);}
+.journey-slides,.journey-slide {position:absolute;inset:0;}
+.journey-slide {opacity:0;transition:opacity 1.1s var(--ease-out);}
+.journey-slide.is-active {opacity:1;}
+.journey-slide img {width:100%;height:100%;object-fit:cover;scale:1.08;transition:scale 7s linear;}
+.journey-slide.is-active img {scale:1;}
+.journey-show::after {content:"";position:absolute;inset:45% 0 0;z-index:1;pointer-events:none;background:linear-gradient(transparent,rgb(18 12 12 / .72));}
+.journey-progress-bar {position:absolute;z-index:3;top:16px;left:18px;right:18px;display:flex;gap:6px;}
+.journey-progress-bar i {flex:1;height:3px;border-radius:9px;background:rgb(255 255 255 / .32);overflow:hidden;}
+.journey-progress-bar b {display:block;height:100%;width:0;background:#fff;border-radius:inherit;}
+.journey-progress-bar i.done b {width:100%;}
+.journey-progress-bar i.running b {animation:qs-progress var(--show-duration,5200ms) linear forwards;}
+.journey-show:not(.is-playing) .journey-progress-bar i.running b {animation-play-state:paused;}
+@keyframes qs-progress {from {width:0;}to {width:100%;}}
+.journey-caption {position:absolute;z-index:3;left:16px;right:16px;bottom:16px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  padding:16px 18px;border-radius:18px;background:rgb(255 255 255 / .16);border:1px solid rgb(255 255 255 / .32);
+  -webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);color:#fff;}
+.journey-captions {position:relative;flex:1;min-height:74px;}
+.journey-cap {position:absolute;inset:auto 0 0 0;opacity:0;translate:0 8px;transition:opacity .6s var(--ease-out),translate .6s var(--ease-out);}
+.journey-cap.is-active {position:relative;opacity:1;translate:0 0;}
+.journey-cap span {font:700 11px/1 'DM Sans',sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#a8f0c8;}
+.journey-cap strong {display:block;font:750 20px/1.2 Archivo,'DM Sans',sans-serif;letter-spacing:-.02em;margin-top:7px;}
+.journey-cap p {color:rgb(255 255 255 / .86);font-size:14.5px;line-height:1.5;margin-top:5px;max-width:420px;}
+.journey-controls {display:flex;gap:6px;flex:none;}
+.journey-controls button {width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:#fff;background:rgb(255 255 255 / .14);border:1px solid rgb(255 255 255 / .35);transition:background .25s;}
+.journey-controls button:hover {background:rgb(255 255 255 / .3);}
+.journey-controls .icon {width:17px;height:17px;}
+.journey-controls .icon.flip {rotate:180deg;}
+.journey-credit {position:absolute;z-index:3;top:28px;right:20px;font:500 11px/1 'DM Sans',sans-serif;letter-spacing:.06em;color:rgb(255 255 255 / .7);}
+.journey-show:not(.enhanced) .journey-controls {display:none;}
+.revised-hero .journey-show {aspect-ratio:1.12;}
+@media (max-width:760px) {
+  .journey-show,.revised-hero .journey-show {aspect-ratio:.86;border-radius:20px;}
+  .journey-caption {flex-direction:column;align-items:stretch;}
+  .journey-controls {justify-content:flex-end;margin-top:-4px;}
+  .journey-cap strong {font-size:18px;}
+}
+@media (prefers-reduced-motion:reduce) {
+  .journey-slide,.journey-slide img,.journey-cap {transition:none;}
+  .journey-slide img {scale:1;}
+}
+
+/* ---------- 12. Call button (number stays out of view) ------------------- */
+.call-button {gap:10px!important;}
+.call-button .icon {width:18px;height:18px;}
+.button.call {background:var(--green);color:#fff;box-shadow:0 10px 22px -14px rgb(27 122 82 / .9);}
+.button.call:hover {background:#14523a;}
+.button.call-small {min-height:40px;padding:8px 16px;font-size:14px;margin:12px 0 6px;width:fit-content;}
+.footer-contact .call-button {display:inline-flex!important;color:#fff!important;}
+.direct-contact .call-button,.contact-lines .call-button,.support-basics .call-button {display:inline-flex;color:#fff;min-height:44px;padding:9px 18px;font-size:15px;margin:4px 0 8px;}
+.direct-contact > a.call-button {font-size:15px;}

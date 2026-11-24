@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="bolt" viewBox="0 0 24 24"><path d="M13.5 2.5 4 14h7l-.6 7.5L20 10h-7z"/></symbol>
+  <symbol id="box" viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10M7 5l10 5.5"/></symbol>
+  <symbol id="store" viewBox="0 0 24 24"><path d="M3 10 5 3.5h14l2 6.5M4.5 12.5v8H20v-8M8.5 20v-5h5v5M3 10v1a2.25 2.25 0 0 0 4.5 0 2.25 2.25 0 0 0 4.5 0 2.25 2.25 0 0 0 4.5 0 2.25 2.25 0 0 0 4.5 0v-1z"/></symbol>
+  <symbol id="bag" viewBox="0 0 24 24"><path d="M5.5 7.5h13L20 21H4zM9 8V5.5a3 3 0 0 1 6 0V8M8.5 14h7"/></symbol>
+  <symbol id="riders" viewBox="0 0 64 52"><g stroke-linecap="round" stroke-linejoin="round"><path d="M3 45c1-9 5-14 16-16m17 0c9 2 14 7 15 16M19 29l8 11 8-11M8 45h35M17 17c.5 8 4 12 10 12s11-6 11-14M12 16l32-2M15 14C16 6 21 3 28 3c7 0 13 5 14 11M23 6l-2 5M46 7c5 0 8 3 9 8l4 1M46 19l8-1c-.5 5-3 8-6 9M50 30c6 2 9 7 10 13"/></g></symbol>
+  <symbol id="ev" viewBox="0 0 64 52"><g stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="39" r="8"/><circle cx="51" cy="39" r="8"/><path d="M3 32c3-5 6-7 12-7h8l5 10h8l7-15M6 30c9-4 14 0 17 9h15l6-12M38 12h7l6 25M7 22h17M7 20V9h14v11M46 14h7v4h-6"/><path d="m31 2-6 11h6l-2 9 8-13h-6z"/></g></symbol>
+  <symbol id="ledger" viewBox="0 0 64 52"><g stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h34v42l-5-3-5 3-5-3-5 3-5-3-5 3-4-3zM20 13h18M20 19h7m5 0h7M20 26h7m5 0h7M20 34h12M8 10H5v32h3"/><circle fill="var(--paper, #faf8f1)" cx="48" cy="36" r="10"/><path d="m43 36 3.5 3.5L53 33"/></g></symbol>
+</svg>

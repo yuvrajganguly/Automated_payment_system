@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en-IN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3f2f2" />
+    <meta
+      name="description"
+      content="Find delivery riders, plan staffing for your hubs, and explore EV support and weekly payouts."
+    />
+    <title>Delivery teams for your hubs | Qwikserve Logistics</title>
+    <link rel="icon" href="./assets/mark.png" />
+    <link rel="stylesheet" href="./site.css?v=3" />
+    <link rel="stylesheet" href="./experience.css?v=3" />
+    <script defer src="./experience.js?v=3"></script>
+    <link rel="preload" as="image" href="./assets/hub-dispatch.webp" />
+    <script defer src="./home.js?v=3"></script>
+  </head>
+  <body id="top" class="home">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="topbar">
+      <div class="wrap navigation">
+        <a
+          class="wordmark"
+          href="./index.html"
+          aria-label="Qwikserve Logistics home"
+          ><img src="./assets/mark.png" width="51" height="23" alt="" /><span
+            >Qwikserve<small>LOGISTICS</small></span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <details class="nav-sol">
+            <summary>For business <span>⌄</span></summary>
+            <div>
+              <a href="./workforce.html">Delivery workforce <b>↗</b></a
+              ><a href="./fleet.html">EV rental &amp; support <b>↗</b></a
+              ><a href="./workforce.html#settlements"
+                >Weekly payouts <b>↗</b></a
+              ><a href="./index.html#planner">Hub staffing planner <b>↗</b></a>
+            </div>
+          </details>
+          <a href="./index.html#sectors">Industries</a
+          ><a href="./riders.html">For riders</a
+          ><a href="./company.html">Company</a>
+        </nav>
+        <a class="pill compact dark nav-partner" href="./partner.html"
+          >Partner with us <span aria-hidden="true">↗</span></a
+        >
+        <details class="mobile-menu">
+          <summary aria-label="Navigation menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 7h18M3 12h18M3 17h18" />
+            </svg>
+          </summary>
+          <nav aria-label="Mobile navigation">
+            <a href="./workforce.html">Delivery workforce</a
+            ><a href="./fleet.html">EV rental &amp; support</a
+            ><a href="./index.html#sectors">Industries</a
+            ><a href="./index.html#planner">Hub staffing planner</a
+            ><a href="./riders.html">For riders</a
+            ><a href="./company.html">Company</a
+            ><a href="./partner.html">Business enquiries ↗</a>
+          </nav>
+        </details>
+      </div>
+      <div class="reading-progress" aria-hidden="true"></div>
+    </header>
+    <main id="main">
+      <section class="cover" aria-labelledby="cover-title">
+        <div class="cover-photos" aria-hidden="true">
+          <img
+            class="show"
+            src="./assets/hub-dispatch.webp"
+            alt=""
+            fetchpriority="high"
+          /><img
+            class=""
+            src="./assets/field-hero.webp"
+            alt=""
+            decoding="async"
+          /><img
+            class=""
+            src="./assets/ev-handover.webp"
+            alt=""
+            decoding="async"
+          />
+        </div>
+        <div class="wrap cover-layout">
+          <div class="cover-copy">
+            <div class="eyebrow">
+              <i class="signal"></i>Qwikserve Logistics LLP &nbsp; / &nbsp; Est.
+              2018
+            </div>
+            <h1 id="cover-title">Your next<br /><em>delivery team.</em></h1>
+            <p>
+              Tell us where your hubs are. We recruit riders, arrange rental EVs
+              where available and manage weekly payouts.
+            </p>
+            <div class="cover-actions">
+              <a class="pill brand" href="./partner.html"
+                >Staff my hubs <span aria-hidden="true">↗</span></a
+              ><a class="watch-link" id="watch-film" href="#process"
+                ><span aria-hidden="true">▶</span> Watch the field film</a
+              >
+            </div>
+          </div>
+          <div class="scene-bar">
+            <span class="scene-kicker">On the ground</span>
+            <div class="scene-picks" role="group" aria-label="Field scenes">
+              <button
+                type="button"
+                data-scene="0"
+                aria-label="View scene 1: Dispatch"
+                aria-pressed="true"
+              >
+                <small>01</small> Dispatch</button
+              ><button
+                type="button"
+                data-scene="1"
+                aria-label="View scene 2: On the road"
+                aria-pressed="false"
+              >
+                <small>02</small> On the road</button
+              ><button
+                type="button"
+                data-scene="2"
+                aria-label="View scene 3: EV handover"
+                aria-pressed="false"
+              >
+                <small>03</small> EV handover
+              </button>
+            </div>
+            <button
+              type="button"
+              id="scene-toggle"
+              aria-label="Pause scene rotation"
+            >
+              Ⅱ
+            </button>
+          </div>
+        </div>
+      </section>
+      <section
+        id="network"
+        class="network wrap"
+        aria-labelledby="network-title"
+      >
+        <div class="metrics">
+          <div class="metrics-heading">
+            <div class="eyebrow"><i class="signal"></i> Our network</div>
+            <h2 id="network-title">Qwikserve <br />in numbers.</h2>
+          </div>
+          <div class="metric">
+            <strong aria-label="500 plus"
+              ><span data-count="500" aria-hidden="true">500</span
+              ><em aria-hidden="true">+</em></strong
+            >
+            <p>Riders associated <br />with our operations</p>
+          </div>
+          <div class="metric">
+            <strong data-count="13" aria-label="13">13</strong>
+            <p>Delivery platforms whose <br />operations we’ve supported</p>
+          </div>
+          <div class="metric">
+            <strong data-count="7" aria-label="7">7</strong>
+            <p>Core delivery sectors, <br />from grocery to pharma</p>
+          </div>
+        </div>
+        <p class="metric-source">
+          Source: Qwikserve company profile, August 2026.
+        </p>
+        <div class="platforms">
+          <span class="platform-title">Platform experience</span>
+          <ul
+            class="platform-sample"
+            aria-label="Examples of platforms supported"
+          >
+            <li>Myntra</li>
+            <li>Blue Dart</li>
+            <li>Zepto</li>
+            <li>Delhivery</li>
+            <li>Nykaa</li>
+          </ul>
+          <details class="platform-details">
+            <summary>View all 13 <span aria-hidden="true">＋</span></summary>
+            <div class="platform-list">
+              <strong
+                >Platforms whose delivery operations we’ve supported</strong
+              >
+              <p>
+                Jiffy (Spencer’s), Myntra, Blue Dart, Blitz, Shadowfax,
+                Delhivery, Zomato, Meesho, Nykaa, Zepto, DealShare, Apollo and
+                BigBasket.
+              </p>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section id="services" class="solutions">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">
+                <i class="signal"></i> Solutions for businesses
+              </div>
+              <h2>One hub.<br /><em>Three moving parts.</em></h2>
+            </div>
+            <p>
+              One team looks after the people, vehicles and earnings behind your
+              deliveries. Here’s what that means for your hub.
+            </p>
+          </div>
+          <div class="cards">
+            <article class="service-card">
+              <div class="card-art sourcing-art" aria-hidden="true">
+                <span class="card-index">01 / PEOPLE</span>
+                <div class="id-stack">
+                  <div class="id-back"></div>
+                  <div class="id-front">
+                    <div class="id-top"><i></i><b>RIDER PASS</b></div>
+                    <div class="id-mid">
+                      <svg viewBox="0 0 60 56">
+                        <circle cx="30" cy="18" r="11" />
+                        <path d="M7 50c1-12 10-18 23-18s22 6 23 18z" />
+                      </svg>
+                      <div><span></span><span></span><span></span></div>
+                    </div>
+                    <div class="id-bottom">
+                      <span>HUB ONBOARDING</span><b>✓</b>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="card-copy">
+                <h3>Rider recruitment</h3>
+                <p>
+                  We source and screen riders for each hub, verify documents and
+                  coordinate their first shift.
+                </p>
+                <a class="line-link" href="./workforce.html"
+                  >Explore staffing <span aria-hidden="true">↗</span></a
+                >
+              </div>
+            </article>
+            <article class="service-card">
+              <div class="card-art fleet-art" aria-hidden="true">
+                <span class="card-index">02 / FLEET</span
+                ><svg class="scooter-art" viewBox="0 0 340 165">
+                  <use href="./assets/fleet.svg#scooter" /></svg
+                ><span class="fleet-tag">EV HANDOVER <b>↗</b></span>
+              </div>
+              <div class="card-copy">
+                <h3>EV rental &amp; support</h3>
+                <p>
+                  Eligible riders can access a rental EV. Our field team records
+                  each handover, repair and return.
+                </p>
+                <a class="line-link" href="./fleet.html"
+                  >Explore fleet support <span aria-hidden="true">↗</span></a
+                >
+              </div>
+            </article>
+            <article class="service-card">
+              <div class="card-art pay-art" aria-hidden="true">
+                <span class="card-index">03 / PAYOUTS</span>
+                <div class="receipt">
+                  <div class="receipt-head">
+                    <span>Weekly earnings</span><b>₹</b>
+                  </div>
+                  <div class="receipt-row">
+                    <span>Company paysheet</span><i></i>
+                  </div>
+                  <div class="receipt-row">
+                    <span>EV rent &amp; dues</span><i></i>
+                  </div>
+                  <div class="receipt-total">
+                    <b>Net payout</b><span>✓</span>
+                  </div>
+                </div>
+              </div>
+              <div class="card-copy">
+                <h3>Payout reconciliation</h3>
+                <p>
+                  We match weekly earnings to rent, dues and cash collections,
+                  then check the bank’s payment results.
+                </p>
+                <a class="line-link" href="./workforce.html#settlements"
+                  >Follow a payout <span aria-hidden="true">↗</span></a
+                >
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="sector-section" id="sectors">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">
+                <i class="signal"></i>Industries / 01—07
+              </div>
+              <h2>Different orders.<br /><em>Different shifts.</em></h2>
+            </div>
+            <p>
+              Select your sector to see what our field team needs to plan
+              coverage.
+            </p>
+          </div>
+          <div class="sector-grid">
+            <div class="sector-select" aria-label="Choose a sector">
+              <button type="button" data-sector="0" aria-pressed="true">
+                <small>01</small>Quick commerce<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="1" aria-pressed="false">
+                <small>02</small>E-commerce<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="2" aria-pressed="false">
+                <small>03</small>Food delivery<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="3" aria-pressed="false">
+                <small>04</small>Courier & express<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="4" aria-pressed="false">
+                <small>05</small>Retail<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="5" aria-pressed="false">
+                <small>06</small>Pharma<span aria-hidden="true"
+                  >↗</span
+                ></button
+              ><button type="button" data-sector="6" aria-pressed="false">
+                <small>07</small>Hyperlocal<span aria-hidden="true">↗</span>
+              </button>
+            </div>
+            <div class="sector-sheet" aria-live="polite">
+              <div class="sector-rule">
+                <span>Hub briefing notes</span><b id="sector-index">01 / 07</b>
+              </div>
+              <div id="sector-content">
+                <article data-sector-panel="0">
+                  <span class="sheet-caption">Quick commerce</span>
+                  <h3>Dark-store shifts</h3>
+                  <p>
+                    Rider demand changes between the opening shift and the
+                    evening rush. Map the shifts for each dark store and call
+                    out when they overlap.
+                  </p>
+                  <ul>
+                    <li>Store locations</li>
+                    <li>Peak order windows</li>
+                    <li>Riders per shift</li>
+                  </ul>
+                  <a
+                    class="line-link"
+                    href="./partner.html?sector=Quick%20commerce"
+                    >Discuss quick commerce staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="1" hidden>
+                  <span class="sheet-caption">E-commerce</span>
+                  <h3>Parcel delivery runs</h3>
+                  <p>
+                    Separate dispatch waves from return pickups. Give the field
+                    team the hub, route area and cut-off for each wave.
+                  </p>
+                  <ul>
+                    <li>Dispatch waves</li>
+                    <li>Delivery areas</li>
+                    <li>Return pickups</li>
+                  </ul>
+                  <a class="line-link" href="./partner.html?sector=E-commerce"
+                    >Discuss e-commerce staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="2" hidden>
+                  <span class="sheet-caption">Food delivery</span>
+                  <h3>Meal-time coverage</h3>
+                  <p>
+                    Lunch and dinner can call for different teams. Share
+                    restaurant clusters and the hours you want riders ready to
+                    collect.
+                  </p>
+                  <ul>
+                    <li>Restaurant clusters</li>
+                    <li>Lunch and dinner peaks</li>
+                    <li>Weekend shifts</li>
+                  </ul>
+                  <a
+                    class="line-link"
+                    href="./partner.html?sector=Food%20delivery"
+                    >Discuss food delivery staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="3" hidden>
+                  <span class="sheet-caption">Courier & express</span>
+                  <h3>Dispatch cut-offs</h3>
+                  <p>
+                    Work back from the last dispatch. Share reporting points,
+                    collection windows and the areas each run needs to cover.
+                  </p>
+                  <ul>
+                    <li>Reporting points</li>
+                    <li>Collection windows</li>
+                    <li>Route areas</li>
+                  </ul>
+                  <a
+                    class="line-link"
+                    href="./partner.html?sector=Courier%20%26%20express"
+                    >Discuss courier & express staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="4" hidden>
+                  <span class="sheet-caption">Retail</span>
+                  <h3>Store-to-door delivery</h3>
+                  <p>
+                    Each shop may trade different hours. List the pickup
+                    counter, busiest trading days and the nearby areas it
+                    serves.
+                  </p>
+                  <ul>
+                    <li>Store hours</li>
+                    <li>Pickup counters</li>
+                    <li>Trading peaks</li>
+                  </ul>
+                  <a class="line-link" href="./partner.html?sector=Retail"
+                    >Discuss retail staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="5" hidden>
+                  <span class="sheet-caption">Pharma</span>
+                  <h3>Pharmacy pickups</h3>
+                  <p>
+                    Tell us which pharmacies are pickup points, their dispatch
+                    windows and any handling instructions riders must receive.
+                  </p>
+                  <ul>
+                    <li>Pharmacy locations</li>
+                    <li>Pickup windows</li>
+                    <li>Handling instructions</li>
+                  </ul>
+                  <a class="line-link" href="./partner.html?sector=Pharma"
+                    >Discuss pharma staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+                <article data-sector-panel="6" hidden>
+                  <span class="sheet-caption">Hyperlocal</span>
+                  <h3>Neighbourhood routes</h3>
+                  <p>
+                    Short local runs often start at more than one point. Map
+                    your pickup locations, service radius and recurring time
+                    slots.
+                  </p>
+                  <ul>
+                    <li>Pickup points</li>
+                    <li>Service radius</li>
+                    <li>Recurring slots</li>
+                  </ul>
+                  <a class="line-link" href="./partner.html?sector=Hyperlocal"
+                    >Discuss hyperlocal staffing
+                    <span aria-hidden="true">↗</span></a
+                  >
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="planner" class="planner-section wrap">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">
+              <i class="signal"></i>Interactive / Hub staffing planner
+            </div>
+            <h2>Size up<br /><em>your shifts.</em></h2>
+          </div>
+          <p>
+            Turn your operating hours into a first staffing brief. Adjust the
+            controls to see how many rider shifts your hubs need.
+          </p>
+        </div>
+        <div class="planning-desk">
+          <div class="plan-inputs">
+            <div class="plan-control">
+              <label for="p-hubs">Delivery hubs</label
+              ><output for="p-hubs" id="v-hubs">2</output
+              ><input id="p-hubs" type="range" min="1" max="25" value="2" />
+            </div>
+            <div class="plan-control">
+              <label for="p-shifts">Shifts per hub per day</label
+              ><output for="p-shifts" id="v-shifts">2</output
+              ><input id="p-shifts" type="range" min="1" max="5" value="2" />
+            </div>
+            <div class="plan-control">
+              <label for="p-riders">Riders per shift</label
+              ><output for="p-riders" id="v-riders">6</output
+              ><input id="p-riders" type="range" min="1" max="100" value="6" />
+            </div>
+            <div class="plan-control">
+              <label for="p-days">Operating days per week</label
+              ><output for="p-days" id="v-days">6</output
+              ><input id="p-days" type="range" min="1" max="7" value="6" />
+            </div>
+          </div>
+          <div class="plan-result">
+            <span class="eyebrow">Coverage estimate</span>
+            <div class="plan-total">
+              <strong id="daily">24</strong
+              ><span>rider shifts<br />per day</span>
+            </div>
+            <p><b id="weekly">144</b> rider shifts per week</p>
+            <small
+              >Assumes equal staffing across hubs and shifts. One rider working
+              two shifts counts twice.</small
+            ><a
+              id="plan-cta"
+              class="pill dark"
+              href="./partner.html?brief=2%20hubs%20%C3%97%202%20shifts%20%C3%97%206%20riders%3B%206%20days%20per%20week.%2024%20rider%20shifts%20per%20day."
+              >Use this in my enquiry <span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+      </section>
+      <section id="process" class="film-section" aria-labelledby="film-title">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow"><i class="signal"></i> The field film</div>
+              <h2 id="film-title">From hub brief<br /><em>to payday.</em></h2>
+            </div>
+            <p>
+              A working week in 32 seconds. Follow the dispatch, the rider, the
+              EV and the pay record, or jump to a chapter below.
+            </p>
+          </div>
+          <div class="cinema">
+            <div class="screen">
+              <video
+                id="field-video"
+                controls
+                muted
+                playsinline
+                preload="metadata"
+                poster="./assets/field-film-poster.webp"
+                aria-label="Qwikserve operations film, from hub brief to payday"
+              >
+                <source src="./assets/field-film.mp4" type="video/mp4" />
+                <track
+                  kind="captions"
+                  src="./assets/field-film.vtt"
+                  srclang="en"
+                  label="English"
+                />
+                <a href="./assets/field-film.mp4">Open the operations film</a>
+              </video>
+            </div>
+            <div class="chapters">
+              <div class="chapter-head">
+                <span class="eyebrow">Film chapters</span
+                ><span class="chapter-total">01—04</span>
+              </div>
+              <ol>
+                <li>
+                  <a
+                    href="./assets/field-film.mp4#t=0"
+                    data-start="0"
+                    aria-current="step"
+                    ><span class="chapter-n">01</span
+                    ><span
+                      ><b>The hub brief</b
+                      ><small
+                        >Locations, rider numbers, start dates</small
+                      ></span
+                    ><span class="chapter-icon" aria-hidden="true">▶</span></a
+                  >
+                </li>
+                <li>
+                  <a href="./assets/field-film.mp4#t=8" data-start="8"
+                    ><span class="chapter-n">02</span
+                    ><span
+                      ><b>Rider onboarding</b
+                      ><small>Recruitment and document checks</small></span
+                    ><span class="chapter-icon" aria-hidden="true">▶</span></a
+                  >
+                </li>
+                <li>
+                  <a href="./assets/field-film.mp4#t=16" data-start="16"
+                    ><span class="chapter-n">03</span
+                    ><span
+                      ><b>The EV handover</b
+                      ><small>Vehicles for eligible riders</small></span
+                    ><span class="chapter-icon" aria-hidden="true">▶</span></a
+                  >
+                </li>
+                <li>
+                  <a href="./assets/field-film.mp4#t=24" data-start="24"
+                    ><span class="chapter-n">04</span
+                    ><span
+                      ><b>Weekly reconciliation</b
+                      ><small
+                        >Earnings, deductions and bank results</small
+                      ></span
+                    ><span class="chapter-icon" aria-hidden="true">▶</span></a
+                  >
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="riders" class="rider-banner">
+        <div class="wrap rider-grid">
+          <img
+            src="./assets/field-hero.webp"
+            loading="lazy"
+            alt="Illustration of a delivery rider on a city street"
+          />
+          <div>
+            <div class="eyebrow"><i class="signal"></i>For riders</div>
+            <h2>Ready for<br />your first shift?</h2>
+            <p>
+              Start with your area, your availability and whether you already
+              have a vehicle. A recruiter can discuss local openings and the
+              next steps.
+            </p>
+            <a class="pill dark" href="./riders.html"
+              >See the joining guide <span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+      </section>
+      <section class="split-section wrap">
+        <div class="split-intro">
+          <div class="eyebrow"><i class="signal"></i>Before you enquire</div>
+          <h2>Questions from<br />hub teams.</h2>
+          <p>A few details help our team start the right conversation.</p>
+        </div>
+        <div class="faq">
+          <details>
+            <summary>
+              Can we ask about more than one hub?<span aria-hidden="true"
+                >＋</span
+              >
+            </summary>
+            <p>
+              Yes. List each pickup point and the shifts you need there. If two
+              hubs share a delivery area, flag it so the field team can plan
+              around the overlap.
+            </p>
+          </details>
+          <details>
+            <summary>
+              Do we need to provide the vehicles?<span aria-hidden="true"
+                >＋</span
+              >
+            </summary>
+            <p>
+              Tell us which riders will need a vehicle. Some riders use their
+              own; the team can check rental EV availability and eligibility for
+              the rest.
+            </p>
+          </details>
+          <details>
+            <summary>
+              How do we confirm rates and a start date?<span aria-hidden="true"
+                >＋</span
+              >
+            </summary>
+            <p>
+              Share the location, headcount, shifts and intended start date. The
+              team can then discuss local availability, commercial terms and
+              onboarding before you commit.
+            </p>
+          </details>
+          <details>
+            <summary>
+              Who follows up on a payout discrepancy?<span aria-hidden="true"
+                >＋</span
+              >
+            </summary>
+            <p>
+              The operations team checks the company paysheet, rider assignment,
+              deductions and bank transfer result. Include the hub and pay
+              period when you raise a query.
+            </p>
+          </details>
+        </div>
+      </section>
+      <section class="band">
+        <div class="wrap">
+          <div>
+            <div class="eyebrow"><i class="signal"></i>Business enquiries</div>
+            <h2>Where do you need riders?</h2>
+            <p>
+              Bring your hub locations, shift timings and target start date.
+            </p>
+          </div>
+          <a class="pill dark" href="./partner.html"
+            >Talk to our team <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
+    </main>
+    <footer class="directory">
+      <div class="wrap">
+        <div class="footer-grid">
+          <div>
+            <a
+              class="wordmark"
+              href="./index.html"
+              aria-label="Qwikserve Logistics home"
+              ><img
+                src="./assets/mark.png"
+                width="51"
+                height="23"
+                alt=""
+              /><span>Qwikserve<small>LOGISTICS</small></span></a
+            >
+            <p>
+              Delivery teams for the last mile.<br />On the ground since 2018.
+            </p>
+          </div>
+          <div>
+            <h2>For business</h2>
+            <a href="./workforce.html">Delivery workforce</a
+            ><a href="./fleet.html">EV rental &amp; support</a
+            ><a href="./workforce.html#settlements">Payout operations</a
+            ><a href="./index.html#planner">Staffing planner</a>
+          </div>
+          <div>
+            <h2>Explore</h2>
+            <a href="./company.html">Our company</a
+            ><a href="./company.html#platforms">Platform experience</a
+            ><a href="./riders.html">Rider joining guide</a
+            ><a href="./index.html#process">Watch the field film</a>
+          </div>
+          <div>
+            <h2>Get in touch</h2>
+            <a href="./partner.html">Business enquiries ↗</a
+            ><a href="mailto:info@qwikserve.in">info@qwikserve.in</a
+            ><a href="tel:+919830984063">+91 98309 84063</a>
+          </div>
+        </div>
+        <div class="copyright">
+          <span>Qwikserve Logistics LLP</span><a href="#top">Back to top ↑</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

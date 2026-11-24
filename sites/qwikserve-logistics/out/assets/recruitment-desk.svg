@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="An illustrated recruitment desk with clipboard, rider pass and telephone"><defs><linearGradient id="paper" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#f5efed"/></linearGradient><linearGradient id="red" x2=".8" y2="1"><stop stop-color="#ec4a3b"/><stop offset="1" stop-color="#ae1520"/></linearGradient><linearGradient id="shade"><stop stop-color="#ead9d7"/><stop offset="1" stop-color="#fff1f0"/></linearGradient><filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="15" stdDeviation="14" flood-color="#673332" flood-opacity=".12"/></filter><filter id="small" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#70332f" flood-opacity=".12"/></filter></defs><ellipse cx="410" cy="482" rx="295" ry="45" fill="#eddcda" opacity=".5"/>
+<g filter="url(#shadow)" transform="translate(170 65) rotate(-8 190 220)">
+<rect x="0" y="35" width="350" height="430" rx="24" fill="#e1cbc5"/>
+<rect x="13" y="22" width="350" height="430" rx="22" fill="url(#paper)" stroke="#ddccc8"/>
+<rect x="107" y="6" width="155" height="52" rx="13" fill="#c22121"/><rect x="128" y="17" width="111" height="20" rx="7" fill="#f6ac9f"/>
+<path d="M65 100h95M65 116h160" stroke="#c22121" stroke-width="9" stroke-linecap="round"/>
+<g fill="#f7efed" stroke="#e9dbd7"><rect x="48" y="150" width="265" height="70" rx="12"/><rect x="48" y="239" width="265" height="70" rx="12"/><rect x="48" y="328" width="265" height="70" rx="12"/></g>
+<g fill="#c22121"><circle cx="81" cy="185" r="16"/><circle cx="81" cy="274" r="16"/><circle cx="81" cy="363" r="16"/></g>
+<g stroke="#fff" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m74 185 5 5 10-11"/><path d="m74 274 5 5 10-11"/><path d="m74 363 5 5 10-11"/></g>
+<g stroke="#c2b5b1" stroke-width="8" stroke-linecap="round"><path d="M117 175h130m-130 18h94M117 264h114m-114 18h140M117 353h145m-145 18h102"/></g></g>
+<g filter="url(#shadow)" transform="translate(475 228) rotate(10 95 127)">
+<rect width="197" height="256" rx="16" fill="url(#paper)" stroke="#d9c6c1"/><path d="M0 16Q0 0 16 0h165q16 0 16 16v45H0z" fill="url(#red)"/>
+<rect x="74" y="16" width="50" height="9" rx="4" fill="#f5c6bb"/><circle cx="99" cy="119" r="38" fill="#f1d8d1"/><circle cx="99" cy="109" r="14" fill="#b78976"/><path d="M70 145q3-24 29-24t29 24" fill="#c22121"/>
+<g stroke="#b5a49d" stroke-width="7" stroke-linecap="round"><path d="M54 184h92m-68 19h45"/></g><path d="M36 224h125" stroke="#e6d6cf" stroke-width="6"/>
+</g><g filter="url(#small)" transform="translate(548 86) rotate(13 50 50)"><rect width="106" height="106" rx="28" fill="url(#red)"/><path d="m29 23 16 3 3 16-8 7q8 15 20 22l8-8 16 4-2 17C47 92 18 53 29 23z" fill="#fff"/></g>
+<path d="M102 364c-39 8-40 54-12 68" fill="none" stroke="#cc8c80" stroke-width="3" stroke-dasharray="6 8"/><circle cx="89" cy="433" r="6" fill="#c22121"/>
+</svg>

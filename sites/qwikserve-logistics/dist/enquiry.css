@@ -1,0 +1,263 @@
+.enquiry {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.eq-shell {
+  width: min(1280px,89.5%);
+  margin-inline: auto;
+}
+
+.eq-skip {
+  position: absolute;
+  left: 10px;
+  top: -90px;
+  z-index: 10;
+  padding: 10px;
+  background: white;
+}
+
+.eq-skip:focus {
+  top: 10px;
+}
+
+.eq-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.eq-bar, .eq-foot-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+}
+
+.eq-bar {
+  min-height: 75px;
+}
+
+.eq-back, .eq-footer nav a {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.eq-back span {
+  margin-right: 5px;
+}
+
+.eq-back:hover, .eq-direct a:hover, .eq-footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.eq-main {
+  display: grid;
+  grid-template-columns: 1fr .95fr;
+  gap: clamp(18px,3vw,50px);
+  align-items: stretch;
+  flex: 1;
+  padding-block: clamp(28px,3.7vw,60px);
+}
+
+.eq-intro, .eq-panel {
+  border-radius: 22px;
+}
+
+.eq-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  overflow: hidden;
+  background: #292625;
+  color: #fff;
+  padding: clamp(26px,3.3vw,54px);
+  position: relative;
+  isolation: isolate;
+}
+
+.eq-intro::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg,#201e1d 17%,#201e1de6 57%,#201e1d70), url("./assets/field-hero.webp") center 80%/cover;
+}
+
+.eq-eyebrow {
+  font: 600 10px/1.4 var(--mono);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.eq-eyebrow span {
+  width: 18px;
+  height: 10px;
+  transform: skewX(-22deg);
+  background: repeating-linear-gradient(90deg,var(--red) 0 4px,transparent 4px 7px);
+}
+
+.eq-intro h1 {
+  margin: 25px 0 18px;
+  font-size: clamp(49px,5.2vw,82px);
+  letter-spacing: -.075em;
+  line-height: .94;
+}
+
+.eq-intro h1 span {
+  color: #ff6648;
+}
+
+.eq-lead {
+  max-width: 34ch;
+  color: #e8dfda;
+  font-size: clamp(16px,1.35vw,20px);
+}
+
+.eq-direct {
+  margin-top: auto;
+  padding-top: 38px;
+  display: grid;
+  gap: 5px;
+}
+
+.eq-direct h2 {
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: #eee1db;
+}
+
+.eq-direct a {
+  font-weight: 600;
+  align-self: start;
+}
+
+.eq-direct a span {
+  color: #ff826d;
+}
+
+.eq-panel {
+  padding: clamp(24px,3.3vw,54px);
+  background: white;
+  border: 1px solid var(--line);
+}
+
+.eq-panel h2 {
+  margin: 0 0 6px;
+  font-size: clamp(32px,3.1vw,48px);
+  line-height: 1.05;
+  letter-spacing: -.065em;
+}
+
+.eq-panel > p, .eq-form-tip {
+  color: var(--muted);
+}
+
+.eq-panel form {
+  display: grid;
+  margin-top: 25px;
+}
+
+.eq-panel label {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 5px;
+}
+
+.eq-panel label:first-child {
+  margin-top: 0;
+}
+
+.eq-panel input, .eq-panel textarea {
+  width: 100%;
+  padding: 12px 14px;
+  background: #faf9f9;
+  border: 1px solid #b7b2b1;
+  border-radius: 10px;
+  color: var(--ink);
+}
+
+.eq-panel textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.eq-panel input::placeholder, .eq-panel textarea::placeholder {
+  color: #716b69;
+  opacity: 1;
+}
+
+.eq-form-tip, .eq-result {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.eq-form-tip {
+  margin: 16px 0;
+}
+
+.eq-result:not(:empty) {
+  margin-top: 12px;
+}
+
+.eq-panel button {
+  justify-self: start;
+}
+
+.eq-footer {
+  border-top: 1px solid var(--line);
+}
+
+.eq-foot-inner {
+  padding-block: 24px;
+  flex-wrap: wrap;
+}
+
+.eq-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.eq-home {
+  font-weight: 800;
+  letter-spacing: -.06em;
+  font-size: 22px;
+}
+
+@media (max-width: 740px) {
+  .eq-shell {
+    width: 91%;
+  }
+  .eq-bar {
+    min-height: 62px;
+  }
+  .eq-main {
+    grid-template-columns: minmax(0,1fr);
+    gap: 16px;
+    padding-block: 18px 35px;
+  }
+  .eq-intro, .eq-panel {
+    padding: 25px;
+    border-radius: 17px;
+  }
+  .eq-intro h1 {
+    font-size: 48px;
+    margin: 18px 0 12px;
+  }
+  .eq-direct {
+    padding-top: 17px;
+  }
+  .eq-direct h2 {
+    display: none;
+  }
+  .eq-lead {
+    font-size: 15px;
+  }
+  .eq-foot-inner {
+    gap: 12px;
+  }
+}

@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="510" viewBox="0 0 680 510" role="img" aria-labelledby="title desc">
+  <title id="title">An electric delivery ride through Kolkata</title>
+  <desc id="desc">A helmeted courier rides a vermilion electric scooter past shuttered shops and an arched heritage building in the afternoon sun.</desc>
+  <defs>
+    <pattern id="paper" width="13" height="11" patternUnits="userSpaceOnUse">
+      <path d="M1 2h.7m6 5h.6m4-6h.7" stroke="#a47f61" stroke-width=".65" opacity=".37"/>
+    </pattern>
+    <pattern id="screen" width="4.3" height="4.3" patternUnits="userSpaceOnUse">
+      <circle cx="1.4" cy="1.4" r=".72" fill="#8f4934"/>
+    </pattern>
+    <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse">
+      <path d="m-1 1 2-2M0 5 5 0m-1 6 2-2" fill="none" stroke="#594637" stroke-width=".65"/>
+    </pattern>
+    <g id="shutter" stroke-width="1.1">
+      <path d="M0 43V11a10 10 0 0 1 20 0v32z" fill="#e4c6ac"/>
+      <path d="M3 40V12a7 7 0 0 1 14 0v28z" fill="#f4e4cf"/>
+      <path d="M5 12h10M5 16h10M5 20h10M5 24h10M5 28h10M5 32h10M5 36h10M10 11v29" fill="none"/>
+    </g>
+    <g id="arch" stroke-width="1.25">
+      <path d="M0 61V22a20 20 0 0 1 40 0v39H0Z" fill="#f7e9d7"/>
+      <path d="M4 61V23a16 16 0 1 1 32 0v38" fill="#e4c8ae"/>
+      <path d="M7 60V24a13 13 0 0 1 26 0v36M7 25h26M10 24l10-9 10 9m-10-9v9m-8 3v31m8-31v31m8-31v31" fill="none"/>
+      <path d="M-3 60h46v4H-3z" fill="#f0ddc7"/>
+    </g>
+    <g id="baluster" fill="#eddbc5" stroke-width="1">
+      <path d="M0 0h6l-1.3 4 1.3 7-1 3H1l-1-3 1.3-7Z"/>
+    </g>
+    <g id="wheel" stroke="#29231f" stroke-linejoin="round">
+      <circle r="45" fill="#29231f" stroke-width="2.6"/>
+      <circle r="39.5" fill="none" stroke="#6d5a49" stroke-width="1"/>
+      <circle r="32" fill="#dfb696" stroke-width="2"/>
+      <circle r="28.8" fill="#f2dfc5" stroke-width="1.5"/>
+      <g fill="#67574a" stroke-width="1.6">
+        <path id="spoke" d="m-2-6-15-15 8-4 13 18z"/>
+        <use href="#spoke" transform="rotate(72)"/>
+        <use href="#spoke" transform="rotate(144)"/>
+        <use href="#spoke" transform="rotate(216)"/>
+        <use href="#spoke" transform="rotate(288)"/>
+      </g>
+      <circle r="10" fill="#d2ad91" stroke-width="2.1"/>
+      <circle r="4" fill="#4e443c" stroke-width="1.6"/>
+    </g>
+  </defs>
+
+  <!-- A printed sky and sun; the fine stipple stays visible on a large poster. -->
+  <path fill="#f6e9d9" d="M0 0h680v510H0z"/>
+  <path fill="url(#paper)" d="M0 0h680v510H0z"/>
+  <circle cx="530" cy="108" r="52" fill="#e8a081"/>
+  <circle cx="530" cy="108" r="52" fill="url(#screen)" opacity=".29"/>
+  <g fill="none" stroke="#a7866d" stroke-linecap="round">
+    <path d="M50 80q6-2 13 1 7-7 16-8m-32 10 8-2m337-29q5 0 9 3 4-5 11-6m215 27q4-2 8 0 4-5 10-6" stroke-width="1.5"/>
+    <path d="M159 107h23m-15 4h32m235-14h15m-20 4h11m159 49h23" stroke-width=".9"/>
+  </g>
+
+  <!-- Street elevation. Pale ink keeps the foreground silhouette legible. -->
+  <g stroke="#ae8b71" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M0 211h21v-16h51v15h15v-29h31v15h25v36h30v-70h26v-15h18v7h22v48h29v-14h48v37h37v-30h27v-14h34v24h18v-40h46v10h23v76h64v65H0Z" fill="#ead3bb" stroke="none"/>
+    <g stroke-width="1.2">
+      <path d="M0 169 99 152l-1 8L0 178z" fill="#e3c6ab"/>
+      <path d="m0 178 94-15v95H0Z" fill="#f1dec7"/>
+      <path d="M5 163v-12l84-14v16M8 152l77-13m-63 10v12m18-16v11m19-14v12m18-15v10" fill="none"/>
+      <path d="m1 198 92-14v9L0 207zm0 44 93-12v8L0 251z" fill="#dec0a3"/>
+      <path d="m9 212 13-2v21l-13 2zm25-4 13-2v21l-13 2zm28-4 14-2v21l-14 2z" fill="#cfb098"/>
+      <path d="m1 255 94-11 15 16L2 275zm6 21 96-13v64H7z" fill="#ebd3b9"/>
+      <path d="m0 271 108-13v7L0 279z" fill="#d6b198"/>
+      <path d="M15 280v47m5-48v48m8-48v48m8-50v50m8-51v51m8-52v52m6-54v54m8-55v55m8-56v56m8-56v56m8-57v57" fill="none" opacity=".65"/>
+      <path d="M98 188h19v-10l82-2v9h13v7H98z" fill="#e4c8ac"/>
+      <path d="M106 194h100v78H106z" fill="#f3e1cc"/>
+      <use href="#shutter" x="116" y="202"/><use href="#shutter" x="146" y="202"/><use href="#shutter" x="176" y="202"/>
+      <path d="M102 250h108v8H102zm0 39h108v40H102z" fill="#dcbda1"/>
+      <path d="M104 260h101l12 22H94z" fill="#efd5bb"/>
+      <path d="m113 260-5 22m15-22-3 22m14-22-1 22m13-22v22m12-22 2 22m9-22 5 22m6-22 7 22m4-22 9 22m2-22 12 22" fill="none"/>
+      <path d="M94 282h123v4q-5 6-11 0-5 6-11 0-5 6-11 0-5 6-11 0-5 6-11 0-6 6-12 0-5 6-11 0-5 6-11 0-5 6-11 0-5 6-10 0-5 6-13 0z" fill="#e1bea3"/>
+    </g>
+    <!-- A corner mansion, high parapet and long run of round-arched windows. -->
+    <g stroke-width="1.3">
+      <path d="m450 213 39-14v-21l38-11v-21l50-10 103 17v177H450Z" fill="#eed9c2"/>
+      <path d="m516 150 61-13 103 17v9l-103-17-61 13z" fill="#dbbba0"/>
+      <path d="m528 146 1-15 45-9 2-7 4 7 100 16v14l-103-16z" fill="#f1ddc4"/>
+      <path d="m531 134 43-9 106 16m-146-9v9m6-11v10m7-11v9m8-11v9m8-11v10m8-11v9m13-9v8m7-6v8m7-7v8m7-7v8m7-7v8m7-6v7m7-6v7m7-6v7m7-6v7m7-6v7m7-6v7m7-6v7" fill="none" stroke-width="1"/>
+      <path d="m514 160 63-13 103 17v9l-103-17-63 13z" fill="#edcfb1"/>
+      <path d="M577 155v88l103 14v-84z" fill="#f1dec6"/>
+      <g transform="translate(586 166) skewY(9)"><use href="#arch"/><use href="#arch" x="52"/></g>
+      <path d="m489 182 82-21v82l-82 17z" fill="#e6c8ae"/>
+      <g transform="translate(501 185) skewY(-14) scale(.68 .92)"><use href="#arch"/><use href="#arch" x="52"/></g>
+      <path d="m480 250 96-21 104 15v6l-104-15-96 21zm0 24 96-19 104 12v8l-104-11-96 19z" fill="#dbb99d"/>
+      <g transform="translate(581 237) skewY(7)"><use href="#baluster"/><use href="#baluster" x="11"/><use href="#baluster" x="22"/><use href="#baluster" x="33"/><use href="#baluster" x="44"/><use href="#baluster" x="55"/><use href="#baluster" x="66"/><use href="#baluster" x="77"/><use href="#baluster" x="88"/></g>
+      <path d="m488 278 88-18 104 12v61H488z" fill="#e6cbb0"/>
+      <path d="m491 279 80-15v57l-80 4zm92-12 20 3v53l-20-1zm29 4 26 3v51l-26-2zm34 4 28 3v50l-28-2z" fill="#dec1a5"/>
+      <path d="M452 212v116m8-119v118m6-120v120m13-124v124m94-167v86m4-85v84m-2 23v54" fill="none"/>
+    </g>
+    <g fill="none">
+      <path d="M-15 124q134 18 266 9t216-33q108-27 231-22M-15 130q141 16 265 6t211-32q118-29 236-23" stroke-width=".85" opacity=".8"/>
+      <path d="m74 326 2-197 3-2v199m-9-197h17m-15-5h14m-14-3 1 7m10-7 1 7" stroke-width="1.5"/>
+      <path d="M0 327h680m-680 5h680m-680 2 160 2m370 0 150-1" stroke-width="1.45"/>
+    </g>
+  </g>
+
+  <path d="M0 339h680v171H0z" fill="#f0ddc6"/>
+  <path d="M0 339h680v171H0z" fill="url(#paper)"/>
+  <g fill="none" stroke="#b18d70" stroke-linecap="round">
+    <path d="M0 345h100m435 0h145m-99 12h47m-195-15h26M0 370h40m13-5h66m454 40h51m13 0h37M20 421h62m496 32h75m-602 6h97m-126 3h17" stroke-width="1.1"/>
+    <path d="m-35 483 142-6 1.5 2-144 8m322-14 117-5 1 1.5-118 6m181 7 167-8 3 3-167 9" fill="#faf1df" stroke-width=".7"/>
+  </g>
+  <path d="M70 446q86-10 242-8 121-2 253 5l31 4-102 3-103 1-167 1-131-2Z" fill="#a48065" opacity=".54"/>
+  <path d="M106 446q77-6 190-5l194 1q39 1 55 5l-135 2-216 1z" fill="#6f5641" opacity=".5"/>
+
+  <!-- Rider and machine. The rear wheel, boxed battery, and low step-through
+       chassis are drawn separately to keep the bike editable. -->
+  <g stroke="#29231f" stroke-width="2.9" stroke-linejoin="round" stroke-linecap="round">
+    <use href="#wheel" x="170" y="399"/><use href="#wheel" x="494" y="399"/>
+    <!-- Drive housing and swing arm. -->
+    <path d="m167 388 80-43 59 9-25 35-107 19-13-5z" fill="#6b5948"/>
+    <path d="m171 398 89-27" fill="none" stroke="#d4af8c" stroke-width="3.5"/>
+    <path d="m186 387 35-42m-29 33 5 4 2-9 5 3 2-9 5 3 2-9 5 3 2-9" fill="none" stroke-width="2.3"/>
+    <!-- Fork, rear rack, and complete near-side body silhouette. -->
+    <path d="m447 318 18-7 34 85-9 5-36-67z" fill="#a8856a"/>
+    <path d="m464 334 29 62" fill="none" stroke="#f3d7b4" stroke-width="2.5"/>
+    <path d="M108 285h119l27 20-5 5-27-17H109z" fill="#655146"/>
+    <path d="M106 310q14-14 53-17l75-3 25-9 46 4q19 4 20 24l-3 38q0 13 12 15l58 1 27-58q5-12 2-29l-6-28 16-7q17 30 25 65l9 34-18 9-18-1-19 27q-6 15-24 16l-85 1q-20 1-32-11l-21-18-36-2-47 16-16-8q-6-8-29-14-18-7-44-1l-3-9z" fill="#d84325"/>
+    <path d="M105 313q52-15 106-13l24-1-7 9-72 6-54 15z" fill="#f07b51" stroke="none"/>
+    <path d="M103 338q42-28 94-23l23-1 17-13 44-3q9-1 14 10l8 24q2 8-10 16l-19 15-25-5-37-2-47 15q-12-22-55-22h-13z" fill="#dc4b2d" stroke-width="2"/>
+    <path d="M108 339q28-14 56-17l38-2m38-10 36-3" fill="none" stroke="#fcb389" stroke-width="2.6"/>
+    <path d="M99 344q31-6 53 4l14 10 12-5 27-8 44 1 16 3-5 10-43-3-46 16q-16-22-51-24l-22 3z" fill="#9f3525" stroke="none"/>
+    <path d="m297 348 8 16q6 14 25 15l61 1q12 0 17-9l32-53 11 5-29 55q-9 16-26 16l-83-1q-19-1-33-16l-14-15z" fill="#493d34"/>
+    <path d="M305 363q8 9 28 10l58 1q9 0 15-6" fill="none" stroke="#e9c1a2" stroke-width="2"/>
+    <path d="m233 320 36-2m-40 8 36-2m-41 8 34-2" fill="none" stroke="#8d3528" stroke-width="2.5"/>
+    <path d="m100 312-3 5-2 11 8-1 4-17z" fill="#f3b877" stroke-width="1.8"/>
+    <path d="m97 333-4 20 5 1 7-22z" fill="#514237" stroke-width="1.9"/>
+    <path d="M429 241q-10 2-10 9l11 49q3 9 2 19l-17 43 12-12 18-25 16 5q-4-30-16-59z" fill="#ed6840"/>
+    <path d="M433 260q7 19 12 39m5 10 3 13" fill="none" stroke="#f8b289" stroke-width="2.8"/>
+    <path d="M450 363q10-18 27-23 27-8 51 12l10 13q-11-1-19-5-25-10-44 0l-24 12z" fill="#d84325"/>
+    <path d="M459 357q24-20 51-7" stroke="#f8a279" fill="none" stroke-width="2"/>
+    <path d="m484 390 9-3 7 9-5 7-8-2z" fill="#b79373" stroke-width="1.9"/>
+    <!-- Wide padded saddle. -->
+    <path d="m207 290 10-8q6-4 22-4l65 2 16 3q5 2 3 7-3 6-15 8l-83 1q-16 0-18-9z" fill="#332e29"/>
+    <path d="M220 286q39-4 85 1" fill="none" stroke="#88705b" stroke-width="1.8"/>
+    <!-- Giant courier trunk, banded canvas over its rigid shell. -->
+    <path d="m99 216 18-9 97 1 8 10 1 59-13 8-107-1-6-6z" fill="#b1a084"/>
+    <path d="m99 216 12 6 1 61-10-1-5-5z" fill="#9b826b" stroke-width="1.8"/>
+    <path d="m111 220 108-2 3 59-12 7-98-1z" fill="#d8ba93" stroke-width="2.2"/>
+    <path d="m99 214 17-10 94 1 11 7-10 10-100 2-11-5z" fill="#edcfab"/>
+    <path d="m112 224 98-2 10-8 1 7-11 8-98 1z" fill="#a98a6a" stroke-width="1.7"/>
+    <path d="m128 214 8-8h10l-9 8 1 67h-9zm60-1 8-8h9l-8 8 2 68h-9z" fill="#473c32" stroke-width="1.5"/>
+    <path d="M128 241h11v7h-11zm61-1h10v7h-10z" fill="#b3a18a" stroke-width="1.6"/>
+    <path d="m116 274 89-1 9-3m-68-23 30-.5m-30 3 19-.5" fill="none" stroke="#92795f" stroke-width="1.1"/>
+    <path d="m117 234 7-1 .5 32-6 1z" fill="url(#hatch)" stroke="none"/>
+    <!-- The farther leg is partially hidden by the step through. -->
+    <path d="M280 259q18-14 43-4l34 29q9 6 14 19l15 42-11 8-19-4-20-40-44-19-20-11z" fill="#51453a"/>
+    <path d="m375 341 11 2 8 9 15 6q6 2 5 6l-37 1-12-7z" fill="#463b32"/>
+    <!-- Near leg, with bent knee, trouser seam and the boot on its floorboard. -->
+    <path d="m265 253 43-7 13 13q27 4 51 14l23 11q15 8 10 25l-19 48-22-4 10-44-67-14q-32-5-44-14-8-8 2-28z" fill="#343332"/>
+    <path d="M285 262q3 15 18 19l66 15 18 5q4 1 2 8l-10 33" stroke="#827261" fill="none" stroke-width="1.7"/>
+    <path d="M302 257q3 13 16 16m39 7 18 4m10 6q8 4 9 8" stroke="#756452" fill="none" stroke-width="1.5"/>
+    <path d="m363 346 24 5-3 9-24-5z" fill="#5f5246" stroke-width="1.8"/>
+    <path d="m359 354 23 4q1 6 10 9l10 2q6 2 4 7l-45-2-7-4z" fill="#322c28"/>
+    <path d="m355 370 50 4-1 4-45-2-6-3z" fill="#ddc4a5" stroke-width="1.5"/>
+    <path d="m379 360-4 3m9-1-4 3m9-1-4 3" fill="none" stroke="#ab9279" stroke-width="1.4"/>
+    <!-- A check-pattern work shirt. Folds reflect forward riding posture. -->
+    <path d="m332 145 23 10 7 18q-13 21-19 40l-11 36 1 12q-15 6-35 5l-37-5q-5-3-3-10l7-28 12-37q8-24 24-34l13-7z" fill="#e4b67b"/>
+    <path d="m302 153-16 35-17 55-9 9q6-40 21-72 8-18 21-27z" fill="#af855b" stroke="none"/>
+    <path d="M278 237q6 3 27 4l26-1-1 12-29 2-28-3z" fill="#c49a68" stroke="none"/>
+    <path d="m258 251 15 4 31 3 27-3 2 7-28 4-43-3-7-4z" fill="#b58a5d" stroke-width="1.9"/>
+    <path d="m290 178-12 39m11-19-10 31m15 7q9 3 20 1m-35 10 15 4" fill="none" stroke="#926f50" stroke-width="1.3"/>
+    <!-- Two narrow retro reflective bands across the back. -->
+    <path d="M281 182q7-16 17-24l9-6 6 1q-13 10-20 22l-3 8z" fill="#f5dfb4" stroke-width="1.2"/>
+    <path d="m270 217 9 2-2 6-9-2z" fill="#f6deaf" stroke-width="1.1"/>
+    <!-- Neck, profile and helmet, complete with chin strap and peak. -->
+    <path d="m315 149 10-18 18-3 16 11-12 24-10 5z" fill="#a96d48"/>
+    <path d="m328 136 17-6 10 10-6 11q-13 1-21-7z" fill="#77513a" stroke="none"/>
+    <path d="m312 147 8-4q8 11 23 15l-6 12-14-7z" fill="#f0c993" stroke-width="2"/>
+    <path d="m348 154 8 5-9 14-7-6z" fill="#b88e5e" stroke-width="1.8"/>
+    <path d="M322 86q18-15 38-2 18 9 18 31l6 12-7 4-1 10q-1 7-9 9l-17-1-16-9-12-15z" fill="#bf8356"/>
+    <path d="M350 135q5 4 12 3l7-5 7 .5-1 9q-4 10-15 8l-11-3-7-10z" fill="#45382e" stroke-width="1.3"/>
+    <path d="m364 113 10 .7m-3 3 2 .3m-4 13 7 1" fill="none" stroke-width="1.8"/>
+    <path d="M323 87q7-14 15-16l13-1 5 9-8 36-7 14-11 2-12-17z" fill="#42362e"/>
+    <path d="M328 114q4-7 10-4 6 3 4 11-2 7-9 7l-5-5z" fill="#bb7e55" stroke-width="1.7"/>
+    <path d="M331 116q4-5 7 0l-2 6" fill="none" stroke-width="1.3"/>
+    <path d="M316 112q-5-12-2-25 4-19 21-27 17-7 33 1 17 8 20 25l-2 10-14 11-20 3-9 10-18 1z" fill="#edcf9f"/>
+    <path d="M315 87q10-25 30-27l10 .4q-27 11-29 43l-10 5z" fill="#d84325" stroke-width="1.4"/>
+    <path d="M320 79q4-11 15-16" fill="none" stroke="#f6d5af" stroke-width="1.4"/>
+    <path d="M342 104q11-9 28-12l14-.5 9 4q-1 4-8 5l-16 1-17 6z" fill="#493d32" stroke-width="2.1"/>
+    <path d="m315 104 12-3 16 2 4 8-4 9-15 4-12-6z" fill="#cbab83" stroke-width="2"/>
+    <path d="m342 118 4 1 5 15 6 5-3 4-9-7z" fill="#463b32" stroke-width="1.3"/>
+    <circle cx="334" cy="111" r="4" fill="#514437" stroke-width="1.2"/>
+    <circle cx="334" cy="111" r="1.4" fill="#d9ba92" stroke="none"/>
+    <path d="M356 64q15 1 23 14m-21-9 7 2" fill="none" stroke="#fbebce" stroke-width="2.1"/>
+    <!-- Hand controls and mirror. -->
+    <path d="m407 221 8-3 24 11 10 15-12 7-14-13z" fill="#d84325"/>
+    <path d="m433 228 15-4q11 2 13 7l-1 11-11 5-11-6z" fill="#e95331" stroke-width="2.1"/>
+    <path d="m451 227 7 .5q5 4 3 11l-7 4z" fill="#f4ddb4" stroke-width="1.8"/>
+    <path d="m444 224-3-15 9-14" fill="none" stroke-width="3.3"/>
+    <path d="m448 195 1-6q3-5 10-6l8 1v4q-3 7-11 9z" fill="#a68c73" stroke-width="2.1"/>
+    <path d="m451 191 11-5" fill="none" stroke="#e8cbae" stroke-width="1.7"/>
+    <path d="m423 231-24-4-4 4 1 3 29 2z" fill="#382f28" stroke-width="1.8"/>
+    <path d="m421 237-4 7-18-3" fill="none" stroke-width="1.9"/>
+    <!-- The forward forearm intersects the handle grip above the steering column. -->
+    <path d="m349 179 16 1 17 21 36 14 11 2 7 6-1 6-6 1-7-6-10-.5-39-9q-6-1-11-6l-17-15z" fill="#ba7b50"/>
+    <path d="m369 201 8 7 38 13m7-5 8 4m-4 0 6 4m-7-.5 6 4" fill="none" stroke="#815234" stroke-width="1.3"/>
+    <path d="M339 157q12-2 20 8l17 24-7 8-13 5-21-23q-6-11 4-22z" fill="#e6bb81"/>
+    <path d="m352 197 8 9 20-13-6-8z" fill="#d3a26b" stroke-width="2"/>
+    <path d="m355 195 18-11m-36-18q-3 8 1 14m12-9 8 14" fill="none" stroke="#986e4e" stroke-width="1.4"/>
+  </g>
+  <!-- A handful of short motion rules, letterpress ink on the street. -->
+  <g fill="none" stroke="#715c4c" stroke-linecap="round">
+    <path d="M38 298h44m-57 7h42m-4 5h23m-50 68h50m-64 7h35" stroke-width="1.6"/>
+    <path d="M61 292h16m-34 26h17m9 62h25" stroke-width=".85"/>
+  </g>
+</svg>
