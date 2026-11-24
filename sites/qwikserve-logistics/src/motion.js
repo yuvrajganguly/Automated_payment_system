@@ -163,47 +163,42 @@ document.querySelectorAll("video[data-loop-src]").forEach(clip => {
   }, {threshold: 0.12}).observe(frame);
 });
 
-// Rider-journey slideshows: crossfade with a slow drift, a progress bar per
-// slide, autoplay only while in view, pause on hover/focus, swipe on touch.
+// Field slideshows: a plain crossfade, numbered tabs underneath, one
+// factual line. Advances every 6.5s only while on screen; hovering, focusing
+// or picking a tab holds it. Reduced motion: manual only.
 document.querySelectorAll("[data-slideshow]").forEach(show => {
-  const slides = [...show.querySelectorAll(".journey-slide")];
-  const caps = [...show.querySelectorAll(".journey-cap")];
-  const bars = [...show.querySelectorAll(".journey-progress-bar i")];
-  const toggle = show.querySelector("[data-show-toggle]");
-  const DURATION = 5200;
-  let index = 0, timer = 0, started = 0, left = DURATION, visible = false, hovered = false, paused = motion.matches;
+  const slides = [...show.querySelectorAll(".field-slide")];
+  const lines = [...show.querySelectorAll(".field-line")];
+  const tabs = [...show.querySelectorAll("[data-show-go]")];
+  const DURATION = 6500;
+  let index = 0, timer = 0, visible = false, held = false, chosen = false;
   show.style.setProperty("--show-duration", DURATION + "ms");
-  function go(next) {
+  function go(next, user = false) {
     index = (next + slides.length) % slides.length;
+    if (user) chosen = true;
     slides.forEach((s, i) => { s.classList.toggle("is-active", i === index); s.setAttribute("aria-hidden", String(i !== index)); });
-    caps.forEach((c, i) => { c.classList.toggle("is-active", i === index); c.setAttribute("aria-hidden", String(i !== index)); });
-    bars.forEach((b, i) => { b.classList.toggle("done", i < index); b.classList.remove("running"); void b.offsetWidth; });
-    const img = slides[index].querySelector("img"); if (img.loading === "lazy") img.loading = "eager";
-    const after = slides[(index + 1) % slides.length].querySelector("img"); if (after.loading === "lazy") after.loading = "eager";
-    left = DURATION; schedule();
+    lines.forEach((l, i) => { l.classList.toggle("is-active", i === index); l.setAttribute("aria-hidden", String(i !== index)); });
+    tabs.forEach((t, i) => { t.setAttribute("aria-pressed", String(i === index)); });
+    [index, index + 1].forEach(n => { const img = slides[n % slides.length].querySelector("img"); if (img.loading === "lazy") img.loading = "eager"; });
+    schedule();
   }
   function schedule() {
     clearTimeout(timer); timer = 0;
-    const run = visible && !hovered && !paused && !document.hidden;
+    const run = visible && !held && !chosen && !motion.matches && !document.hidden;
     show.classList.toggle("is-playing", run);
-    toggle.classList.toggle("is-playing", !paused);
-    toggle.setAttribute("aria-label", paused ? "Play slideshow" : "Pause slideshow");
-    bars[index].classList.toggle("running", run);
-    if (run) { started = performance.now(); timer = setTimeout(() => go(index + 1), left); }
+    if (run) { show.classList.remove("tick"); void show.offsetWidth; show.classList.add("tick"); timer = setTimeout(() => go(index + 1), DURATION); }
+    else show.classList.remove("tick");
   }
-  function hold() { if (timer) { left = Math.max(400, left - (performance.now() - started)); } }
-  show.querySelector("[data-show-next]").addEventListener("click", () => go(index + 1));
-  show.querySelector("[data-show-prev]").addEventListener("click", () => go(index - 1));
-  toggle.addEventListener("click", () => { hold(); paused = !paused; schedule(); });
-  show.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { hold(); hovered = true; schedule(); } });
-  show.addEventListener("pointerleave", () => { hovered = false; schedule(); });
-  show.addEventListener("focusin", () => { hold(); hovered = true; schedule(); });
-  show.addEventListener("focusout", () => { hovered = false; schedule(); });
-  show.addEventListener("keydown", e => { if (e.key === "ArrowRight") go(index + 1); if (e.key === "ArrowLeft") go(index - 1); });
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => go(i, true));
+    t.addEventListener("keydown", e => { const d = {ArrowRight:1, ArrowDown:1, ArrowLeft:-1, ArrowUp:-1}[e.key]; if (d) { e.preventDefault(); go(index + d, true); tabs[index].focus(); } });
+  });
+  show.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") { held = true; schedule(); } });
+  show.addEventListener("pointerleave", () => { held = false; schedule(); });
   let touch;
   show.addEventListener("touchstart", e => { touch = e.touches[0]; }, {passive:true});
-  show.addEventListener("touchend", e => { if (!touch) return; const dx = e.changedTouches[0].clientX - touch.clientX; if (Math.abs(dx) > 45) go(index + (dx < 0 ? 1 : -1)); touch = null; }, {passive:true});
-  document.addEventListener("visibilitychange", () => { hold(); schedule(); });
-  new IntersectionObserver(([entry]) => { if (!entry.isIntersecting) hold(); visible = entry.isIntersecting; schedule(); }, {threshold:.35}).observe(show);
-  show.classList.add("enhanced"); go(0);
+  show.addEventListener("touchend", e => { if (!touch) return; const dx = e.changedTouches[0].clientX - touch.clientX; if (Math.abs(dx) > 45) go(index + (dx < 0 ? 1 : -1), true); touch = null; }, {passive:true});
+  document.addEventListener("visibilitychange", schedule);
+  new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; schedule(); }, {threshold:.4}).observe(show);
+  go(0);
 });

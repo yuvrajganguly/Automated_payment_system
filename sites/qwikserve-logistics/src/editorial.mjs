@@ -123,67 +123,74 @@ export function evTeaser() {
   </div></section>`;
 }
 
-// Rider-journey slideshows (Partners page). Each slide names its final photo;
-// until that file is in src/assets, a current stock photo stands in.
+// Field slideshows. Documentary street photos from Indian cities (Pexels,
+// free licence). Files are src/assets/field-<pexels id>.webp; a slide whose
+// file is missing falls back to an existing photo so the build never breaks.
 import { existsSync as fileExists } from "node:fs";
-const journeyPhotos = {
-  "journey-call":   {fallback:"stock-recruiter.webp", alt:"A recruiter on a phone call at an office desk"},
-  "journey-forms":  {fallback:"guide-ride-2.webp", alt:"A new rider filling in onboarding paperwork"},
-  "journey-hub":    {fallback:"stock-warehouse.webp", alt:"Delivery staff together inside a stocked warehouse hub"},
-  "journey-road":   {fallback:"guide-ride-4.webp", alt:"A helmeted rider on a scooter in Indian city traffic"},
-  "journey-door":   {fallback:"guide-ride-3.webp", alt:"A parcel handed over a gate to a customer"},
-  "journey-brief":  {fallback:"stock-recruiter.webp", alt:"Two colleagues discussing a staffing plan in an office"},
-  "journey-source": {fallback:"guide-ride-1.webp", alt:"Riders on scooters in a busy Indian street"},
-  "journey-ready":  {fallback:"stock-warehouse.webp", alt:"Workers moving a parcel through warehouse aisles"},
-  "journey-rain":   {fallback:"guide-ride-4.webp", alt:"A rider on a scooter riding through the rain"},
-  "journey-cover":  {fallback:"guide-ride-2.webp", alt:"A rider in a blue helmet checking his phone at the handlebars"},
+const fieldPhotos = {
+  33628086:["A rider in a yellow raincoat on a flooded street in West Bengal","West Bengal"],
+  25810543:["A courier riding through the city at night with a loaded delivery bag","Bengaluru"],
+  29469905:["A rider on a motorcycle in a crowded market lane","Varanasi"],
+  28624791:["A rider balancing a heavy load of goods on a motorcycle in city traffic","India"],
+  38107476:["Workers unloading goods from a truck","Kolkata"],
+  39351202:["Workers sorting cardboard boxes across a warehouse floor","India"],
+  13369323:["Customers at a neighbourhood shop with motorcycles parked outside","India"],
+  27786496:["A young man smiling at a call on his phone in a busy market","Mumbai"],
+  14335349:["A man on a parked motorcycle checking his phone outside a shop","Mumbai"],
+  12333458:["A motorcyclist carrying goods through highway traffic","Karnataka"],
+  36569208:["A delivery tricycle stacked with parcels on a misty street","India"],
+  13652096:["A cycle rickshaw loaded with boxes in a sunlit alley","India"],
+  38107477:["A man steadying a loaded bicycle on a busy street","Kolkata"],
+  21923095:["A rider carrying large sacks on a motorbike","Bengaluru"],
+  19673703:["A newspaper delivery on a bicycle on a misty morning","Kolkata"],
+  33224085:["A dabbawala cycling through the streets with lunch deliveries","Mumbai"],
 };
-function journeyPhoto(key) {
-  const own = fileExists(new URL("./assets/" + key + ".webp", import.meta.url));
-  const file = own ? key + ".webp" : journeyPhotos[key].fallback;
-  const small = file.replace(".webp", "-small.webp");
+const fallbacks = ["guide-ride-1.webp","guide-ride-2.webp","guide-ride-3.webp","guide-ride-4.webp"];
+function fieldPhoto(id, i) {
+  const file = "field-" + id + ".webp";
+  const own = fileExists(new URL("./assets/" + file, import.meta.url));
+  const use = own ? file : fallbacks[i % fallbacks.length];
+  const small = use.replace(".webp", "-small.webp");
   const hasSmall = fileExists(new URL("./assets/" + small, import.meta.url));
-  return { src:"/assets/" + file, srcset: hasSmall ? `/assets/${small} 700w, /assets/${file} 1600w` : "", alt: journeyPhotos[key].alt };
+  return { src:"/assets/" + use, srcset: hasSmall ? `/assets/${small} 700w, /assets/${use} 1600w` : "", alt: fieldPhotos[id][0], place: fieldPhotos[id][1] };
 }
+// [pexels id, short title, one factual line]
 export const journeys = {
   rider: [
-    ["journey-call","Day 1","The first call","A recruiter talks through the area, the shift and the vehicle."],
-    ["journey-forms","Day 2","Paperwork, done right","Documents checked and onboarding completed before day one."],
-    ["journey-hub","Day 3","Briefed at the hub","The rider meets the team leader and learns the reporting point."],
-    ["journey-road","Day 4","The first shift","Out on your routes, on their own bike or a rental EV."],
-    ["journey-door","Every day after","At the doorstep","Support stays one call away, for the rider and for your hub."],
-  ],
-  prep: [
-    ["journey-brief","Before day one","The reporting point","We start from your hub’s address, shift pattern and headcount."],
-    ["journey-call","Before day one","A recruiter calls","Riders hear about the work, the hours and the vehicle first."],
-    ["journey-forms","Before day one","Documents in order","Onboarding is completed and checked before anyone travels."],
-    ["journey-hub","Day one","Briefed at your hub","Riders arrive knowing who to ask for and what the shift involves."],
-  ],
-  lastmile: [
-    ["journey-brief","01","A local brief","Every requirement starts with one reporting point and its shifts."],
-    ["journey-source","02","Riders from the neighbourhood","People who live near the hub and know its streets."],
-    ["journey-ready","03","Through the hub","Parcels picked, scanned and loaded at the start of the shift."],
-    ["journey-rain","04","Whatever the weather","Team leaders keep riders supported through the working day."],
-    ["journey-door","05","The last mile","The order reaches the customer’s door."],
+    [33628086,"Every shift","Monsoon or not, the hub still needs riders on the road."],
+    [25810543,"Every hour","Night slots and late dispatches are staffed like any other."],
+    [29469905,"Every lane","Riders who know the neighbourhood reach doors faster."],
+    [28624791,"Every load","Parcels, groceries or bulk goods, briefed before the first run."],
   ],
   brief: [
-    ["journey-brief","Step 1","Your brief","Reporting point, shift pattern and headcount, in one conversation."],
-    ["journey-source","Step 2","Sourced near your hub","Field recruiters find riders who live close enough to report on time."],
-    ["journey-ready","Step 3","Ready at the reporting point","Screened, onboarded and briefed before the first shift."],
-    ["journey-rain","Step 4","On the route, rain or shine","Team leaders stay with riders through the working day."],
-    ["journey-cover","Step 5","Every shift covered","Replacements arranged when someone drops off, without you chasing."],
+    [38107476,"Your hub","It starts with your reporting point and when goods arrive."],
+    [39351202,"Your shifts","Sorting, loading and dispatch windows set the headcount."],
+    [13369323,"Your area","We recruit from the streets your hub actually serves."],
+    [27786496,"Your riders","Each rider gets the call, the brief and a start date."],
+  ],
+  prep: [
+    [14335349,"Found nearby","Field recruiters and telecallers reach riders where they live."],
+    [12333458,"Vehicle sorted","Own bike, or a rental EV for riders working with us."],
+    [36569208,"Briefed","Shift times, the reporting point and the kind of load."],
+    [13652096,"Ready","Riders arrive knowing who to ask for at the hub."],
+  ],
+  lastmile: [
+    [38107477,"Kolkata first","Our head office and home ground since 2018."],
+    [21923095,"Any load","From parcels and food to bulk retail drops."],
+    [19673703,"Any hour","Early-morning and late-night slots covered."],
+    [33224085,"The last mile","Getting it to the door is the job that matters."],
   ],
 };
 export function slideshow(name, label, priority=false) {
   const slides = journeys[name];
-  return `<figure class="journey-show" data-slideshow aria-roledescription="carousel" aria-label="${esc(label)}" data-reveal>
-    <div class="journey-slides">${slides.map(([key,kicker,title],i)=>{const p=journeyPhoto(key);return `<div class="journey-slide${i?"":" is-active"}" role="group" aria-roledescription="slide" aria-label="${i+1} of ${slides.length}: ${esc(title)}" ${i?'aria-hidden="true"':""}>
-      <img src="${p.src}" ${p.srcset?`srcset="${p.srcset}" sizes="(max-width:700px) 94vw, 48vw"`:""} width="1600" height="1067" alt="${esc(p.alt)}" ${i===0&&priority?'fetchpriority="high"':'loading="lazy"'} decoding="async"></div>`;}).join("")}</div>
-    <div class="journey-progress-bar" aria-hidden="true">${slides.map(()=>"<i><b></b></i>").join("")}</div>
-    <figcaption class="journey-caption">
-      <div class="journey-captions">${slides.map(([,kicker,title,body],i)=>`<div class="journey-cap${i?"":" is-active"}" ${i?'aria-hidden="true"':""}><span>${esc(kicker)}</span><strong>${esc(title)}</strong><p>${esc(body)}</p></div>`).join("")}</div>
-      <div class="journey-controls"><button type="button" data-show-prev aria-label="Previous slide">${icon("arrow","flip")}</button><button type="button" data-show-toggle aria-label="Pause slideshow"><span class="playback-glyph" aria-hidden="true"></span></button><button type="button" data-show-next aria-label="Next slide">${icon("arrow")}</button></div>
+  const pics = slides.map(([id],i)=>fieldPhoto(id,i));
+  return `<figure class="field-show" data-slideshow aria-roledescription="carousel" aria-label="${esc(label)}" data-reveal>
+    <div class="field-frame">${slides.map(([id,title],i)=>{const p=pics[i];return `<div class="field-slide${i?"":" is-active"}" role="group" aria-roledescription="slide" aria-label="${i+1} of ${slides.length}: ${esc(title)}" ${i?'aria-hidden="true"':""}>
+      <img src="${p.src}" ${p.srcset?`srcset="${p.srcset}" sizes="(max-width:700px) 94vw, 48vw"`:""} width="1600" height="1067" alt="${esc(p.alt)}" ${i===0&&priority?'fetchpriority="high"':'loading="lazy"'} decoding="async">
+      <span class="field-tag">${esc(p.place)} · Stock photo</span></div>`;}).join("")}</div>
+    <figcaption class="field-caption">
+      <div class="field-tabs" role="group" aria-label="Choose a photo">${slides.map(([,title],i)=>`<button type="button" aria-pressed="${!i}" data-show-go="${i}"><span>${String(i+1).padStart(2,"0")}</span>${esc(title)}<i aria-hidden="true"></i></button>`).join("")}</div>
+      <div class="field-lines">${slides.map(([,,line],i)=>`<p class="field-line${i?"":" is-active"}" ${i?'aria-hidden="true"':""}>${esc(line)}</p>`).join("")}</div>
     </figcaption>
-    <span class="journey-credit">Stock photos</span>
   </figure>`;
 }
