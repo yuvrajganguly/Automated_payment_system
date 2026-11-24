@@ -1,5 +1,6 @@
 import { button, esc, icon, link } from "./components.mjs";
 import { media } from "./content.mjs";
+import { journeys, slidePhotos } from "./editorial.mjs";
 import { riderInterviews } from "./rider-interviews.mjs";
 import { existsSync } from "node:fs";
 
@@ -32,25 +33,17 @@ const steps = [
   ["Meet the team at the hub", "Confirm the time, address and person to ask for. Keep the coordinator’s number handy for your first visit.", "guide-ride-4.webp", "A rider in a Qwikserve jacket heading out on a motorbike with a delivery bag"]
 ];
 
+// How to join: an automated slideshow. The numbered steps on the left are
+// the controls; the photo on the right follows them (see motion.js).
 export function joiningGuide(home = false) {
   const action = home ? button("Explore rider opportunities", "/join/") : button("Enquire about joining", "#apply");
-  const stepsHtml = steps.map(([title, body], index) => `<li id="join-stage-${index+1}">
-    <button type="button" data-stage="${index}" aria-controls="guide-image-${index}" aria-pressed="${index===0}">
-      <span>${String(index+1).padStart(2,"0")}</span>${esc(title)}</button><p>${esc(body)}</p>
-  </li>`).join("");
-  const pictures = steps.map(([title, , file, alt], index) => `<figure class="guide-image ${index===0?"active":""}" id="guide-image-${index}" aria-hidden="${index!==0}">
-    <img src="/assets/${file}" srcset="/assets/${file.replace(".webp", "-small.webp")} 700w, /assets/${file} ${[1600,1600,1280,1600][index]}w" sizes="(max-width:700px) 93vw, 49vw" width="1000" height="750" loading="lazy" alt="Stock photo of ${esc(alt.charAt(0).toLowerCase()+alt.slice(1))}">
-    <figcaption><b>${esc(title)}</b><small>Stock photo</small></figcaption></figure>`).join("");
-  return `<section class="joining-guide journey-section" id="how-to-join" data-guide>
+  const steps = journeys.join;
+  return `<section class="joining-guide join-show-section" id="how-to-join">
     <div class="container">
       <div class="journey-title"><h2>How to join <em>Qwikserve.</em></h2>${home?link(riderInterviews.some(r=>r.quote)?"What our riders say":"Meet our riders","/join/#rider-stories"):""}</div>
-      <div class="guide-layout"><div class="guide-itinerary"><ol class="guide-list">${stepsHtml}</ol>${action}</div>
-        <div class="guide-view"><div class="guide-pictures">${pictures}</div>
-          <div class="guide-navigation" hidden><span role="status" data-guide-position>Step 1 of 4</span>
-            <div class="journey-progress" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-            <div><button type="button" data-guide-prev aria-label="Previous joining step">←</button><button type="button" data-guide-next aria-label="Next joining step">→</button></div>
-          </div>
-        </div>
+      <div class="join-show" data-slideshow aria-roledescription="carousel" aria-label="How to join Qwikserve">
+        <div class="join-steps"><ol class="field-tabs join-list" aria-label="Joining steps">${steps.map(([,title,line],i)=>`<li><button type="button" aria-pressed="${!i}" data-show-go="${i}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(title)}</b><small>${esc(line)}</small><i aria-hidden="true"></i></button></li>`).join("")}</ol>${action}</div>
+        ${slidePhotos("join", true)}
       </div>
     </div>
   </section>`;

@@ -128,6 +128,12 @@ export function evTeaser() {
 // file is missing falls back to an existing photo so the build never breaks.
 import { existsSync as fileExists } from "node:fs";
 const fieldPhotos = {
+  12203733:["A rider on his scooter checking a message on his phone","India"],
+  4487383:["Two workers carrying a parcel down a stocked hub aisle","Hub"],
+  24976284:["A helmeted rider on a scooter heading out on a city road","India"],
+  6994107:["A parcel handed over a gate to a smiling customer","Doorstep"],
+  39948199:["A rider carrying stacked parcels on a motorbike","On the road"],
+  7580860:["A recruiter on a call at his desk","Recruitment desk"],
   33628086:["A rider in a yellow raincoat on a flooded street in West Bengal","West Bengal"],
   25810543:["A courier riding through the city at night with a loaded delivery bag","Bengaluru"],
   29469905:["A rider on a motorcycle in a crowded market lane","Varanasi"],
@@ -157,16 +163,22 @@ function fieldPhoto(id, i) {
 // [pexels id, short title, one factual line]
 export const journeys = {
   rider: [
-    [33628086,"Every shift","Monsoon or not, the hub still needs riders on the road."],
-    [25810543,"Every hour","Night slots and late dispatches are staffed like any other."],
-    [29469905,"Every lane","Riders who know the neighbourhood reach doors faster."],
-    [28624791,"Every load","Parcels, groceries or bulk goods, briefed before the first run."],
+    [33628086,"Rain or shine","Riders who turn up for the shift, whatever the weather."],
+    [39948199,"Parcels","Briefed on the load before the first run."],
+    [25810543,"Late shifts","Night slots and late dispatches staffed like any other."],
+    [28624791,"Bulk drops","Heavier retail and grocery runs covered too."],
   ],
   brief: [
-    [38107476,"Your hub","It starts with your reporting point and when goods arrive."],
-    [39351202,"Your shifts","Sorting, loading and dispatch windows set the headcount."],
-    [13369323,"Your area","We recruit from the streets your hub actually serves."],
-    [27786496,"Your riders","Each rider gets the call, the brief and a start date."],
+    [7580860,"Your brief","A recruiter takes your reporting point, shifts and headcount."],
+    [38107476,"Your hub","We plan around when goods arrive at your hub."],
+    [39351202,"Your shifts","Sorting and dispatch windows set how many riders you need."],
+    [36569208,"Your routes","Riders who know the streets your hub serves."],
+  ],
+  join: [
+    [12203733,"Contact us","Call, WhatsApp or send the form. A recruiter calls you back about your area and vehicle."],
+    [4487383,"Go to the hub","Meet the team at your hub, finish onboarding and learn the shift."],
+    [24976284,"Start riding","Ride your own bike or a rental EV on routes near home."],
+    [6994107,"Deliver","Hand the order over at the door. Support stays a call away."],
   ],
   prep: [
     [14335349,"Found nearby","Field recruiters and telecallers reach riders where they live."],
@@ -181,6 +193,12 @@ export const journeys = {
     [33224085,"The last mile","Getting it to the door is the job that matters."],
   ],
 };
+export function slidePhotos(name, lazy=false) {
+  const slides = journeys[name];
+  return `<div class="field-frame">${slides.map(([id,title],i)=>{const p=fieldPhoto(id,i);return `<div class="field-slide${i?"":" is-active"}" role="group" aria-roledescription="slide" aria-label="${i+1} of ${slides.length}: ${esc(title)}" ${i?'aria-hidden="true"':""}>
+      <img src="${p.src}" ${p.srcset?`srcset="${p.srcset}" sizes="(max-width:700px) 94vw, 52vw"`:""} width="1600" height="1067" alt="${esc(p.alt)}" loading="lazy" decoding="async">
+      <span class="field-tag">${esc(p.place)} · Stock photo</span></div>`;}).join("")}</div>`;
+}
 export function slideshow(name, label, priority=false) {
   const slides = journeys[name];
   const pics = slides.map(([id],i)=>fieldPhoto(id,i));
