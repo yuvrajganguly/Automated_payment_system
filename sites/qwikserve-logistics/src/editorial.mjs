@@ -128,6 +128,12 @@ export function evTeaser() {
 // file is missing falls back to an existing photo so the build never breaks.
 import { existsSync as fileExists } from "node:fs";
 const fieldPhotos = {
+  35803222:["Two delivery riders with delivery bags riding through the city at night","On the road"],
+  7363190:["A delivery rider with an orange delivery box on his scooter","On the road"],
+  7363125:["A uniformed delivery rider on his scooter with a delivery box","Ready to ride"],
+  13311393:["A delivery rider with a Qwikserve delivery bag on his motorbike","On the road"],
+  31332062:["A delivery rider in a red helmet with a delivery backpack on his motorbike","On the road"],
+  11206901:["A delivery rider with a delivery box riding out on his scooter","On the road"],
   25048304:["A Qwikserve delivery rider riding through a flooded Kolkata street","Kolkata"],
   37059837:["A courier in a red helmet carrying parcels on a motorbike","On the road"],
   33359127:["A Qwikserve delivery rider with a loaded bag on his motorbike","Kolkata"],
@@ -175,8 +181,8 @@ export const journeys = {
   rider: [
     [33628086,"Rain or shine","Riders who turn up for the shift, whatever the weather."],
     [39948199,"Parcels","Briefed on the load before the first run."],
-    [25810543,"Late shifts","Night slots and late dispatches staffed like any other."],
-    [12333458,"Bulk drops","Heavier retail and grocery runs, carried on two wheels."],
+    [35803222,"Late shifts","Night slots and late dispatches staffed like any other."],
+    [7363190,"Every drop","Parcels and orders taken door to door across your zone."],
   ],
   brief: [
     [13062478,"Your brief","A recruiter takes your reporting point, shifts and headcount."],
@@ -191,10 +197,10 @@ export const journeys = {
     [6682787,"Deliver","Hand the order over at the door. Support stays a call away."],
   ],
   prep: [
-    [14335349,"Found nearby","Field recruiters and telecallers reach riders where they live."],
-    [12333458,"Vehicle sorted","Own bike, or a rental EV for riders working with us."],
-    [33136687,"Briefed","Shift times, the reporting point and the kind of load."],
-    [29469905,"Ready","Riders arrive knowing who to ask for at the hub."],
+    [7363125,"Found nearby","Field recruiters and telecallers reach riders where they live."],
+    [13311393,"Vehicle sorted","Own bike, or a rental EV for riders working with us."],
+    [31332062,"Briefed","Shift times, the reporting point and the kind of load."],
+    [11206901,"Ready","Riders arrive knowing who to ask for at the hub."],
   ],
   lastmile: [
     [25048304,"Kolkata first","Our home ground since 2019, monsoon included."],
