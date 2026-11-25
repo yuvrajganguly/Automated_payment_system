@@ -128,6 +128,13 @@ export function evTeaser() {
 // file is missing falls back to an existing photo so the build never breaks.
 import { existsSync as fileExists } from "node:fs";
 const fieldPhotos = {
+  25048304:["A Qwikserve delivery rider riding through a flooded Kolkata street","Kolkata"],
+  37059837:["A courier in a red helmet carrying parcels on a motorbike","On the road"],
+  33359127:["A Qwikserve delivery rider with a loaded bag on his motorbike","Kolkata"],
+  39978119:["A food delivery rider on a scooter with an insulated bag","On the road"],
+  6682787:["A delivery rider in red handing a parcel to a smiling customer at his door","Doorstep"],
+  13062478:["A telecaller with a headset on a call at her desk","Recruitment desk"],
+  7362949:["A uniformed delivery rider on his motorbike checking the next drop on his phone","On the road"],
   33136687:["A rider on a scooter riding through monsoon rain","India"],
   11091214:["A Qwikserve rider in a red T-shirt beside parked motorbikes at a Kolkata street hub","Kolkata"],
   28928633:["A rider on a scooter in a busy market street","Punjab"],
@@ -172,16 +179,16 @@ export const journeys = {
     [12333458,"Bulk drops","Heavier retail and grocery runs, carried on two wheels."],
   ],
   brief: [
-    [7580860,"Your brief","A recruiter takes your reporting point, shifts and headcount."],
+    [13062478,"Your brief","A recruiter takes your reporting point, shifts and headcount."],
     [11091214,"Your hub","Riders reporting at your hub, ready for the shift."],
     [39351202,"Your shifts","Sorting and dispatch windows set how many riders you need."],
-    [28928633,"Your routes","Riders who know the streets your hub serves."],
+    [7362949,"Your routes","Riders who know the streets your hub serves."],
   ],
   join: [
     [12203733,"Contact us","Call, WhatsApp or send the form. A recruiter calls you back about your area and vehicle."],
     [4487383,"Go to the hub","Meet the team at your hub, finish onboarding and learn the shift."],
     [24976284,"Start riding","Ride your own bike or a rental EV on routes near home."],
-    [6994107,"Deliver","Hand the order over at the door. Support stays a call away."],
+    [6682787,"Deliver","Hand the order over at the door. Support stays a call away."],
   ],
   prep: [
     [14335349,"Found nearby","Field recruiters and telecallers reach riders where they live."],
@@ -190,10 +197,10 @@ export const journeys = {
     [29469905,"Ready","Riders arrive knowing who to ask for at the hub."],
   ],
   lastmile: [
-    [19673703,"Kolkata first","Our head office and home ground since 2019."],
-    [21923095,"Any load","From parcels and food to bulk retail drops."],
-    [25810543,"Any hour","Early-morning and late-night slots covered."],
-    [33224085,"The last mile","Getting it to the door is the job that matters."],
+    [25048304,"Kolkata first","Our home ground since 2019, monsoon included."],
+    [37059837,"Any load","Parcels, groceries and bulk retail drops."],
+    [33359127,"Any lane","Riders who know the neighbourhood reach doors faster."],
+    [39978119,"The last mile","Getting it to the door is the job that matters."],
   ],
 };
 export function slidePhotos(name, lazy=false) {
