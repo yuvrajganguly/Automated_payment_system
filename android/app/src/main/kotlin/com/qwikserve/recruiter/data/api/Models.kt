@@ -97,6 +97,8 @@ data class RiderOut(
     @SerialName("last_worked_on") val lastWorkedOn: String? = null,
     @SerialName("referred_by") val referredBy: String? = null, // only on the create response
     @SerialName("copied_from") val copiedFrom: CopiedFrom? = null,
+    /** Zomato id type (per_order = Flat, salary, commission); null = company default. */
+    @SerialName("payment_model") val paymentModel: String? = null,
 )
 
 @Serializable

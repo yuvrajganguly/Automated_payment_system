@@ -51,7 +51,6 @@ import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.KycField
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
-import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.login.Field
 import com.qwikserve.recruiter.ui.login.fieldColors
@@ -113,14 +112,11 @@ class NewRiderViewModel @Inject constructor(
     /** Aadhaar / PAN can be photographed instead of typed. In photo mode the
      *  number is not sent (whatever was typed before switching is ignored)
      *  and the picture goes up as a document once the rider exists. */
-    var aadhaarByPhoto by mutableStateOf(false)
-    var panByPhoto by mutableStateOf(false)
     var aadhaarPhoto by mutableStateOf<Uri?>(null)
     var panPhoto by mutableStateOf<Uri?>(null)
     /** Bank details by photo: the passbook's first page or a cancelled
      *  cheque. Account and IFSC are then not sent; the office types them in
      *  from the picture, and payouts stay held until it does. */
-    var bankByPhoto by mutableStateOf(false)
     var bankPhoto by mutableStateOf<Uri?>(null)
     var account by mutableStateOf("")
     /** Left blank means the account is in the rider's own name. */
@@ -166,19 +162,13 @@ class NewRiderViewModel @Inject constructor(
         val digits = phone.filter { it.isDigit() }
         if (phone.isNotBlank() && digits.length != 10) e["phone"] = "Ten digits, no country code."
         val a = aadhaar.filter { it.isDigit() }
-        if (!aadhaarByPhoto && aadhaar.isNotBlank() && a.length != 12) e["aadhaar"] = "Twelve digits."
-        if (aadhaarByPhoto && aadhaarPhoto == null) e["aadhaar"] = "Take the photo, or switch back to Number."
+        if (aadhaar.isNotBlank() && a.length != 12) e["aadhaar"] = "Twelve digits."
         val p = pan.trim().uppercase()
-        if (!panByPhoto && p.isNotBlank() && !Regex("^[A-Z]{5}\\d{4}[A-Z]$").matches(p)) e["pan"] = "Five letters, four digits, one letter."
-        if (panByPhoto && panPhoto == null) e["pan"] = "Take the photo, or switch back to Number."
+        if (p.isNotBlank() && !Regex("^[A-Z]{5}\\d{4}[A-Z]$").matches(p)) e["pan"] = "Five letters, four digits, one letter."
         val acct = account.filter { it.isDigit() }
         val code = ifsc.trim().uppercase()
-        if (bankByPhoto) {
-            if (bankPhoto == null) e["account"] = "Take the photo, or switch back to Number."
-        } else {
-            if ((acct.isNotBlank() || code.isNotBlank()) && !Regex("^\\d{6,18}$").matches(acct)) e["account"] = "Digits only, 6 to 18 of them."
-            if ((acct.isNotBlank() || code.isNotBlank()) && code.length != 11) e["ifsc"] = "IFSC is exactly 11 characters."
-        }
+        if ((acct.isNotBlank() || code.isNotBlank()) && !Regex("^\\d{6,18}$").matches(acct)) e["account"] = "Digits only, 6 to 18 of them."
+        if ((acct.isNotBlank() || code.isNotBlank()) && code.length != 11) e["ifsc"] = "IFSC is exactly 11 characters."
         fieldErrors = e
         return e.isEmpty()
     }
@@ -195,11 +185,11 @@ class NewRiderViewModel @Inject constructor(
                         riderId = riderId.trim().ifBlank { null },
                         hub = hub.trim().ifBlank { null },
                         mobNo = phone.filter { it.isDigit() }.ifBlank { null },
-                        accountNo = if (bankByPhoto) null else account.filter { it.isDigit() }.ifBlank { null },
+                        accountNo = account.filter { it.isDigit() }.ifBlank { null },
                         accountName = accountName.trim().ifBlank { null },
-                        ifsc = if (bankByPhoto) null else ifsc.trim().uppercase().ifBlank { null },
-                        aadhaarNo = if (aadhaarByPhoto) null else aadhaar.filter { it.isDigit() }.ifBlank { null },
-                        panNo = if (panByPhoto) null else pan.trim().uppercase().ifBlank { null },
+                        ifsc = ifsc.trim().uppercase().ifBlank { null },
+                        aadhaarNo = aadhaar.filter { it.isDigit() }.ifBlank { null },
+                        panNo = pan.trim().uppercase().ifBlank { null },
                         personId = attachTo,
                         allowDuplicateName = allowDuplicate,
                         referredByPersonId = referrer?.personId,
@@ -213,13 +203,13 @@ class NewRiderViewModel @Inject constructor(
                 // card upload is reported, not thrown: it can be redone from
                 // their page without onboarding them twice.
                 val kycFailed = buildList {
-                    if (aadhaarByPhoto) aadhaarPhoto?.let { uri ->
+                    aadhaarPhoto?.let { uri ->
                         if (runCatching { photos.uploadKyc(out.personId, "aadhaar", uri) }.isFailure) add("Aadhaar")
                     }
-                    if (panByPhoto) panPhoto?.let { uri ->
+                    panPhoto?.let { uri ->
                         if (runCatching { photos.uploadKyc(out.personId, "pan", uri) }.isFailure) add("PAN")
                     }
-                    if (bankByPhoto) bankPhoto?.let { uri ->
+                    bankPhoto?.let { uri ->
                         if (runCatching { photos.uploadKyc(out.personId, "bank_proof", uri) }.isFailure) add("bank")
                     }
                 }
@@ -293,24 +283,34 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 }
                 Kicker("Company")
                 Spacer(Modifier.height(8.dp))
+                // Zomato is listed three times, once per kind of id — Flat,
+                // Salary, Commission — because each is paid differently and a
+                // recruiter thinks of them as three different jobs.
+                val choices = companies.flatMap { c ->
+                    if (c.trim().equals("Zomato", ignoreCase = true)) ZOMATO_TYPES.map { "$c · ${it.first}" } else listOf(c)
+                }
                 Dropdown(
-                    options = companies,
-                    selected = vm.company,
-                    onSelect = { vm.company = it },
+                    options = choices,
+                    selected = if (vm.isZomato) {
+                        ZOMATO_TYPES.getOrNull(vm.zomatoType)?.let { "${vm.company} · ${it.first}" }.orEmpty()
+                    } else {
+                        vm.company
+                    },
+                    onSelect = { pick ->
+                        val i = ZOMATO_TYPES.indexOfFirst { pick.endsWith(" · ${it.first}") }
+                        if (i >= 0) {
+                            vm.company = pick.substringBeforeLast(" · ")
+                            vm.zomatoType = i
+                        } else {
+                            vm.company = pick
+                            vm.zomatoType = -1
+                        }
+                    },
                     placeholder = if (companies.isEmpty()) "Loading companies…" else "Pick a company",
                     modifier = Modifier.fillMaxWidth(),
                     enabled = companies.isNotEmpty(),
                 )
                 if (vm.isZomato) {
-                    Spacer(Modifier.height(10.dp))
-                    Kicker("Zomato id type")
-                    Spacer(Modifier.height(6.dp))
-                    Segmented(
-                        ZOMATO_TYPES.map { it.first },
-                        selected = vm.zomatoType,
-                        onSelect = { vm.zomatoType = it },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         when (ZOMATO_TYPES.getOrNull(vm.zomatoType)?.second) {
@@ -350,21 +350,18 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                     Spacer(Modifier.height(6.dp))
                     Kicker("Identity")
                     Spacer(Modifier.height(8.dp))
+                    // Number and photo, both: type it, then photograph the card.
                     KycField(
                         label = "Aadhaar",
-                        byPhoto = vm.aadhaarByPhoto,
-                        onModeChange = { vm.aadhaarByPhoto = it },
                         photo = vm.aadhaarPhoto,
                         onPhoto = { vm.aadhaarPhoto = it },
-                    ) { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
+                    ) { Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) } }
                     ErrorLine(err["aadhaar"])
                     KycField(
                         label = "PAN",
-                        byPhoto = vm.panByPhoto,
-                        onModeChange = { vm.panByPhoto = it },
                         photo = vm.panPhoto,
                         onPhoto = { vm.panPhoto = it },
-                    ) { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
+                    ) { Field("PAN") { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) } }
                     ErrorLine(err["pan"])
                 }
 
@@ -372,23 +369,15 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 Kicker("Bank account")
                 Spacer(Modifier.height(8.dp))
                 if (vm.attachTo == null) {
-                    // A first onboarding may photograph the passbook instead of typing it.
+                    // The typed account and a photo of the passbook / cancelled cheque, both.
+                    Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Digits only", keyboard = KeyboardType.Number) }
+                    ErrorLine(err["account"])
                     KycField(
-                        label = "Account & IFSC",
-                        byPhoto = vm.bankByPhoto,
-                        onModeChange = { vm.bankByPhoto = it },
+                        label = "Passbook / cheque",
                         photo = vm.bankPhoto,
                         onPhoto = { vm.bankPhoto = it },
-                        prompt = "passbook front page or a cancelled cheque",
-                    ) {
-                        Column {
-                            Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Digits only", keyboard = KeyboardType.Number) }
-                            ErrorLine(err["account"])
-                            Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "HDFC0000123", cap = KeyboardCapitalization.Characters) }
-                            ErrorLine(err["ifsc"])
-                        }
-                    }
-                    if (vm.bankByPhoto) ErrorLine(err["account"])
+                    ) { Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "HDFC0000123", cap = KeyboardCapitalization.Characters) } }
+                    ErrorLine(err["ifsc"])
                 } else {
                     Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Already on file — leave blank", keyboard = KeyboardType.Number) }
                     ErrorLine(err["account"])
@@ -403,7 +392,6 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                 Text(
                     when {
                         vm.attachTo != null -> "Left blank, all three are copied from their other id."
-                        vm.bankByPhoto -> "Payouts stay held until the office types the account in from the photo."
                         else -> "Payouts stay blocked until an account is on file; it can be added later."
                     },
                     style = MaterialTheme.typography.bodySmall, color = Qwik.N700,

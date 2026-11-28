@@ -2,127 +2,126 @@ package com.qwikserve.recruiter.ui.common
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
 import coil.compose.SubcomposeAsyncImage
 import com.qwikserve.recruiter.BuildConfig
 import com.qwikserve.recruiter.ui.theme.Qwik
 
 /**
- * One identity document — Aadhaar or PAN — entered either way the recruiter
- * finds quicker in the store: type the number, or photograph the card and let
- * the office read it. The two are alternatives, not both required; a photo
- * stands on its own.
+ * One identity or bank document — Aadhaar, PAN, passbook — on the onboarding
+ * form. The number and the photo are both taken, not one or the other: type
+ * what can be typed, and photograph the card as the proof. Either may be left
+ * for later.
+ *
+ * The photo is not drawn on the form: a line says whether one is attached,
+ * with Camera / Gallery / Remove beside it. Somebody's Aadhaar should not sit
+ * on a recruiter's screen any longer than it takes to photograph it.
  */
 @Composable
 fun KycField(
     label: String,
-    byPhoto: Boolean,
-    onModeChange: (Boolean) -> Unit,
     photo: Uri?,
-    onPhoto: (Uri) -> Unit,
-    prompt: String = "$label card",
+    onPhoto: (Uri?) -> Unit,
     number: @Composable () -> Unit,
 ) {
+    val picker = rememberPhotoPicker { onPhoto(it) }
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, style = MaterialTheme.typography.titleMedium, color = Qwik.Ink, modifier = Modifier.weight(1f))
-            Segmented(
-                listOf("Number", "Photo"),
-                selected = if (byPhoto) 1 else 0,
-                onSelect = { onModeChange(it == 1) },
-                modifier = Modifier.width(176.dp),
+        number()
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                if (photo != null) "✓ Photo attached" else "$label photo",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (photo != null) Qwik.Ink else Qwik.N700,
+                modifier = Modifier.weight(1f),
             )
-        }
-        Spacer(Modifier.height(8.dp))
-        if (byPhoto) {
-            DocumentTile(picked = photo, prompt = prompt, onPicked = onPhoto)
-        } else {
-            number()
+            GhostAction(if (photo != null) "Retake" else "Camera", onClick = picker.takePhoto)
+            GhostAction("Gallery", onClick = picker.chooseFromGallery)
+            if (photo != null) GhostAction("Remove", onClick = { onPhoto(null) }, color = Qwik.N700)
         }
     }
 }
 
 /**
- * A card-shaped photo slot for a document. Unlike [PhotoTile] the picture is
- * fitted, not cropped — the point is that every digit on the card can be
- * read, edges included. Camera and Gallery sit under it, one tap each.
- *
- * Shows, in order of preference: a [picked] file not yet uploaded, or the
- * stored document [docId] from the server.
+ * A stored document on a rider's page, as a link rather than a picture: the
+ * label, "View" when there is one (opens it full screen, on request), and
+ * Camera / Gallery to add or replace it.
  */
 @Composable
-fun DocumentTile(
-    picked: Uri?,
-    prompt: String,
+fun DocumentLink(
+    label: String,
+    docId: Long?,
     onPicked: (Uri) -> Unit,
-    docId: Long? = null,
     busy: Boolean = false,
-    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     val picker = rememberPhotoPicker(onPicked)
-    Column(modifier) {
-        Box(
-            Modifier.fillMaxWidth().height(150.dp).background(Qwik.N200).border(1.dp, Qwik.N400)
-                .clickable(enabled = !busy) { picker.takePhoto() },
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                picked != null -> AsyncImage(
-                    model = picked,
-                    contentDescription = prompt,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth().height(150.dp),
-                )
-                docId != null -> SubcomposeAsyncImage(
-                    model = BuildConfig.API_BASE_URL + "documents/$docId/download",
-                    contentDescription = prompt,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth().height(150.dp),
-                    loading = { TilePrompt("Loading…") },
-                    // A PDF uploaded on the web will not draw here; it is still on file.
-                    error = { TilePrompt("On file (open it on the web)") },
-                )
-                else -> TilePrompt("Tap to photograph\n$prompt")
-            }
+    var viewing by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = Qwik.Ink)
+            Text(
+                when {
+                    busy -> "Uploading…"
+                    docId != null -> "Photo on file"
+                    else -> "No photo yet"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Qwik.N700,
+            )
         }
-        Spacer(Modifier.height(6.dp))
-        if (busy) {
-            Text("Uploading…", style = MaterialTheme.typography.bodySmall, color = Qwik.N700)
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                GhostAction(if (picked != null || docId != null) "Retake" else "Camera", onClick = picker.takePhoto)
-                GhostAction("Gallery", onClick = picker.chooseFromGallery)
+        if (!busy) {
+            if (docId != null) GhostAction("View", onClick = { viewing = true })
+            GhostAction(if (docId != null) "Retake" else "Camera", onClick = picker.takePhoto)
+            GhostAction("Gallery", onClick = picker.chooseFromGallery)
+        }
+    }
+    if (viewing && docId != null) {
+        Dialog(onDismissRequest = { viewing = false }) {
+            Column(Modifier.background(Qwik.Bg).padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = MaterialTheme.typography.titleMedium, color = Qwik.Ink, modifier = Modifier.weight(1f))
+                    GhostAction("Close", onClick = { viewing = false })
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 520.dp), contentAlignment = Alignment.Center) {
+                    SubcomposeAsyncImage(
+                        model = BuildConfig.API_BASE_URL + "documents/$docId/download",
+                        contentDescription = label,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxWidth(),
+                        loading = { Text("Loading…", color = Qwik.N700) },
+                        // A PDF uploaded on the web will not draw here; it is still on file.
+                        error = { Text("Can't show this file here — open it on the web.", color = Qwik.N700) },
+                    )
+                }
             }
         }
     }
-}
-
-@Composable
-private fun TilePrompt(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = Qwik.N700,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(horizontal = 12.dp),
-    )
 }

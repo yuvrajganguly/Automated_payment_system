@@ -64,7 +64,7 @@ import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
 import com.qwikserve.recruiter.ui.evs.GiveEvSheet
 import com.qwikserve.recruiter.ui.evs.RepairSheet
 import com.qwikserve.recruiter.ui.common.Hairline
-import com.qwikserve.recruiter.ui.common.DocumentTile
+import com.qwikserve.recruiter.ui.common.DocumentLink
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
@@ -514,40 +514,30 @@ fun PersonScreen(
                     )
                 }
 
-                Kicker("Aadhaar, PAN & bank", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 8.dp))
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    DocumentTile(
-                        picked = null,
-                        prompt = "Aadhaar card",
-                        docId = vm.latestDoc("aadhaar")?.id,
-                        busy = vm.uploadingKyc == "aadhaar",
-                        onPicked = { vm.setKyc("aadhaar", it) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    DocumentTile(
-                        picked = null,
-                        prompt = "PAN card",
-                        docId = vm.latestDoc("pan")?.id,
-                        busy = vm.uploadingKyc == "pan",
-                        onPicked = { vm.setKyc("pan", it) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                DocumentTile(
-                    picked = null,
-                    prompt = "passbook or cancelled cheque",
+                // Links, not pictures: the cards open full screen only when
+                // somebody taps View.
+                Kicker("Aadhaar, PAN & bank", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
+                DocumentLink(
+                    label = "Aadhaar",
+                    docId = vm.latestDoc("aadhaar")?.id,
+                    busy = vm.uploadingKyc == "aadhaar",
+                    onPicked = { vm.setKyc("aadhaar", it) },
+                )
+                DocumentLink(
+                    label = "PAN",
+                    docId = vm.latestDoc("pan")?.id,
+                    busy = vm.uploadingKyc == "pan",
+                    onPicked = { vm.setKyc("pan", it) },
+                )
+                DocumentLink(
+                    label = "Passbook / cancelled cheque",
                     docId = vm.latestDoc("bank_proof")?.id,
                     busy = vm.uploadingKyc == "bank_proof",
                     onPicked = { vm.setKyc("bank_proof", it) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 )
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
-                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name) }
+                val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name, it.paymentModel) }
                     // The cache carries the holder name too since it became a column
                     // on RiderEntity, so the offline row says the same as the live one.
                     ?: cached.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name) }
@@ -557,7 +547,7 @@ fun PersonScreen(
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(r.riderId, style = MaterialTheme.typography.titleLarge, color = Qwik.Ink)
-                            Tag(r.company, outline = true)
+                            Tag(r.companyLabel, outline = true)
                             if (!r.active) Tag("inactive")
                         }
                         // The id's own name, whenever the company knows him by
@@ -1117,7 +1107,18 @@ private data class RiderLine(
      * the id's own name has to be on screen next to the id.
      */
     val name: String? = null,
-)
+    /** How the id is paid, where the company runs several kinds (Zomato). */
+    val paymentModel: String? = null,
+) {
+    /** "Zomato · Flat" for a typed Zomato id; the bare company otherwise. */
+    val companyLabel: String
+        get() = when (paymentModel) {
+            "per_order" -> "Flat"
+            "salary" -> "Salary"
+            "commission" -> "Commission"
+            else -> null
+        }?.takeIf { company.equals("Zomato", ignoreCase = true) }?.let { "$company · $it" } ?: company
+}
 
 /**
  * A form field in the app's style.
