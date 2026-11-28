@@ -861,6 +861,7 @@ interface CodPaymentRow {
  *  the list of everybody. */
 function PersonCod({ personId, canPay }: { personId: number; canPay: boolean }) {
   const [entries, setEntries] = useState<CodEntryRow[] | null>(null)
+  const [loadErr, setLoadErr] = useState<string | null>(null)
   const [payments, setPayments] = useState<CodPaymentRow[]>([])
   const [showCleared, setShowCleared] = useState(false)
   const [amount, setAmount] = useState('')
@@ -871,18 +872,36 @@ function PersonCod({ personId, canPay }: { personId: number; canPay: boolean }) 
   const [tone, setTone] = useState<'ok' | 'err'>('ok')
 
   function load() {
-    api.get<CodEntryRow[]>(`/cod/${personId}/entries`).then(setEntries).catch(() => setEntries([]))
+    // A failure is shown, not swallowed: an empty section and a server that
+    // could not answer (say, one not restarted since the COD migration) must
+    // not look the same.
+    api.get<CodEntryRow[]>(`/cod/${personId}/entries`)
+      .then((r) => { setEntries(r); setLoadErr(null) })
+      .catch((e) => { setEntries([]); setLoadErr(e instanceof Error ? e.message : 'Could not load COD') })
     api.get<CodPaymentRow[]>(`/cod/${personId}/payments`).then(setPayments).catch(() => setPayments([]))
   }
   useEffect(load, [personId])
   useLiveReload(load, ['cod', 'person'])
 
-  if (entries === null) return null
+  if (entries === null) {
+    return <Section title="COD"><p className="text-sm text-slate-500 px-3 py-2">Loading…</p></Section>
+  }
+  if (loadErr) {
+    return (
+      <Section title="COD">
+        <p className="text-sm text-red-400 px-3 py-2">
+          Could not load this rider's COD: {loadErr}. If the server was just updated, restart it so
+          the COD part-payment migration runs.
+        </p>
+      </Section>
+    )
+  }
   const left = (e: CodEntryRow) => (e.cleared_at ? 0 : (e.pending ?? e.amount))
   const open = entries.filter((e) => !e.cleared_at && left(e) > 0)
   const owed = open.reduce((a, e) => a + left(e), 0)
-  // Nothing ever held: say nothing rather than add an empty table to every page.
-  if (entries.length === 0) return null
+  if (entries.length === 0) {
+    return <Section title="COD"><p className="text-sm text-slate-500 px-3 py-2">No COD has ever been held against this rider.</p></Section>
+  }
   const shown = showCleared ? entries : open
 
   async function pay(e: FormEvent) {
