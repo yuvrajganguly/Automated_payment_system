@@ -9,12 +9,15 @@ import { useUrlRecord, useUrlString } from '../state/useUrlState'
 import { ExportButton } from '../components/ExportButton'
 import { SortableTh, useSort } from '../components/Sortable'
 import type { Company, RiderOut } from '../api/types'
+import { companyChoices, companyLabel, parseCompanyChoice } from '../lib/companyTypes'
 
 export function RidersPage() {
   const { user } = useAuth()
   const isRecruiter = user?.role === 'recruiter'
   const isAdmin = user?.role === 'admin' || user?.role === 'creator'
-  const [riders, setRiders] = useState<RiderOut[]>([])
+  // company_label: "Zomato · Flat" etc., so the three kinds of Zomato id
+  // filter, sort and read as three companies.
+  const [riders, setRiders] = useState<(RiderOut & { company_label: string })[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [filters, setFilters] = useUrlRecord('f')
   const [search, setSearch] = useUrlString('q')
@@ -27,7 +30,7 @@ export function RidersPage() {
   const reload = () => {
     setBusy(true); setError(null)
     api.get<RiderOut[]>('/riders')
-      .then(setRiders)
+      .then((rs) => setRiders(rs.map((r) => ({ ...r, company_label: companyLabel(r.company, r.payment_model) }))))
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
   }
@@ -36,10 +39,10 @@ export function RidersPage() {
   useLiveReload(reload, ['rider', 'person'])
 
   // Apply company filter first so Hub options shrink to that company.
-  const companyKey = filters['company'] ?? ''
-  const scoped = companyKey ? riders.filter((r) => r.company === companyKey) : riders
+  const companyKey = filters['company_label'] ?? ''
+  const scoped = companyKey ? riders.filter((r) => r.company_label === companyKey) : riders
   // Drop 'company' from the rest so we don't filter twice, then apply remaining.
-  const restFilters = Object.fromEntries(Object.entries(filters).filter(([k]) => k !== 'company'))
+  const restFilters = Object.fromEntries(Object.entries(filters).filter(([k]) => k !== 'company_label'))
   const filtered = applyFilters(scoped, restFilters)
   const q = search.trim().toLowerCase()
   const searched = q ? filtered.filter((r) =>
@@ -66,7 +69,7 @@ export function RidersPage() {
       <ColumnFilters
         rows={riders}
         columns={[
-          { key: 'company', label: 'Company' },
+          { key: 'company_label', label: 'Company' },
           { key: 'hub',     label: 'Hub' },
           { key: 'vehicle', label: 'Vehicle' },
         ]}
@@ -86,7 +89,7 @@ export function RidersPage() {
               <SortableTh tag="person_id" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Person</SortableTh>
               <SortableTh tag="rider_id"  sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Rider ID</SortableTh>
               <SortableTh tag="name"      sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Name</SortableTh>
-              <SortableTh tag="company"   sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Company</SortableTh>
+              <SortableTh tag="company_label" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Company</SortableTh>
               <SortableTh tag="hub"       sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Hub</SortableTh>
               <SortableTh tag="vehicle"   sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Vehicle</SortableTh>
               <Th>Account</Th><Th>IFSC</Th><Th>Phone</Th>
@@ -99,7 +102,7 @@ export function RidersPage() {
                 <Td><Link to={'/persons/' + r.person_id} className="text-brand underline">#{r.person_id}</Link></Td>
                 <Td>{r.rider_id}</Td>
                 <Td>{r.name}</Td>
-                <Td>{r.company}</Td>
+                <Td>{r.company_label}</Td>
                 <Td>{r.hub ?? '-'}</Td>
                 <Td>{r.vehicle ?? '-'}</Td>
                 <Td>{r.account_no ?? '-'}</Td>
@@ -141,8 +144,10 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
   async function submit(e: FormEvent | null, allowDuplicate = false) {
     e?.preventDefault(); setBusy(true); setMsg(null); setDupWarning(null)
     try {
+      // "Zomato · Salary" → company Zomato + payment_model salary.
+      const body = { ...form, ...parseCompanyChoice(form.company) }
       const r = await api.post<{ rider_id: string }>('/riders',
-        allowDuplicate ? { ...form, allow_duplicate_name: true } : form)
+        allowDuplicate ? { ...body, allow_duplicate_name: true } : body)
       setMsgTone('ok'); setMsg(`Added (rider_id=${r.rider_id})`)
       setForm(empty); onAdded()
     }
@@ -163,7 +168,7 @@ function AddRiderCard({ companies, onAdded }: { companies: Company[]; onAdded: (
                on={(v) => setForm({ ...form, rider_id: v })} />
         <SelectF label="Company *" v={form.company}
                  on={(v) => setForm({ ...form, company: v })}
-                 options={['', ...companies.map((c) => c.company_name)]} />
+                 options={['', ...companyChoices(companies.map((c) => c.company_name))]} />
         <Input label="Name *" v={form.name} on={(v) => setForm({ ...form, name: v })} />
         <Input label="Hub" v={form.hub} on={(v) => setForm({ ...form, hub: v })} />
         <SelectF label="Vehicle" v={form.vehicle} on={(v) => setForm({ ...form, vehicle: v })}

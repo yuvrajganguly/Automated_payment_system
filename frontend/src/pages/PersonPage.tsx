@@ -7,6 +7,7 @@ import { todayISO } from '../lib/dates'
 import { useAuth } from '../auth/AuthContext'
 import { Spinner } from '../components/Spinner'
 import type { PersonOut, TransactionOut } from '../api/types'
+import { ZOMATO_TYPES, companyChoices, isZomato, parseCompanyChoice } from '../lib/companyTypes'
 
 interface RiderRow {
   rider_id: string
@@ -25,15 +26,6 @@ interface RiderRow {
 
 interface CompanyOpt { company_name: string }
 
-/** Zomato runs three kinds of id. The type decides how Process Payout pays it:
- *  Flat = orders × rate, Salary = salary less days short + incentives,
- *  Commission = Zomato pays the rider itself (listed, never paid by us). */
-const ZOMATO_TYPES: { value: string; label: string }[] = [
-  { value: 'per_order', label: 'Flat' },
-  { value: 'salary', label: 'Salary' },
-  { value: 'commission', label: 'Commission' },
-]
-const isZomato = (company: string) => company.trim().toLowerCase() === 'zomato'
 
 function ZomatoIdType({ rider, canEdit, onSaved }: { rider: RiderRow; canEdit: boolean; onSaved: () => void }) {
   const [busy, setBusy] = useState(false)
@@ -1416,6 +1408,7 @@ function AddAtAnotherCompanyCard({
     try {
       const r = await api.post<{ rider_id: string; copied_from: { from: string; fields: string[] } | null }>('/riders', {
         ...form,
+        ...parseCompanyChoice(form.company),
         name: displayName,
         person_id: personId,
       })
@@ -1447,9 +1440,9 @@ function AddAtAnotherCompanyCard({
                     onChange={(e) => setForm({ ...form, company: e.target.value })}
                     className="w-full border rounded px-2 py-1">
               <option value="">(pick one)</option>
-              {allCompanies.map((c) => (
+              {companyChoices(allCompanies).map((c) => (
                 <option key={c} value={c}>
-                  {c}{usedSet.has(c) ? ' — already added (new rider_id will create a second row)' : ''}
+                  {c}{usedSet.has(parseCompanyChoice(c).company) ? ' — already added (new rider_id will create a second row)' : ''}
                 </option>
               ))}
             </select>
@@ -1478,7 +1471,7 @@ function AddAtAnotherCompanyCard({
             </button>
             {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
           </div>
-          {form.company && usedSet.has(form.company) && (
+          {form.company && usedSet.has(parseCompanyChoice(form.company).company) && (
             <p className="col-span-2 text-xs text-amber-300">
               This person already has a rider_id at {form.company}. Type a
               different rider_id below to add a second one — leaving it blank
