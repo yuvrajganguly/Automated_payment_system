@@ -114,12 +114,13 @@ PAY_HEADERS = [
     "Remarks",
     "Account No",
     "IFSC",
+    "Mobile No",
     "Manual Adjustment",
     "Notes",
 ]
 # Numeric (right-align + thousands separator) columns. Orders=7 stays integer-ish
 # but we leave it in the numeric set so it formats consistently.
-PAY_NUM = [8, 9, 10, 11, 12, 13, 14, 15, 19]  # money only (Orders=7 excluded)
+PAY_NUM = [8, 9, 10, 11, 12, 13, 14, 15, 20]  # money only (Orders=7 excluded)
 PAY_SUM = [7, 8, 9, 10, 11, 12, 13, 14, 15]
 
 
@@ -161,14 +162,15 @@ def _pay_sheet(wb, rows):
             r.remarks,
             r.account_no or "",
             r.ifsc or "",
+            getattr(r, "mob_no", None) or "",
             "",
             "",
         ]
         for col, v in enumerate(vals, 1):
             cell = ws.cell(row=i, column=col, value=v)
-            # Left-align Name (3), Remarks (16), Account/IFSC (17/18), Notes (20).
+            # Left-align Name (3), Remarks (16), Account/IFSC (17/18), Notes (21).
             cell.alignment = Alignment(
-                horizontal="left" if col in (3, 16, 17, 18, 20) else "center",
+                horizontal="left" if col in (3, 16, 17, 18, 21) else "center",
                 vertical="center",
             )
         _style_row(ws, i, len(PAY_HEADERS), fill=fill)
@@ -202,6 +204,7 @@ DUES_HEADERS = [
     "Carry Forward",
     "Account No",
     "IFSC",
+    "Mobile No",
 ]
 DUES_NUM = [9, 10, 11, 12, 13, 14]  # money only (Orders=8 excluded)
 DUES_SUM = [8, 9, 10, 11, 12, 13, 14]
@@ -238,6 +241,7 @@ def _dues_sheet(wb, rows):
             carry,
             r.account_no or "",
             r.ifsc or "",
+            getattr(r, "mob_no", None) or "",
         ]
         for col, v in enumerate(vals, 1):
             ws.cell(row=i, column=col, value=v).alignment = Alignment(

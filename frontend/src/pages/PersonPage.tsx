@@ -19,9 +19,57 @@ interface RiderRow {
   ifsc?: string | null
   mob_no?: string | null
   is_active: boolean
+  payment_model?: string | null
+  salary?: number | null
 }
 
 interface CompanyOpt { company_name: string }
+
+/** Zomato runs three kinds of id. The type decides how Process Payout pays it:
+ *  Flat = orders × rate, Salary = salary less days short + incentives,
+ *  Commission = Zomato pays the rider itself (listed, never paid by us). */
+const ZOMATO_TYPES: { value: string; label: string }[] = [
+  { value: 'per_order', label: 'Flat' },
+  { value: 'salary', label: 'Salary' },
+  { value: 'commission', label: 'Commission' },
+]
+const isZomato = (company: string) => company.trim().toLowerCase() === 'zomato'
+
+function ZomatoIdType({ rider, canEdit, onSaved }: { rider: RiderRow; canEdit: boolean; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [salary, setSalary] = useState(rider.salary != null ? String(rider.salary) : '')
+  const current = ZOMATO_TYPES.find((t) => t.value === rider.payment_model)
+  const url = '/riders/' + encodeURIComponent(rider.rider_id) + '?company=' + encodeURIComponent(rider.company)
+
+  async function patch(body: Record<string, unknown>) {
+    setBusy(true); setErr(null)
+    try { await api.patch(url, body); onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+
+  if (!canEdit) {
+    return <span className="block text-[11px] text-slate-400">{current?.label ?? 'type not set'}</span>
+  }
+  return (
+    <span className="block mt-0.5 text-[11px]">
+      <select value={rider.payment_model ?? ''} disabled={busy}
+              onChange={(e) => patch({ payment_model: e.target.value })}
+              className={'border rounded px-1 py-0.5 text-[11px] ' + (current ? '' : 'border-amber-400 text-amber-300')}>
+        <option value="">Type not set</option>
+        {ZOMATO_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+      {rider.payment_model === 'salary' && (
+        <input value={salary} onChange={(e) => setSalary(e.target.value)} type="number" min="0"
+               placeholder="₹ / cycle" title="Salary per cycle"
+               onBlur={() => { if (salary !== '' && Number(salary) !== rider.salary) patch({ salary: Number(salary) }) }}
+               className="ml-1 border rounded px-1 py-0.5 w-20 text-[11px]" />
+      )}
+      {err && <span className="block text-red-400">{err}</span>}
+    </span>
+  )
+}
 
 interface Backrent {
   applicable: boolean
@@ -1237,7 +1285,10 @@ function RiderRow({
     return (
       <tr className="border-t">
         <Td>{rider.rider_id}</Td>
-        <Td>{rider.company}</Td>
+        <Td>
+          {rider.company}
+          {isZomato(rider.company) && <ZomatoIdType rider={rider} canEdit={isAdmin} onSaved={onSaved} />}
+        </Td>
         <Td>{rider.name}</Td>
         <Td>{rider.hub ?? '-'}</Td>
         <Td>{rider.vehicle ?? '-'}</Td>

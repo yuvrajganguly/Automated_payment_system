@@ -92,6 +92,8 @@ class RiderResult:
     remarks: str
     account_no: str | None
     ifsc: str | None
+    # Rider's phone: the file's when it carries one, else the roster's.
+    mob_no: str | None = None
     # Delivered/completed orders pulled straight from the company file when the
     # company config declares an orders_column. None when not available.
     orders: float | None = None
@@ -136,6 +138,7 @@ class CycleResult:
     # {rider_id, name, old_hub, new_hub}. The company file is the authority on
     # where a rider works; the roster follows it.
     hub_updates: list = field(default_factory=list)
+    phone_updates: list = field(default_factory=list)
     # Every rider id present in the payout sheet (known or not). The HOLD sheet
     # uses it to split COD riders into "in this payout" / "not in this payout".
     file_rider_ids: list = field(default_factory=list)
@@ -189,6 +192,55 @@ def _id_sharing_companies(conn, company):
         (company, company),
     ).fetchall()
     return [r["company_name"] for r in rows if r["company_name"] != company]
+
+
+def _sync_phone(conn, rec, company, person, result):
+    """Roster phone follows the payout file, like the hub does.
+
+    Myntra's sheets carry each rider's phone; the office wants the roster — and
+    so the recruiter app and the payout sheet — to show it without anybody
+    typing it in. Only a clean ten-digit number from the file is written
+    (the parser drops anything else), and only onto this rider id.
+
+    A number already on file for a *different* person is not copied: a phone
+    is what the engine links people by, and two people sharing one would make
+    the next unknown id ambiguous. It is reported instead, for a human to look
+    at.
+    """
+    new = (rec.mob_no or "").strip()
+    old = (person.get("mob_no") or "").strip()
+    if not new or norm_phone(new) == norm_phone(old):
+        return
+    # Who holds which phone, built once per run: a full roster scan per row
+    # would be thousands of rows times thousands of riders on a first import.
+    owners = getattr(result, "_phone_owners", None)
+    if owners is None:
+        owners = {}
+        for r in conn.execute(
+            "SELECT person_id, mob_no FROM rider_master WHERE mob_no IS NOT NULL AND mob_no <> ''"
+        ).fetchall():
+            d = norm_phone(r["mob_no"])
+            if d:
+                owners.setdefault(d, set()).add(int(r["person_id"]))
+        result._phone_owners = owners
+    digits = norm_phone(new)
+    others = sorted(owners.get(digits, set()) - {int(person["person_id"])})
+    if others:
+        result.warnings.append(
+            f"Rider {rec.rider_id}: phone {new} in the file is already on person "
+            f"#{others[0]} — roster phone left as {old or 'blank'}"
+        )
+        return
+    owners.setdefault(digits, set()).add(int(person["person_id"]))
+    conn.execute(
+        "UPDATE rider_master SET mob_no=?, updated_at=datetime('now') "
+        "WHERE rider_id=? AND company=?",
+        (new, rec.rider_id, company),
+    )
+    person["mob_no"] = new
+    result.phone_updates.append(
+        {"rider_id": rec.rider_id, "company": company, "old": old, "new": new}
+    )
 
 
 def _sync_hub(conn, rec, company, person, result):
@@ -277,7 +329,7 @@ def _lookup(conn, rider_id, company):
         "SELECT rm.person_id, rm.name, rm.hub, "
         "       CASE WHEN ea.assignment_id IS NOT NULL THEN 'EV' ELSE 'BIKE' END "
         "         AS vehicle, "
-        "       rm.account_no, rm.ifsc, "
+        "       rm.account_no, rm.ifsc, rm.mob_no, "
         "       pr.deduction_company, pr.deduction_rider_id "
         "FROM rider_master rm "
         "JOIN person_registry pr ON pr.person_id = rm.person_id "
@@ -709,6 +761,7 @@ def process_cycle(
             if p:
                 present_persons[rec.rider_id] = p
                 _sync_hub(conn, rec, company, p, result)
+                _sync_phone(conn, rec, company, p, result)
             else:
                 result.unknown_ids.append(rec.rider_id)
                 # The auto-link above refuses whenever it is not certain — two
@@ -1271,6 +1324,7 @@ def process_cycle(
                 ),
                 account_no=person["account_no"],
                 ifsc=person["ifsc"],
+                mob_no=rec.mob_no or person.get("mob_no"),
                 orders=getattr(rec, "orders", None),
                 referral_bonus=referral_bonus,
             )
@@ -1298,6 +1352,14 @@ def process_cycle(
                 "WHERE EXISTS ("
                 "    SELECT 1 FROM rider_master rm "
                 "    WHERE rm.person_id = pr.person_id AND rm.company = ? AND rm.is_active = 1"
+                # Only ids this company's cycle actually pays. A Zomato
+                # Commission (or untyped) id is never in the paid file, and
+                # missing from it is not absence — that rider's rent is
+                # collected in cash (rent_due), not charged as missed here.
+                "    AND COALESCE(rm.payment_model, "
+                "        (SELECT _c.payment_model FROM companies _c "
+                "         WHERE _c.company_name = rm.company), 'payout_file') "
+                "        IN ('payout_file', 'per_order', 'salary')"
                 ")",
                 (company,),
             ).fetchall()
@@ -1433,6 +1495,13 @@ def process_cycle(
             result.warnings.append(
                 f"{len(result.hub_updates)} rider hub(s) updated from the file: {shown}"
                 + (f" … +{more} more" if more > 0 else "")
+            )
+        if result.phone_updates:
+            n = len(result.phone_updates)
+            filled = sum(1 for u in result.phone_updates if not u["old"])
+            result.warnings.append(
+                f"{n} rider phone(s) updated from the file"
+                + (f" ({filled} were blank)" if filled else "")
             )
         result.file_rider_ids = [rec.rider_id for rec in parsed.records]
         in_file = set(result.file_rider_ids)

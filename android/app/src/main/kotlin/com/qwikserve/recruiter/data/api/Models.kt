@@ -157,6 +157,9 @@ data class RiderIn(
     @SerialName("person_id") val personId: Long? = null,
     @SerialName("allow_duplicate_name") val allowDuplicateName: Boolean = false,
     @SerialName("referred_by_person_id") val referredByPersonId: Long? = null,
+    /** Zomato id type: per_order (Flat), salary (Salary) or commission. Null
+     *  for every other company — they pay one way. */
+    @SerialName("payment_model") val paymentModel: String? = null,
 )
 
 @Serializable

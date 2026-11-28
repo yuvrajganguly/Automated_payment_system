@@ -17,7 +17,13 @@ collected in cash. That is ``person_is_direct_pay``.
 from __future__ import annotations
 
 CYCLE_MODELS = ("payout_file", "per_order", "salary")
-VALID_MODELS = ("payout_file", "per_order", "salary", "direct")
+# ``commission`` (2026-11, Zomato MFFLEET ids): the client pays the rider and
+# pays Qwikserve a commission. For the books it is ``direct`` — we never pay
+# the rider, so EV rent is collected the cash way — but it is its own value so
+# the office can tell a Commission id from a Flat or Salary one at a glance.
+VALID_MODELS = ("payout_file", "per_order", "salary", "direct", "commission")
+# What the office calls each id type, where the client runs several (Zomato).
+ID_TYPES = {"per_order": "Flat", "salary": "Salary", "commission": "Commission"}
 
 
 def rider_payment_model(row) -> str:

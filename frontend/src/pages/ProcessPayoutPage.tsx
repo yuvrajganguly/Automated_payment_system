@@ -1,3 +1,4 @@
+import { ZomatoPanel } from '../components/ZomatoPanel'
 import { ShadowfaxPanel } from '../components/ShadowfaxPanel'
 import { FormEvent, useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
@@ -75,7 +76,8 @@ export function ProcessPayoutPage() {
   const [previewedKey, setPreviewedKey] = useState<RunKey | null>(null)
   const selected = companies.find((c) => c.company_name === company)
   const [typeCounts, setTypeCounts] = useState(false)
-  const bulkFiles = !adHoc && !typeCounts && selected?.payment_model === 'per_order' && selected?.rate_model === 'pincode_ratecard'
+  const zomatoFiles = !adHoc && selected?.parser_type === 'zomato'
+  const bulkFiles = zomatoFiles || (!adHoc && !typeCounts && selected?.payment_model === 'per_order' && selected?.rate_model === 'pincode_ratecard')
   const perOrder = selected?.payment_model === 'per_order'
   const salaried = selected?.payment_model === 'salary'
   const typed = perOrder || salaried
@@ -101,7 +103,9 @@ export function ProcessPayoutPage() {
       .get<Company[]>('/companies')
       .then((cs) => {
         // Direct-pay companies have nothing to process — they never appear here.
-        const active = cs.filter((c) => c.is_active && c.payment_model !== 'direct')
+        // Zomato is the exception: its company row stays "direct" (an untyped id
+        // is never paid), but its Flat and Salary ids are processed from the FE reports.
+        const active = cs.filter((c) => c.is_active && (c.payment_model !== 'direct' || c.parser_type === 'zomato'))
         setCompanies(active)
         if (active.length) {
           setCompany((cur) => (active.some((c) => c.company_name === cur) ? cur : active[0].company_name))
@@ -273,13 +277,15 @@ export function ProcessPayoutPage() {
           <div className="mb-3 text-sm">
             <label>Company{' '}
               <select value={company} onChange={(e) => setCompany(e.target.value)} className="border rounded px-2 py-1">
-                {companies.filter((c) => c.is_active && c.payment_model !== 'direct').map((c) => (
+                {companies.map((c) => (
                   <option key={c.company_name} value={c.company_name}>{c.company_name}</option>
                 ))}
               </select>
             </label>
           </div>
-          <ShadowfaxPanel company={company} onTypeCounts={() => setTypeCounts(true)} />
+          {zomatoFiles
+            ? <ZomatoPanel company={company} />
+            : <ShadowfaxPanel company={company} onTypeCounts={() => setTypeCounts(true)} />}
         </>
       )}
       {!bulkFiles && (

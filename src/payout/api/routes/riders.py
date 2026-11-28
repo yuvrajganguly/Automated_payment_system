@@ -977,6 +977,21 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                 "pan_no=COALESCE(?, pan_no) WHERE person_id=?",
                 (aadhaar, pan, person_id),
             )
+        pm = (body.payment_model or "").strip().lower() or None
+        if pm:
+            # Set at onboarding by whoever adds the id (a recruiter adding a
+            # Zomato Flat / Salary / Commission id); changing it later is an
+            # admin's job (PATCH). The activity log below records the choice.
+            from payout.domain.payment_model import VALID_MODELS
+
+            if pm not in VALID_MODELS:
+                raise HTTPException(
+                    400, f"payment_model must be one of {', '.join(VALID_MODELS)} or blank"
+                )
+            conn.execute(
+                "UPDATE rider_master SET payment_model=? WHERE rider_id=? AND company=?",
+                (pm, rider_id, body.company),
+            )
         referral = None
         if body.referred_by_person_id is not None:
             try:
@@ -1006,6 +1021,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
                 "copied_from": copied_from,
                 "placeholder": rider_id.startswith(PLACEHOLDER_PREFIX),
                 "referred_by": referral["referrer_name"] if referral else None,
+                "payment_model": pm,
             },
         )
         conn.commit()
@@ -1024,6 +1040,7 @@ def create_rider(body: RiderIn, user: dict = Depends(require_recruiter)) -> Ride
         is_active=True,
         recruited_by=user.get("email"),
         referred_by=referral["referrer_name"] if referral else None,
+        payment_model=pm,
     )
 
 

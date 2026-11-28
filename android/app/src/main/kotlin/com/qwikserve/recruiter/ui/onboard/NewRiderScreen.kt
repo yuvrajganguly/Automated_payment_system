@@ -51,6 +51,7 @@ import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.KycField
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
+import com.qwikserve.recruiter.ui.common.Segmented
 import com.qwikserve.recruiter.ui.common.Tag
 import com.qwikserve.recruiter.ui.login.Field
 import com.qwikserve.recruiter.ui.login.fieldColors
@@ -98,6 +99,10 @@ class NewRiderViewModel @Inject constructor(
      *  rider exists, because the photo hangs off their person id. */
     var photo by mutableStateOf<Uri?>(null)
     var company by mutableStateOf("")
+    /** Zomato runs three kinds of id; the office pays each differently, so
+     *  the recruiter says which when adding one. Index into [ZOMATO_TYPES]. */
+    var zomatoType by mutableStateOf(-1)
+    val isZomato get() = company.trim().equals("Zomato", ignoreCase = true)
     // Handed over by the caller in attach mode; they already had it on screen.
     var name by mutableStateOf(state.get<String>("name").orEmpty())
     var riderId by mutableStateOf("")
@@ -156,6 +161,7 @@ class NewRiderViewModel @Inject constructor(
     private fun validate(): Boolean {
         val e = mutableMapOf<String, String>()
         if (company.isBlank()) e["company"] = "Pick the company."
+        if (isZomato && zomatoType !in ZOMATO_TYPES.indices) e["company"] = "Pick the Zomato id type."
         if (name.trim().length < 3) e["name"] = "The rider's full name."
         val digits = phone.filter { it.isDigit() }
         if (phone.isNotBlank() && digits.length != 10) e["phone"] = "Ten digits, no country code."
@@ -197,6 +203,7 @@ class NewRiderViewModel @Inject constructor(
                         personId = attachTo,
                         allowDuplicateName = allowDuplicate,
                         referredByPersonId = referrer?.personId,
+                        paymentModel = if (isZomato) ZOMATO_TYPES.getOrNull(zomatoType)?.second else null,
                     ),
                 )
                 val photoFailed = photo?.let { uri ->
@@ -294,6 +301,28 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                     modifier = Modifier.fillMaxWidth(),
                     enabled = companies.isNotEmpty(),
                 )
+                if (vm.isZomato) {
+                    Spacer(Modifier.height(10.dp))
+                    Kicker("Zomato id type")
+                    Spacer(Modifier.height(6.dp))
+                    Segmented(
+                        ZOMATO_TYPES.map { it.first },
+                        selected = vm.zomatoType,
+                        onSelect = { vm.zomatoType = it },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when (ZOMATO_TYPES.getOrNull(vm.zomatoType)?.second) {
+                            "per_order" -> "ZFPP id — we pay a flat rate per order."
+                            "salary" -> "ZFPP id — we pay a monthly salary; the office sets the amount."
+                            "commission" -> "MFFLEET id — Zomato pays the rider directly."
+                            else -> "Pick one: it decides how the rider is paid."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Qwik.N700,
+                    )
+                }
                 ErrorLine(err["company"])
                 Spacer(Modifier.height(14.dp))
 
@@ -468,6 +497,9 @@ private fun Input(
         modifier = Modifier.fillMaxWidth(),
     )
 }
+
+/** Label → server payment_model, in the order shown. */
+private val ZOMATO_TYPES = listOf("Flat" to "per_order", "Salary" to "salary", "Commission" to "commission")
 
 @Composable
 private fun ErrorLine(text: String?) {

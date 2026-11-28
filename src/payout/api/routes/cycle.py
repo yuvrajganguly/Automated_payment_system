@@ -484,6 +484,41 @@ async def run_cycle(
     file_bytes: bytes | None = None
     if model != "salary":
         parsed = None
+    zom = None
+    if co["parser_type"] == "zomato":
+        # Zomato: daily FE reports, each id paid as its type (Flat / Salary /
+        # Commission) — see domain/zomato.py. The company itself stays
+        # "direct" so an id nobody has typed is never paid by accident.
+        from payout.domain import zomato
+
+        uploads = [f for f in (files or []) if f is not None] + ([file] if file is not None else [])
+        if not uploads:
+            raise HTTPException(400, f"Drop the {company} FE report files for this cycle.")
+        blobs = [(u.filename or "file.xlsx", await u.read()) for u in uploads]
+        try:
+            batch = zomato.read_files(blobs)
+            with get_connection() as conn:
+                zom = zomato.price(conn, company, batch, cycle_start, cycle_end, co)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        zom._files = batch.files  # type: ignore[attr-defined]  # for the preview
+        if not zom.records and not zom.commission and not zom.needs_type:
+            raise HTTPException(
+                400,
+                "No FE report rows fall inside this cycle"
+                + (" — every day in it was already paid." if zom.already_paid else "."),
+            )
+        if commit and zom.needs_type:
+            # Committing would close the cycle with these riders unpaid, and a
+            # committed cycle cannot be re-run for them.
+            names = ", ".join(f"{x['name']} ({x['rider_id']})" for x in zom.needs_type[:5])
+            raise HTTPException(
+                400,
+                f"{len(zom.needs_type)} Zomato id(s) need a type (Flat or Salary) before "
+                f"this cycle can be committed: {names}",
+            )
+        parsed = zomato.to_parse_result(company, zom)
+        model = "zomato"
     if model == "direct":
         raise HTTPException(
             400,
@@ -521,7 +556,7 @@ async def run_cycle(
     elif model == "per_order":
         with get_connection() as conn:
             parsed = _orders_to_parse_result(conn, company, orders, co["per_order_rate"])
-    elif model == "salary":
+    elif model in ("salary", "zomato"):
         pass
     else:
         if file is None:
@@ -541,6 +576,8 @@ async def run_cycle(
         buf = build_output(result, conn=conn)
         if sfx is not None:
             buf = _shadowfax_sheets(buf, sfx)
+        if zom is not None:
+            buf = _zomato_sheets(buf, zom)
         filename = build_output_filename(company, cycle_start, cycle_end)
         content = buf.getvalue()
         owner = "adhoc_id" if ad_hoc else "cycle_id"
@@ -575,6 +612,8 @@ async def run_cycle(
             before_commit=(
                 (lambda c: _record_days(c, company, cycle_start, cycle_end, sfx))
                 if sfx is not None
+                else (lambda c: _record_zomato_days(c, company, cycle_start, cycle_end, zom))
+                if zom is not None
                 else None
             ),
         )
@@ -608,7 +647,135 @@ async def run_cycle(
         response["shadowfax"] = _shadowfax_payload(sfx, result)
     if salary_lines:
         response["salary_lines"] = salary_lines
+    if zom is not None:
+        response["zomato"] = _zomato_payload(zom, result)
     return response
+
+
+# ── Zomato (daily FE reports; Flat / Salary / Commission ids) ───────────────
+
+
+def _record_zomato_days(conn, company, cycle_start, cycle_end, zom) -> None:
+    from payout.domain import shadowfax
+
+    shadowfax.record_paid_days(conn, company, cycle_start, cycle_end, zom.day_rows)
+
+
+def _zomato_payload(zom, result) -> dict:
+    """Preview detail. ``gross`` stays in paise here and is listed in
+    MONEY_KEYS, so the API edge turns it into rupees like every other amount."""
+    net = {r.rider_id: r for r in result.pay_rows + result.dues_rows}
+    riders = []
+    for x in zom.riders:
+        r = net.get(x["rider_id"])
+        riders.append(
+            {
+                **x,
+                "rent": r.rent if r else 0,
+                "released": r.released if r else 0,
+                "held": bool(r.is_hold) if r else False,
+            }
+        )
+    by_type: dict[str, dict] = {}
+    for x in zom.riders:
+        t = by_type.setdefault(
+            x["type"], {"type": x["type"], "riders": 0, "orders": 0.0, "gross": 0}
+        )
+        t["riders"] += 1
+        t["orders"] += x["orders"]
+        t["gross"] += x["gross"]
+    return {
+        "files": [f.__dict__ for f in getattr(zom, "_files", [])],
+        "riders": riders,
+        "by_type": list(by_type.values()),
+        "needs_type": zom.needs_type,
+        "already_paid": zom.already_paid,
+    }
+
+
+def _zomato_sheets(buf, zom):
+    """Zomato detail: every FE ID in the reports with its type and working.
+    COMMISSION: the ids Zomato pays itself, with the numbers Zomato's
+    commission to us is reckoned on."""
+    import io as _io
+
+    from openpyxl import load_workbook
+
+    from payout.exports import add_styled_sheet
+
+    wb = load_workbook(buf)
+    add_styled_sheet(
+        wb,
+        sheet_name="Zomato detail",
+        headers=(
+            "FE ID",
+            "Name",
+            "Type",
+            "Vendor",
+            "Days present",
+            "Orders",
+            "Rain orders",
+            "Login hours",
+            "Cancellations",
+            "Denials",
+            "Gross",
+            "Working",
+        ),
+        rows=[
+            (
+                x["rider_id"],
+                x["name"],
+                x["type"],
+                x["vendor"],
+                x["days_present"],
+                x["orders"],
+                x["rain_orders"],
+                x["login_hours"],
+                x["cancellations"],
+                x["denials"],
+                x["gross"],
+                x["working"],
+            )
+            for x in zom.riders
+        ],
+        numeric_cols=(5, 6, 7, 8, 9, 10, 11),
+        totals_cols=(6, 7, 8, 11),
+        money_cols=(11,),
+        left_align_cols=(1, 2, 3, 4, 12),
+    )
+    if zom.commission:
+        add_styled_sheet(
+            wb,
+            sheet_name="COMMISSION",
+            headers=(
+                "FE ID",
+                "Name",
+                "Vendor",
+                "Days present",
+                "Orders",
+                "Rain orders",
+                "Login hours",
+            ),
+            rows=[
+                (
+                    x["rider_id"],
+                    x["name"],
+                    x["vendor"],
+                    x["days_present"],
+                    x["orders"],
+                    x["rain_orders"],
+                    x["login_hours"],
+                )
+                for x in zom.commission
+            ],
+            numeric_cols=(4, 5, 6, 7),
+            totals_cols=(5, 6, 7),
+            left_align_cols=(1, 2, 3),
+        )
+    out = _io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
 
 
 # ── Shadowfax (per-order on the pincode ratecard) ───────────────────────────

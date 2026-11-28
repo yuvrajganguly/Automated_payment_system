@@ -56,6 +56,22 @@ _PHONE_ALIASES = (
     "contact number",
     "rider_mobile",
     "rider mobile",
+    # Spellings seen on Myntra payin sheets and their cousins (2026-11).
+    "phone no.",
+    "phone_no",
+    "phone num",
+    "mobile no.",
+    "mobile_no",
+    "mobile_number",
+    "mob no",
+    "mob no.",
+    "mob. no.",
+    "mobile num",
+    "contact no.",
+    "rider phone no",
+    "rider mobile no",
+    "worker phone",
+    "worker mobile",
 )
 # Hub / store column. Spencer's new layout carries the store as store_names
 # (+ store_ids); older files used Store / Hub.
@@ -110,6 +126,19 @@ def _normalise_rider_id(value) -> str:
             digits = digits[1:]
         text = digits
     return text
+
+
+def _phone(value) -> str | None:
+    """A phone cell as ten digits, or None when it is not a usable number.
+
+    Excel gives a numeric phone as ``9876543210.0``; read naively that is
+    eleven digits and the last ten are wrong. ``_normalise_rider_id`` already
+    knows every spelling (float, +91, leading 0, spaces), so it does the work;
+    anything that does not come out as ten digits is dropped rather than
+    written onto somebody's roster row.
+    """
+    text = _normalise_rider_id(value)
+    return text if len(text) == 10 and text.isdigit() else None
 
 
 def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
@@ -177,6 +206,8 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
         matched["name"] = name_col
     if hub_col:
         matched["hub"] = hub_col
+    if phone_col:
+        matched["phone"] = phone_col
     if hub_code_col:
         matched["hub_code"] = hub_code_col
 
@@ -227,7 +258,7 @@ def parse_with_config(file_bytes: bytes, config: sqlite3.Row) -> ParseResult:
                 name=_cell(name_col),
                 hub=_cell(hub_col),
                 hub_code=_cell(hub_code_col),
-                mob_no=_cell(phone_col),
+                mob_no=_phone(row.get(phone_col)) if phone_col else None,
                 payout_invalid=payout_invalid,
             )
         )

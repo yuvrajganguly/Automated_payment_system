@@ -123,7 +123,7 @@ COMPANIES: list[dict] = [
     # order count off the Shadowfax dashboard and we pay ₹15 an order.
     {
         "company_name": "Zomato",
-        "parser_type": "none",
+        "parser_type": "zomato",
         "payout_sheet": None,
         "rider_id_column": "rider_id",
         "payout_column": "payout",

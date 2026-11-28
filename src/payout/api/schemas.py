@@ -175,6 +175,10 @@ class RiderIn(BaseModel):
     pan_no: str | None = None
     # An existing rider who brought this one in (referral bonus after 4 weeks).
     referred_by_person_id: int | None = None
+    # How this id is paid, where the company runs several kinds (Zomato:
+    # per_order = Flat, salary = Salary, commission = Commission). Blank =
+    # the company's default.
+    payment_model: str | None = None
 
 
 class IdentityIn(BaseModel):
@@ -230,7 +234,7 @@ class RiderPatch(BaseModel):
     salary: float | None = None  # rupees per cycle (salary companies)
     recruited_by: str | None = None  # admin only: hand the rider to another recruiter
     payment_model: str | None = (
-        None  # admin only: payout_file | per_order | salary | direct | "" (clear)  # noqa: E501
+        None  # admin only: payout_file | per_order | salary | direct | commission | "" (clear)  # noqa: E501
     )
     new_rider_id: str | None = None
     new_company: str | None = None

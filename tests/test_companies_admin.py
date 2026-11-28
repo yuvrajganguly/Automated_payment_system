@@ -133,11 +133,22 @@ def test_monthly_next_cycle(client):
     assert r["cycle_start"].endswith("-01")
 
 
+def test_zomato_is_processed_from_its_fe_reports(client):
+    # Zomato stays "direct" as a company (an untyped id is never paid) but its
+    # Flat and Salary ids are processed from the FE reports (tests/test_zomato.py).
+    r = client.post(
+        "/api/cycles/run",
+        data={"company": "Zomato", "cycle_start": "2026-06-01", "cycle_end": "2026-06-07"},
+    )
+    assert r.status_code == 400
+    assert "FE report" in r.json()["detail"]
+
+
 def test_direct_pay_company_has_nothing_to_process(client):
     r = client.post(
         "/api/cycles/run",
         data={
-            "company": "Zomato",
+            "company": "Elastic",
             "cycle_start": "2026-06-01",
             "cycle_end": "2026-06-07",
             "commit": "false",

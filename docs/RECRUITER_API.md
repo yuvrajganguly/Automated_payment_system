@@ -99,6 +99,10 @@ GET   /persons/{person_id}                person: display_name, riders[], ev (op
 GET   /companies                          company list (for the company picker)
 ```
 
+`POST /riders` takes an optional `payment_model` — for Zomato ids the type:
+`per_order` (Flat), `salary` (Salary) or `commission` (Commission). Set at
+onboarding by anyone; changing it later (`PATCH`) is admin-only.
+
 `POST /riders` stamps `recruited_by` with the caller's email — that is what
 "my riders" and the recruiting numbers are built on. A bank account already
 owned by another person is refused with `409` naming the owner. Deleting riders, merging/splitting people and onboarding unknown

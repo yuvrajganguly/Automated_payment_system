@@ -1222,6 +1222,17 @@ def _0043_cod_partial_payments(conn: Any) -> None:
     conn.execute(translate_ddl(ddl) if DB_URL else ddl)
 
 
+def _0044_zomato_fe_reports(conn: Any) -> None:
+    """Zomato is processed from its daily FE reports (domain/zomato.py), with
+    each id paid as Flat, Salary or Commission. The company keeps its own
+    payment_model (direct: an id with no type is never paid by accident); only
+    the parser changes, so Process Payout offers it."""
+    conn.execute(
+        "UPDATE companies SET parser_type='zomato' WHERE company_name='Zomato' "
+        "AND (parser_type IS NULL OR parser_type IN ('none', ''))"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1269,6 +1280,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0041_payout_workbooks", _0041_payout_workbooks),
     ("0042_cycle_reporting_adjustments", _0042_cycle_reporting_adjustments),
     ("0043_cod_partial_payments", _0043_cod_partial_payments),
+    ("0044_zomato_fe_reports", _0044_zomato_fe_reports),
 ]
 
 _TRACKING_DDL = (

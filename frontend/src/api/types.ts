@@ -154,6 +154,9 @@ export interface RiderOut {
   is_active: boolean
   /** Rupees per cycle (salary companies). */
   salary?: number | null
+  /** How this id is paid when it differs from the company's: per_order (Zomato "Flat"),
+   *  salary, commission, direct, payout_file. Null = the company's. */
+  payment_model?: string | null
 }
 
 export interface EvSummary {
