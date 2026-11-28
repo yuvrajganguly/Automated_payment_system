@@ -247,6 +247,8 @@ data class DocumentOut(
     @SerialName("doc_type") val docType: String = "",
     val filename: String = "",
     @SerialName("size_bytes") val sizeBytes: Long = 0,
+    @SerialName("content_type") val contentType: String? = null,
+    @SerialName("uploaded_at") val uploadedAt: String? = null,
 )
 
 /* ── EV actions: hand one over, take it back, park it, fix it ── */

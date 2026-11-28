@@ -49,6 +49,7 @@ import com.qwikserve.recruiter.data.api.ApiError
 import com.qwikserve.recruiter.data.api.PayoutApi
 import com.qwikserve.recruiter.data.api.MoneyRequestIn
 import com.qwikserve.recruiter.data.api.PersonOut
+import com.qwikserve.recruiter.data.api.DocumentOut
 import com.qwikserve.recruiter.data.api.RiderPatchBody
 import com.qwikserve.recruiter.data.api.TimelineEvent
 import com.qwikserve.recruiter.data.db.RiderEntity
@@ -63,6 +64,7 @@ import com.qwikserve.recruiter.ui.evs.EvActionsViewModel
 import com.qwikserve.recruiter.ui.evs.GiveEvSheet
 import com.qwikserve.recruiter.ui.evs.RepairSheet
 import com.qwikserve.recruiter.ui.common.Hairline
+import com.qwikserve.recruiter.ui.common.DocumentTile
 import com.qwikserve.recruiter.ui.common.Kicker
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
@@ -130,6 +132,45 @@ class PersonViewModel @Inject constructor(
         private set
 
     init { if (personId != 0L) load() }
+
+    /* ── Aadhaar / PAN cards ────────────────────────────────────────────── */
+
+    /** Documents on file, newest first — only the cards are shown here. */
+    var docs by mutableStateOf<List<DocumentOut>>(emptyList())
+        private set
+    /** "aadhaar" / "pan" while that card is going up. */
+    var uploadingKyc by mutableStateOf<String?>(null)
+        private set
+
+    /** The newest card of each kind, by document id. */
+    fun latestDoc(docType: String): DocumentOut? = docs.firstOrNull { it.docType == docType }
+
+    private var docsFor = 0L
+
+    private fun loadDocs() {
+        val id = _personId.value
+        // On a tablet this view model is re-pointed at another rider: never
+        // show the last rider's cards under the new one's name.
+        if (docsFor != id) { docs = emptyList(); docsFor = id }
+        viewModelScope.launch {
+            runCatching { api.documents(id) }
+                .onSuccess { if (_personId.value == id) docs = it }
+        }
+    }
+
+    /** Camera or gallery → a new Aadhaar or PAN card. A wrong one is replaced
+     *  by taking it again; recruiters never delete (admins can, on the web). */
+    fun setKyc(docType: String, uri: Uri) {
+        if (uploadingKyc != null) return
+        val id = _personId.value
+        uploadingKyc = docType
+        viewModelScope.launch {
+            runCatching { photos.uploadKyc(id, docType, uri) }
+                .onSuccess { doc -> if (_personId.value == id) docs = listOf(doc) + docs }
+                .onFailure { error = "The card did not upload. Try again when the signal is better." }
+            uploadingKyc = null
+        }
+    }
 
     /** Camera or gallery → the rider's profile picture. */
     fun setPhoto(uri: Uri) {
@@ -283,6 +324,7 @@ class PersonViewModel @Inject constructor(
                 if (_personId.value == id) error = e.message ?: "Could not load this rider"
             }
         }
+        loadDocs()
         loadTimeline()
     }
 
@@ -348,8 +390,11 @@ fun PersonScreen(
                     Column(Modifier.weight(1f)) {
                         Text(name ?: "Rider", style = MaterialTheme.typography.headlineLarge, color = Qwik.Ink)
                         Spacer(Modifier.height(6.dp))
+                        // A photographed card counts as on file even with no number typed.
                         val ids = p?.aadhaarNo?.let { "Aadhaar " + it.chunked(4).joinToString(" ") }
+                            ?: vm.latestDoc("aadhaar")?.let { "Aadhaar photo" }
                         val pan = p?.panNo?.let { "PAN $it" }
+                            ?: vm.latestDoc("pan")?.let { "PAN photo" }
                         val line = listOfNotNull(ids, pan).joinToString(" · ")
                         when {
                             line.isNotEmpty() -> Text(line, style = MaterialTheme.typography.bodyMedium, color = Qwik.N700)
@@ -468,6 +513,38 @@ fun PersonScreen(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                     )
                 }
+
+                Kicker("Aadhaar, PAN & bank", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 8.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    DocumentTile(
+                        picked = null,
+                        prompt = "Aadhaar card",
+                        docId = vm.latestDoc("aadhaar")?.id,
+                        busy = vm.uploadingKyc == "aadhaar",
+                        onPicked = { vm.setKyc("aadhaar", it) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    DocumentTile(
+                        picked = null,
+                        prompt = "PAN card",
+                        docId = vm.latestDoc("pan")?.id,
+                        busy = vm.uploadingKyc == "pan",
+                        onPicked = { vm.setKyc("pan", it) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                DocumentTile(
+                    picked = null,
+                    prompt = "passbook or cancelled cheque",
+                    docId = vm.latestDoc("bank_proof")?.id,
+                    busy = vm.uploadingKyc == "bank_proof",
+                    onPicked = { vm.setKyc("bank_proof", it) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                )
 
                 Kicker("Rider ids", Modifier.padding(start = 20.dp, top = 20.dp, bottom = 2.dp))
                 val rows = p?.riders?.map { RiderLine(it.riderId, it.company, it.hub, it.mobNo, it.accountNo, it.ifsc, it.isActive, it.recruitedBy, it.accountName, it.name) }

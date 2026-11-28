@@ -30,6 +30,7 @@ const ForgotPasswordPage = page(() => import('./pages/ForgotPasswordPage'), 'For
 const ProcessPayoutPage = page(() => import('./pages/ProcessPayoutPage'), 'ProcessPayoutPage')
 const ProcessedPayoutsPage = page(() => import('./pages/ProcessedPayoutsPage'), 'ProcessedPayoutsPage')
 const RidersPage = page(() => import('./pages/RidersPage'), 'RidersPage')
+const ActiveRidersPage = page(() => import('./pages/ActiveRidersPage'), 'ActiveRidersPage')
 const PersonPage = page(() => import('./pages/PersonPage'), 'PersonPage')
 const EVsPage = page(() => import('./pages/EVsPage'), 'EVsPage')
 const EvProfilePage = page(() => import('./pages/EvProfilePage'), 'EvProfilePage')
@@ -65,6 +66,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<ProcessPayoutPage />} />
             <Route path="/riders" element={<RidersPage />} />
+            <Route path="/active-riders" element={<ActiveRidersPage />} />
             <Route path="/persons/:id" element={<PersonPage />} />
             <Route path="/evs" element={<EVsPage />} />
             <Route path="/evs/:id" element={<EvProfilePage />} />

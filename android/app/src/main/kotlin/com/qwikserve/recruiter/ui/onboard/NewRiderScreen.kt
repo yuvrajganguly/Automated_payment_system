@@ -48,6 +48,7 @@ import com.qwikserve.recruiter.ui.common.Dropdown
 import com.qwikserve.recruiter.ui.common.GhostAction
 import com.qwikserve.recruiter.ui.common.Hairline
 import com.qwikserve.recruiter.ui.common.Kicker
+import com.qwikserve.recruiter.ui.common.KycField
 import com.qwikserve.recruiter.ui.common.PhotoTile
 import com.qwikserve.recruiter.ui.common.Rule
 import com.qwikserve.recruiter.ui.common.Tag
@@ -104,6 +105,18 @@ class NewRiderViewModel @Inject constructor(
     var phone by mutableStateOf("")
     var aadhaar by mutableStateOf("")
     var pan by mutableStateOf("")
+    /** Aadhaar / PAN can be photographed instead of typed. In photo mode the
+     *  number is not sent (whatever was typed before switching is ignored)
+     *  and the picture goes up as a document once the rider exists. */
+    var aadhaarByPhoto by mutableStateOf(false)
+    var panByPhoto by mutableStateOf(false)
+    var aadhaarPhoto by mutableStateOf<Uri?>(null)
+    var panPhoto by mutableStateOf<Uri?>(null)
+    /** Bank details by photo: the passbook's first page or a cancelled
+     *  cheque. Account and IFSC are then not sent; the office types them in
+     *  from the picture, and payouts stay held until it does. */
+    var bankByPhoto by mutableStateOf(false)
+    var bankPhoto by mutableStateOf<Uri?>(null)
     var account by mutableStateOf("")
     /** Left blank means the account is in the rider's own name. */
     var accountName by mutableStateOf("")
@@ -147,13 +160,19 @@ class NewRiderViewModel @Inject constructor(
         val digits = phone.filter { it.isDigit() }
         if (phone.isNotBlank() && digits.length != 10) e["phone"] = "Ten digits, no country code."
         val a = aadhaar.filter { it.isDigit() }
-        if (aadhaar.isNotBlank() && a.length != 12) e["aadhaar"] = "Twelve digits."
+        if (!aadhaarByPhoto && aadhaar.isNotBlank() && a.length != 12) e["aadhaar"] = "Twelve digits."
+        if (aadhaarByPhoto && aadhaarPhoto == null) e["aadhaar"] = "Take the photo, or switch back to Number."
         val p = pan.trim().uppercase()
-        if (p.isNotBlank() && !Regex("^[A-Z]{5}\\d{4}[A-Z]$").matches(p)) e["pan"] = "Five letters, four digits, one letter."
+        if (!panByPhoto && p.isNotBlank() && !Regex("^[A-Z]{5}\\d{4}[A-Z]$").matches(p)) e["pan"] = "Five letters, four digits, one letter."
+        if (panByPhoto && panPhoto == null) e["pan"] = "Take the photo, or switch back to Number."
         val acct = account.filter { it.isDigit() }
         val code = ifsc.trim().uppercase()
-        if ((acct.isNotBlank() || code.isNotBlank()) && !Regex("^\\d{6,18}$").matches(acct)) e["account"] = "Digits only, 6 to 18 of them."
-        if ((acct.isNotBlank() || code.isNotBlank()) && code.length != 11) e["ifsc"] = "IFSC is exactly 11 characters."
+        if (bankByPhoto) {
+            if (bankPhoto == null) e["account"] = "Take the photo, or switch back to Number."
+        } else {
+            if ((acct.isNotBlank() || code.isNotBlank()) && !Regex("^\\d{6,18}$").matches(acct)) e["account"] = "Digits only, 6 to 18 of them."
+            if ((acct.isNotBlank() || code.isNotBlank()) && code.length != 11) e["ifsc"] = "IFSC is exactly 11 characters."
+        }
         fieldErrors = e
         return e.isEmpty()
     }
@@ -170,11 +189,11 @@ class NewRiderViewModel @Inject constructor(
                         riderId = riderId.trim().ifBlank { null },
                         hub = hub.trim().ifBlank { null },
                         mobNo = phone.filter { it.isDigit() }.ifBlank { null },
-                        accountNo = account.filter { it.isDigit() }.ifBlank { null },
+                        accountNo = if (bankByPhoto) null else account.filter { it.isDigit() }.ifBlank { null },
                         accountName = accountName.trim().ifBlank { null },
-                        ifsc = ifsc.trim().uppercase().ifBlank { null },
-                        aadhaarNo = aadhaar.filter { it.isDigit() }.ifBlank { null },
-                        panNo = pan.trim().uppercase().ifBlank { null },
+                        ifsc = if (bankByPhoto) null else ifsc.trim().uppercase().ifBlank { null },
+                        aadhaarNo = if (aadhaarByPhoto) null else aadhaar.filter { it.isDigit() }.ifBlank { null },
+                        panNo = if (panByPhoto) null else pan.trim().uppercase().ifBlank { null },
                         personId = attachTo,
                         allowDuplicateName = allowDuplicate,
                         referredByPersonId = referrer?.personId,
@@ -183,12 +202,29 @@ class NewRiderViewModel @Inject constructor(
                 val photoFailed = photo?.let { uri ->
                     runCatching { photos.uploadPhoto(out.personId, uri) }.isFailure
                 } ?: false
+                // The rider exists now whatever happens below, so a failed
+                // card upload is reported, not thrown: it can be redone from
+                // their page without onboarding them twice.
+                val kycFailed = buildList {
+                    if (aadhaarByPhoto) aadhaarPhoto?.let { uri ->
+                        if (runCatching { photos.uploadKyc(out.personId, "aadhaar", uri) }.isFailure) add("Aadhaar")
+                    }
+                    if (panByPhoto) panPhoto?.let { uri ->
+                        if (runCatching { photos.uploadKyc(out.personId, "pan", uri) }.isFailure) add("PAN")
+                    }
+                    if (bankByPhoto) bankPhoto?.let { uri ->
+                        if (runCatching { photos.uploadKyc(out.personId, "bank_proof", uri) }.isFailure) add("bank")
+                    }
+                }
                 val note = buildString {
                     append(out.name ?: name.trim())
                     if (attachTo != null) append(" added to $company") else append(" added")
                     if (out.riderId.startsWith("QSPEND")) append(" with a placeholder id")
                     out.referredBy?.let { append(" · referred by $it") }
                     if (photoFailed) append(" · photo did not upload, add it from their page")
+                    if (kycFailed.isNotEmpty()) {
+                        append(" · ${kycFailed.joinToString(" and ")} photo did not upload, add it from their page")
+                    }
                 }
                 onDone(out.personId, note)
             } catch (e: HttpException) {
@@ -285,27 +321,62 @@ fun NewRiderScreen(onBack: () -> Unit, onSaved: (Long, String) -> Unit, vm: NewR
                     Spacer(Modifier.height(6.dp))
                     Kicker("Identity")
                     Spacer(Modifier.height(8.dp))
-                    Field("Aadhaar") { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
+                    KycField(
+                        label = "Aadhaar",
+                        byPhoto = vm.aadhaarByPhoto,
+                        onModeChange = { vm.aadhaarByPhoto = it },
+                        photo = vm.aadhaarPhoto,
+                        onPhoto = { vm.aadhaarPhoto = it },
+                    ) { Input(vm.aadhaar, { vm.aadhaar = it }, placeholder = "Twelve digits", keyboard = KeyboardType.Number) }
                     ErrorLine(err["aadhaar"])
-                    Field("PAN") { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
+                    KycField(
+                        label = "PAN",
+                        byPhoto = vm.panByPhoto,
+                        onModeChange = { vm.panByPhoto = it },
+                        photo = vm.panPhoto,
+                        onPhoto = { vm.panPhoto = it },
+                    ) { Input(vm.pan, { vm.pan = it }, placeholder = "ABCDE1234F", cap = KeyboardCapitalization.Characters) }
                     ErrorLine(err["pan"])
                 }
 
                 Spacer(Modifier.height(6.dp))
                 Kicker("Bank account")
                 Spacer(Modifier.height(8.dp))
-                Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = if (vm.attachTo != null) "Already on file — leave blank" else "Digits only", keyboard = KeyboardType.Number) }
-                ErrorLine(err["account"])
-                Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = if (vm.attachTo != null) "Already on file — leave blank" else "HDFC0000123", cap = KeyboardCapitalization.Characters) }
-                ErrorLine(err["ifsc"])
+                if (vm.attachTo == null) {
+                    // A first onboarding may photograph the passbook instead of typing it.
+                    KycField(
+                        label = "Account & IFSC",
+                        byPhoto = vm.bankByPhoto,
+                        onModeChange = { vm.bankByPhoto = it },
+                        photo = vm.bankPhoto,
+                        onPhoto = { vm.bankPhoto = it },
+                        prompt = "passbook front page or a cancelled cheque",
+                    ) {
+                        Column {
+                            Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Digits only", keyboard = KeyboardType.Number) }
+                            ErrorLine(err["account"])
+                            Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "HDFC0000123", cap = KeyboardCapitalization.Characters) }
+                            ErrorLine(err["ifsc"])
+                        }
+                    }
+                    if (vm.bankByPhoto) ErrorLine(err["account"])
+                } else {
+                    Field("Account number") { Input(vm.account, { vm.account = it }, placeholder = "Already on file — leave blank", keyboard = KeyboardType.Number) }
+                    ErrorLine(err["account"])
+                    Field("IFSC") { Input(vm.ifsc, { vm.ifsc = it }, placeholder = "Already on file — leave blank", cap = KeyboardCapitalization.Characters) }
+                    ErrorLine(err["ifsc"])
+                }
                 // The account is often in a relative's name; the bank bounces a
                 // transfer whose beneficiary name does not match. Blank means
                 // the rider's own, which is the common case and stays unstored.
                 Field("Account holder") { Input(vm.accountName, { vm.accountName = it }, placeholder = "Same as the rider", cap = KeyboardCapitalization.Words) }
                 ErrorLine(null)
                 Text(
-                    if (vm.attachTo != null) "Left blank, all three are copied from their other id."
-                    else "Payouts stay blocked until an account is on file; it can be added later.",
+                    when {
+                        vm.attachTo != null -> "Left blank, all three are copied from their other id."
+                        vm.bankByPhoto -> "Payouts stay held until the office types the account in from the photo."
+                        else -> "Payouts stay blocked until an account is on file; it can be added later."
+                    },
                     style = MaterialTheme.typography.bodySmall, color = Qwik.N700,
                 )
 

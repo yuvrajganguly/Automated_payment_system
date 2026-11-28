@@ -38,6 +38,27 @@ class PhotoRepository @Inject constructor(
         )
     }
 
+    /**
+     * An Aadhaar or PAN card (or a passbook / cheque), photographed instead of typed. Kept sharper than
+     * a face (1 800 px, JPEG 88): somebody in the office has to read every
+     * digit off it. Still well under the server's 15 MB cap.
+     */
+    suspend fun uploadKyc(personId: Long, docType: String, uri: Uri) = withContext(Dispatchers.IO) {
+        require(docType in KYC_TYPES) { "Unknown document $docType" }
+        val doc = api.uploadDocument(
+            personId,
+            part(uri, "$docType-$personId.jpg", maxPx = KYC_PX, quality = KYC_QUALITY),
+            docType.toRequestBody("text/plain".toMediaType()),
+        )
+        // A camera shot of somebody's Aadhaar should not outlive its upload in
+        // our cache. Only our own FileProvider files; a gallery pick is the
+        // user's picture and stays where it is.
+        if (uri.authority == context.packageName + ".fileprovider") {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+        doc
+    }
+
     /** The recruiter's own face, for the Profile tab. Same shrink, same field. */
     suspend fun uploadMyPhoto(uri: Uri) = withContext(Dispatchers.IO) {
         api.uploadMyPhoto(part(uri, "recruiter.jpg"))
@@ -66,8 +87,13 @@ class PhotoRepository @Inject constructor(
         }
 
     /** One picture off the phone, shrunk, as a `file` part. */
-    private fun part(uri: Uri, filename: String): MultipartBody.Part {
-        val jpeg = readAndShrink(uri) ?: error("That picture could not be read.")
+    private fun part(
+        uri: Uri,
+        filename: String,
+        maxPx: Int = MAX_PX,
+        quality: Int = QUALITY,
+    ): MultipartBody.Part {
+        val jpeg = readAndShrink(uri, maxPx, quality) ?: error("That picture could not be read.")
         return MultipartBody.Part.createFormData(
             "file",
             filename,
@@ -75,19 +101,19 @@ class PhotoRepository @Inject constructor(
         )
     }
 
-    private fun readAndShrink(uri: Uri): ByteArray? {
+    private fun readAndShrink(uri: Uri, maxPx: Int, quality: Int): ByteArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         val longest = maxOf(bounds.outWidth, bounds.outHeight)
         if (longest <= 0) return null
         val opts = BitmapFactory.Options().apply {
-            inSampleSize = generateSequence(1) { it * 2 }.first { longest / it <= MAX_PX * 2 }
+            inSampleSize = generateSequence(1) { it * 2 }.first { longest / it <= maxPx * 2 }
         }
         val bitmap = context.contentResolver.openInputStream(uri)
             ?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return null
-        val scaled = scale(upright(bitmap, uri))
+        val scaled = scale(upright(bitmap, uri), maxPx)
         val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
+        scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
         if (!scaled.isRecycled) scaled.recycle()
         return out.toByteArray()
     }
@@ -117,10 +143,10 @@ class PhotoRepository @Inject constructor(
         return turned
     }
 
-    private fun scale(bitmap: Bitmap): Bitmap {
+    private fun scale(bitmap: Bitmap, maxPx: Int): Bitmap {
         val longest = maxOf(bitmap.width, bitmap.height)
-        if (longest <= MAX_PX) return bitmap
-        val ratio = MAX_PX.toFloat() / longest
+        if (longest <= maxPx) return bitmap
+        val ratio = maxPx.toFloat() / longest
         return Bitmap.createScaledBitmap(
             bitmap,
             (bitmap.width * ratio).toInt().coerceAtLeast(1),
@@ -132,5 +158,10 @@ class PhotoRepository @Inject constructor(
     private companion object {
         const val MAX_PX = 1_280
         const val QUALITY = 80
+        const val KYC_PX = 1_800
+        const val KYC_QUALITY = 88
+        /** Server doc_types a recruiter photographs: the two ids, and the
+         *  passbook / cancelled cheque that stands in for typed bank details. */
+        val KYC_TYPES = setOf("aadhaar", "pan", "bank_proof")
     }
 }

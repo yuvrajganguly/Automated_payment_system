@@ -189,6 +189,7 @@ MONEY_KEYS = frozenset(
         "rent_collected_this_cycle",
         "rent_missed_this_cycle",
         "applied_to_arrears",
+        "applied_to_dues",
         "applied_to_rent",
         "new_balance",
         "value",
@@ -206,6 +207,11 @@ MONEY_KEYS = frozenset(
         "missed_amount",
         # COD page + Payments reconciliation
         "total_pending",
+        "total_cod_paid",
+        "total_held",
+        "cod_paid",
+        "amount_applied",
+        "cod_still_owed",
         "recent_payout",
         "expected_amount",
         # Dashboard: partial rent collection (charged minus collected, this window)

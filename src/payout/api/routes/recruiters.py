@@ -855,7 +855,7 @@ def recruiter_series(
 @router.get("/{email}/riders")
 def recruiter_riders(
     email: str,
-    status: str = Query("all", pattern="^(all|working|idle|holding)$"),
+    status: str = Query("all", pattern="^(all|working|idle|holding|inactive)$"),
     limit: int = Query(200, ge=1, le=2000),
     user: dict = Depends(get_current_user),
 ) -> list[dict]:
@@ -887,6 +887,9 @@ def recruiter_riders(
         "working": f" AND {active}",
         "idle": f" AND NOT {active}",
         "holding": f" AND {holds}",
+        # Filtered after grouping: a person is inactive only when every id
+        # this recruiter gave them is switched off.
+        "inactive": "",
     }[status]
     from payout.domain.worked import last_worked_sql
 
@@ -911,7 +914,10 @@ def recruiter_riders(
             "ORDER BY rm.created_at DESC, rm.rider_id DESC",
             (email,),
         ).fetchall()
-    return by_person(rows)[:limit]
+    people = by_person(rows)
+    if status == "inactive":
+        people = [p for p in people if not p["on_roster"]]
+    return people[:limit]
 
 
 @router.get("/{email}/evs")

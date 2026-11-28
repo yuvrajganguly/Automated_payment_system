@@ -132,7 +132,20 @@ class EvActionsViewModel @Inject constructor(
     var promptNote by mutableStateOf("")
         private set
 
-    fun clear() { error = null; prompt = null; photoNote = null }
+    fun clear() { error = null; prompt = null; photoNote = null; handoverDate = LocalDate.now() }
+
+    fun clearError() { error = null }
+
+    /** The day the vehicle actually went out. Today unless set back. */
+    var handoverDate by mutableStateOf(LocalDate.now())
+
+    /** Null for today, so the server dates it (the office clock, not the
+     *  phone's); the picked day otherwise. */
+    private fun handoverOrNull(): String? =
+        handoverDate.takeIf { it < LocalDate.now() }?.toString()
+
+    private fun dated(success: String): String =
+        handoverOrNull()?.let { "$success, dated ${shortDate(it)}" } ?: success
 
     /** Leave the question unanswered — the vehicle stays on the pending list. */
     fun dismissPrompt() { prompt = null }
@@ -163,7 +176,8 @@ class EvActionsViewModel @Inject constructor(
     ) {
         val id = evId.trim().uppercase()
         if (id.isBlank()) { error = "The unit needs its number."; return }
-        act(if (personId == null) "$id added" else "$id added and handed over", onDone) {
+        val day = if (personId == null) null else handoverOrNull()
+        act(if (personId == null) "$id added" else dated("$id added and handed over"), onDone) {
             api.createEv(
                 EvUnitIn(
                     evId = id,
@@ -171,13 +185,18 @@ class EvActionsViewModel @Inject constructor(
                     model = model.modelName,
                     notes = notes.trim().ifBlank { null },
                     personId = personId,
+                    handoverDate = day,
                 ),
             )
         }
     }
 
-    fun assign(evId: String, personId: Long, onDone: (String) -> Unit) =
-        act("$evId handed over", onDone) { api.assignEv(EvAssignIn(evId = evId, personId = personId)) }
+    fun assign(evId: String, personId: Long, onDone: (String) -> Unit) {
+        val day = handoverOrNull()
+        act(dated("$evId handed over"), onDone) {
+            api.assignEv(EvAssignIn(evId = evId, personId = personId, handoverDate = day))
+        }
+    }
 
     fun returnUnit(evId: String, onDone: (String) -> Unit) =
         takeBack("$evId returned to the provider", onDone) {
@@ -423,6 +442,8 @@ fun EvUnitSheet(
 
             when (mode) {
                 "give" -> {
+                    HandoverDateField(vm.handoverDate, onChange = { vm.handoverDate = it })
+                    Spacer(Modifier.height(14.dp))
                     Kicker("Give it to")
                     Spacer(Modifier.height(8.dp))
                     SearchField(q, onChange = { vm.riderQuery.value = it }, placeholder = "Rider name, id or phone")
@@ -597,10 +618,13 @@ fun GiveEvSheet(
             Spacer(Modifier.height(6.dp))
             Kicker(personName ?: "This rider")
             Spacer(Modifier.height(14.dp))
+            HandoverDateField(vm.handoverDate, onChange = { vm.handoverDate = it })
+            Spacer(Modifier.height(14.dp))
             Segmented(
                 listOf("Free units", "New unit"),
                 selected = if (adding) 1 else 0,
-                onSelect = { adding = it == 1; vm.clear() },
+                // Not vm.clear(): that would also reset the handover day.
+                onSelect = { adding = it == 1; vm.clearError() },
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(14.dp))

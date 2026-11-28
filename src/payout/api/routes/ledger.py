@@ -164,11 +164,16 @@ def post_rent_payment(body: RentPaymentIn, user: dict = Depends(require_admin)) 
       1. **Arrears first.** Any outstanding ev_arrears.outstanding is paid down
          and logged as RENT_RECOVERED. EV Rent Details reads this as recovered
          rent for the prior cycle.
-      2. **Current cycle rent next.** The remainder is logged as RENT_COLLECTED.
+      2. **Carried dues next.** A negative general balance is paid down and
+         logged as DUES_CLEARED, and the balance moves by that amount.
+      3. **Current cycle rent last.** The remainder is logged as RENT_COLLECTED.
          EV Rent Details reads this as collected rent for the current cycle.
 
-    Either way the running balance is credited by the full amount so the
-    Person ledger and the Arrears/Dues view agree.
+    Same order the payout settles in (rent arrears -> dues). Step 2 is the
+    2026-11-24 double-charge fix: riders pay the Total Dues the console and
+    the app show (arrears + dues), and the dues part used to land in step 3
+    with the balance untouched — so the next payout cleared the same dues
+    again from the rider's earnings.
     """
     if body.amount <= 0:
         raise HTTPException(400, "Amount must be positive.")
@@ -321,7 +326,38 @@ def post_rent_payment(body: RentPaymentIn, user: dict = Depends(require_admin)) 
                 amount=applied_to_arrears,
             )
 
-        # 2) Current cycle rent.
+        # 2) Carried dues (negative general balance). Unlike the two rent
+        # steps this MUST move the balance: the debt lives in the balance, and
+        # leaving it there is what made the next payout collect it a second
+        # time as "Dues Cleared" (2026-11-24).
+        applied_to_dues = 0.0
+        if balance < 0 and remaining > 0:
+            applied_to_dues = round(min(remaining, -balance), 2)
+            balance = balance + applied_to_dues
+            conn.execute(
+                "UPDATE balances SET current_balance=?, last_updated=? WHERE person_id=?",
+                (balance, paid_on, pid),
+            )
+            conn.execute(
+                "INSERT INTO transactions (person_id, rider_id, company, "
+                "cycle_start, cycle_end, event_type, amount, balance_after, "
+                "remarks, created_by) "
+                "VALUES (?,?,?,?,?,'DUES_CLEARED',?,?,?,?)",
+                (
+                    pid,
+                    rider_id,
+                    company,
+                    cs,
+                    ce,
+                    applied_to_dues,
+                    balance,
+                    f"Carried dues paid in cash ({note})",
+                    user["email"],
+                ),
+            )
+            remaining = round(remaining - applied_to_dues, 2)
+
+        # 3) Current cycle rent.
         collected_txn_id = None
         if remaining > 0:
             applied_to_rent = round(remaining, 2)
@@ -464,6 +500,7 @@ def post_rent_payment(body: RentPaymentIn, user: dict = Depends(require_admin)) 
     return {
         "person_id": pid,
         "applied_to_arrears": applied_to_arrears,
+        "applied_to_dues": applied_to_dues,
         "applied_to_rent": applied_to_rent,
         "new_balance": balance,
         "covered_window": {"start": cs, "end": ce}

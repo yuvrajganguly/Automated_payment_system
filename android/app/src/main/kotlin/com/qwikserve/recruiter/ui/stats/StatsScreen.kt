@@ -102,7 +102,7 @@ class StatsViewModel @Inject constructor(private val api: PayoutApi) : ViewModel
     /* The drilldown behind a tile. */
     var drill by mutableStateOf<Period?>(null)
         private set
-    var drillStatus by mutableStateOf("all") // all | working | idle
+    var drillStatus by mutableStateOf("all") // all | working | idle | inactive
         private set
     var drillRows by mutableStateOf<List<RecruiterRider>>(emptyList())
         private set
@@ -435,9 +435,9 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
             // offer ways to stop showing what was tapped.
             if (!period.fixedStatus) {
                 Segmented(
-                    listOf("All", "Working", "Idle"),
-                    selected = when (vm.drillStatus) { "working" -> 1; "idle" -> 2; else -> 0 },
-                    onSelect = { vm.chooseDrillStatus(listOf("all", "working", "idle")[it]) },
+                    listOf("All", "Working", "Idle", "Inactive"),
+                    selected = when (vm.drillStatus) { "working" -> 1; "idle" -> 2; "inactive" -> 3; else -> 0 },
+                    onSelect = { vm.chooseDrillStatus(listOf("all", "working", "idle", "inactive")[it]) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
@@ -458,6 +458,7 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                     vm.drillStatus == "working" ->
                         "Nobody from this period was in their company's last payout."
                     vm.drillStatus == "idle" -> "Everybody from this period is still working."
+                    vm.drillStatus == "inactive" -> "Nobody from this period has been switched off."
                     else -> "Nobody onboarded in this period."
                 },
             )
@@ -485,7 +486,14 @@ private fun DrilldownSheet(period: Period, vm: StatsViewModel, onOpenPerson: (Lo
                                 if (period == Period.HOLDING && r.evId != null) {
                                     Tag(r.evId, accent = true)
                                 } else {
-                                    Tag(if (r.working) "working" else "idle", accent = r.working)
+                                    Tag(
+                                        when {
+                                            !r.onRoster -> "inactive"
+                                            r.working -> "working"
+                                            else -> "idle"
+                                        },
+                                        accent = r.onRoster && r.working,
+                                    )
                                 }
                             }
                         },

@@ -1,5 +1,6 @@
 package com.qwikserve.recruiter.ui.riders
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -71,8 +73,13 @@ enum class Scope { MINE, ALL }
  * cached with the rest of the roster, so this filter works with no signal
  * like the zone and Mine/All ones do.
  */
-enum class Activity(val label: String, val working: Boolean?) {
-    ALL("All", null), WORKING("Working", true), IDLE("Idle", false);
+enum class Activity(val label: String, val working: Boolean?, val includeInactive: Boolean) {
+    ALL("All", null, true),
+    WORKING("Working", true, false),
+    IDLE("Idle", false, false),
+    /** Every id they hold is switched off. Filtered per person after grouping,
+     *  so somebody with one live id and one dead one is not "inactive". */
+    INACTIVE("Inactive", null, true);
 
     companion object {
         fun of(label: String): Activity = entries.firstOrNull { it.label == label } ?: ALL
@@ -168,9 +175,9 @@ class RidersViewModel @Inject constructor(
                     // theirs, so filtering again here can only subtract.
                     zone = if (f.scope == Scope.ALL && f.zone != "All" && !fenced) f.zone else null,
                     working = f.activity.working,
-                    // An inactive id still exists and blocks duplicate onboarding.
-                    // Keep it visible in the roster without widening the zone.
-                    includeInactive = true,
+                    // All and Inactive carry switched-off ids; Working and
+                    // Idle are about riders who are still on the roster.
+                    includeInactive = f.activity.includeInactive,
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -212,11 +219,15 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
     val rows by vm.riders.collectAsStateWithLifecycle()
     // One entry per person. remember() keys on the filtered list, so the
     // grouping runs when the list changes and not on every recomposition.
-    val riders = remember(rows) { rows.byPerson() }
     val q by vm.query.collectAsStateWithLifecycle()
     val scope by vm.scope.collectAsStateWithLifecycle()
     val zone by vm.zone.collectAsStateWithLifecycle()
     val activity by vm.activity.collectAsStateWithLifecycle()
+    val riders = remember(rows, activity) {
+        rows.byPerson().let { people ->
+            if (activity == Activity.INACTIVE) people.filter { !it.isActive } else people
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -247,18 +258,21 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Kicker("Working")
+                Kicker("Status")
                 Spacer(Modifier.width(10.dp))
                 Chips(
                     Activity.entries.map { it.label },
                     activity.label,
                     onSelect = { vm.activity.value = Activity.of(it) },
+                    // Four chips beside a label is right at the edge of a
+                    // 360 dp phone; scroll rather than clip on a smaller one.
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
                 )
             }
             SearchField(q, onChange = { vm.query.value = it }, placeholder = "Name, rider id, phone or hub")
-            if (q.isNotBlank()) {
+            if (q.isNotBlank() && !activity.includeInactive) {
                 Text(
-                    "This view includes inactive riders.",
+                    "Inactive riders are hidden — set Status to All or Inactive to search them.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Qwik.N700,
                 )
@@ -274,13 +288,15 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                         q.isNotBlank() -> buildString {
                             append("No rider matches \"$q\" in this view.")
                             if (scope == Scope.MINE) append(" Try All riders.")
-                            if (activity != Activity.ALL) append(" Set Working to All.")
+                            if (activity != Activity.ALL) append(" Set Status to All.")
                             append(" Pull down to refresh. If they already exist, ask the office to check their store and zone.")
                         }
                         activity == Activity.WORKING ->
                             "Nobody here was in their company's last payout. Try All."
                         activity == Activity.IDLE ->
                             "Everybody here is working — nothing idle to chase."
+                        activity == Activity.INACTIVE ->
+                            "No inactive riders here — every rider in this view has a live id."
                         scope == Scope.MINE -> "You haven't onboarded anyone yet. Riders you add will show here."
                         zone != "All" -> "No riders at $zone stores yet — or their hubs still need a zone on the web."
                         else -> "No riders yet."
@@ -318,7 +334,7 @@ fun RidersScreen(onOpenPerson: (Long) -> Unit, onNewRider: () -> Unit, vm: Rider
                                     }
                                     Tag(
                                         when {
-                                            !r.isActive -> "inactive id"
+                                            !r.isActive -> "inactive"
                                             r.working == true -> "working"
                                             else -> "idle"
                                         },

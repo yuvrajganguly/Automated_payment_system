@@ -715,6 +715,93 @@ def delete_rider(
     }
 
 
+@router.get("/active")
+def active_riders(
+    company: str | None = None,
+    include_inactive_companies: bool = False,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Active riders: exactly the rider ids that were in their own company's
+    most recent payout, company by company.
+
+    "Most recent payout" is the company's last committed run in
+    ``company_cycles`` (ad-hoc surge runs never write there, so they do not
+    count). A rider id is listed under that company when the run paid it — a
+    PAYOUT row for that company and cycle. Each company is judged on its own
+    last run, so a company that has not been run for three weeks still shows
+    the riders of that run rather than nobody.
+
+    Companies the office has switched off are left out unless
+    ``include_inactive_companies``. Recruiters get the same list without the
+    payout amounts.
+    """
+    is_recruiter = user.get("role") == "recruiter"
+    with get_connection() as conn:
+        last = conn.execute(
+            "SELECT cc.company, cc.cycle_start, cc.cycle_end, cc.processed_at "
+            "FROM company_cycles cc "
+            "LEFT JOIN companies c ON c.company_name = cc.company "
+            "WHERE cc.id = (SELECT _x.id FROM company_cycles _x "
+            "               WHERE _x.company = cc.company "
+            "               ORDER BY _x.cycle_end DESC, _x.cycle_start DESC, _x.id DESC LIMIT 1) "
+            + ("" if include_inactive_companies else "AND COALESCE(c.is_active, 1) = 1 ")
+            + "ORDER BY cc.company"
+        ).fetchall()
+        companies = []
+        riders = []
+        for lc in last:
+            if company and lc["company"] != company:
+                continue
+            rows = conn.execute(
+                "SELECT t.rider_id, t.person_id, SUM(t.amount) AS payout, "
+                "       MAX(rm.name) AS rider_name, MAX(pr.display_name) AS display_name, "
+                "       MAX(rm.hub) AS hub, MAX(rm.mob_no) AS mob_no, "
+                "       MAX(rm.is_active) AS id_active, "
+                "       (SELECT a.ev_id FROM ev_assignments a "
+                "         WHERE a.person_id = t.person_id AND a.returned_date IS NULL "
+                "         ORDER BY a.assignment_id DESC LIMIT 1) AS ev_id "
+                "FROM transactions t "
+                "LEFT JOIN rider_master rm ON rm.rider_id = t.rider_id AND rm.company = t.company "
+                "LEFT JOIN person_registry pr ON pr.person_id = t.person_id "
+                "WHERE t.company = ? AND t.cycle_start = ? AND t.cycle_end = ? "
+                "  AND t.event_type = 'PAYOUT' "
+                "GROUP BY t.rider_id, t.person_id "
+                "ORDER BY MAX(pr.display_name), t.rider_id",
+                (lc["company"], lc["cycle_start"], lc["cycle_end"]),
+            ).fetchall()
+            companies.append(
+                {
+                    "company": lc["company"],
+                    "cycle_start": lc["cycle_start"],
+                    "cycle_end": lc["cycle_end"],
+                    "processed_at": lc["processed_at"],
+                    "riders": len(rows),
+                }
+            )
+            for r in rows:
+                item = {
+                    "company": lc["company"],
+                    "cycle_start": lc["cycle_start"],
+                    "cycle_end": lc["cycle_end"],
+                    "rider_id": r["rider_id"],
+                    "person_id": r["person_id"],
+                    "name": r["display_name"] or r["rider_name"] or "",
+                    "hub": r["hub"],
+                    "mob_no": r["mob_no"],
+                    "ev_id": r["ev_id"],
+                    # The id may have been switched off since the payout ran.
+                    "id_active": bool(r["id_active"]) if r["id_active"] is not None else None,
+                }
+                if not is_recruiter:
+                    item["payout"] = int(r["payout"] or 0)
+                riders.append(item)
+    return {
+        "companies": companies,
+        "riders": riders,
+        "people": len({r["person_id"] for r in riders if r["person_id"] is not None}),
+    }
+
+
 @router.get("/duplicate-check")
 def duplicate_check(
     name: str = Query(..., min_length=1),

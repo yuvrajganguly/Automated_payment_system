@@ -474,3 +474,102 @@ def test_identity_numbers_set_validated_and_unique(db, client):
         headers=h,
     )
     assert r.status_code == 409 and "Id Rider" in r.text
+
+
+# ── 2026-11-24: backdated handovers, inactive riders, KYC by photo ───────────
+
+
+def test_recruiter_can_backdate_a_handover_but_not_into_the_future(db, client):
+    from datetime import date, timedelta
+
+    h = _login(client, _RECRUITER)
+    pid = client.post(
+        "/api/riders", json={"company": "Jiffy", "name": "Back Dated"}, headers=h
+    ).json()["person_id"]
+    past = (date.today() - timedelta(days=6)).isoformat()
+    r = client.post(
+        "/api/evs",
+        json={
+            "ev_id": "KOLBACK1",
+            "provider": "Blive",
+            "model": "Standard",
+            "person_id": pid,
+            "handover_date": past,
+        },
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["handover_date"] == past
+    row = db.execute(
+        "SELECT details FROM activity_log WHERE action='ev.create' AND entity_id='KOLBACK1'"
+    ).fetchone()
+    assert '"backdated_days": 6' in row["details"]
+
+    # the same EV, returned and handed to someone else: not before the return
+    returned = (date.today() - timedelta(days=2)).isoformat()
+    r = client.post(
+        "/api/evs/return", json={"ev_id": "KOLBACK1", "returned_date": returned}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    pid2 = client.post(
+        "/api/riders", json={"company": "Jiffy", "name": "Second Holder"}, headers=h
+    ).json()["person_id"]
+    too_early = (date.today() - timedelta(days=4)).isoformat()
+    r = client.post(
+        "/api/evs/assign",
+        json={"ev_id": "KOLBACK1", "person_id": pid2, "handover_date": too_early},
+        headers=h,
+    )
+    assert r.status_code == 409, r.text
+    future = (date.today() + timedelta(days=5)).isoformat()
+    r = client.post(
+        "/api/evs/assign",
+        json={"ev_id": "KOLBACK1", "person_id": pid2, "handover_date": future},
+        headers=h,
+    )
+    assert r.status_code == 400, r.text
+    r = client.post(
+        "/api/evs/assign",
+        json={"ev_id": "KOLBACK1", "person_id": pid2, "handover_date": returned},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["handover_date"] == returned
+
+
+def test_recruiter_sees_inactive_riders(db, client):
+    h = _login(client, _RECRUITER)
+    on = client.post("/api/riders", json={"company": "Jiffy", "name": "Still On"}, headers=h)
+    off = client.post("/api/riders", json={"company": "Jiffy", "name": "Switched Off"}, headers=h)
+    assert on.status_code == 201 and off.status_code == 201
+    r = client.patch(
+        f"/api/riders/{off.json()['rider_id']}?company=Jiffy",
+        json={"is_active": False},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    # the roster the app caches carries the inactive id
+    names = {x["name"]: x["is_active"] for x in client.get("/api/riders", headers=h).json()}
+    assert names.get("Switched Off") is False and names.get("Still On") is True
+    # and "My numbers" can list just the inactive ones
+    r = client.get("/api/recruiters/me/riders?status=inactive", headers=h)
+    assert r.status_code == 200, r.text
+    assert [x["name"] for x in r.json()] == ["Switched Off"]
+
+
+def test_recruiter_uploads_aadhaar_and_pan_photos(db, client):
+    h = _login(client, _RECRUITER)
+    pid = client.post(
+        "/api/riders", json={"company": "Jiffy", "name": "Photo Kyc"}, headers=h
+    ).json()["person_id"]
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 64
+    for kind in ("aadhaar", "pan"):
+        r = client.post(
+            f"/api/persons/{pid}/documents",
+            files={"file": (f"{kind}.jpg", io.BytesIO(jpeg), "image/jpeg")},
+            data={"doc_type": kind},
+            headers=h,
+        )
+        assert r.status_code == 201, r.text
+    docs = client.get(f"/api/persons/{pid}/documents", headers=h).json()
+    assert {d["doc_type"] for d in docs} == {"aadhaar", "pan"}

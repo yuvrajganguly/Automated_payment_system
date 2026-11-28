@@ -274,10 +274,26 @@ CREATE TABLE IF NOT EXISTS cod_holds (
     worker_name  TEXT,
     cleared_at   TEXT,           -- NULL until the operator marks the COD collected
     cleared_by   TEXT,
-    created_at   TEXT DEFAULT (datetime('now'))
+    created_at   TEXT DEFAULT (datetime('now')),
+    -- Collected so far (paise). COD can be paid in parts: still owed on a row
+    -- is amount - paid, and the row is cleared when paid reaches amount.
+    paid         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cod_cycle
     ON cod_holds (company, cycle_start, cycle_end, rider_id);
+
+-- ── cod_payments ────────────────────────────────────────────────────────────
+-- Every COD collection, whole or part, as the operator recorded it. The
+-- amount is spread over the person's open cod_holds rows oldest first.
+CREATE TABLE IF NOT EXISTS cod_payments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id   INTEGER NOT NULL REFERENCES person_registry(person_id),
+    amount      INTEGER NOT NULL,          -- paise
+    paid_on     TEXT NOT NULL,
+    note        TEXT,
+    created_by  TEXT,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
 
 -- ── hub_codes ───────────────────────────────────────────────────────────────
 -- Store/hub code → name, learnt from every payout file that carries both

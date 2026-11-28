@@ -52,6 +52,7 @@ export const WORKSPACES: Workspace[] = [
     label: 'People',
     pages: [
       { to: '/riders', label: 'Riders' },
+      { to: '/active-riders', label: 'Active riders' },
       { to: '/inactive', label: 'Inactive' },
       { to: '/requests', label: 'My Requests', recruiterOnly: true },
     ],

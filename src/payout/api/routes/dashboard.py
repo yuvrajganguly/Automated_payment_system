@@ -986,7 +986,8 @@ def dashboard_breakdown(
             title = "COD held and never cleared (live, all time)"
             columns = ["rider_id", "person_id", "company", "amount", "cycle_end", "created_at"]
             sql = (
-                "SELECT ch.rider_id, ch.person_id, ch.company, ch.amount, "
+                "SELECT ch.rider_id, ch.person_id, ch.company, "
+                "       ch.amount - COALESCE(ch.paid, 0) AS amount, "
                 "       ch.cycle_end, ch.created_at "
                 "FROM cod_holds ch WHERE ch.cleared_at IS NULL "
                 "ORDER BY ch.created_at ASC LIMIT ?"

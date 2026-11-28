@@ -5,6 +5,11 @@ their total pending COD, the most recent payout we released to them, and a
 breakdown of the individual entries. Marking a rider's COD as cleared closes
 the entries and optionally posts a ledger adjustment to credit / debit the
 person's general balance.
+
+COD can also be paid in parts (``POST /cod/pay``): the amount is spread over
+the open entries oldest first, an entry closes when it is fully paid, and the
+rest stays pending with what is still owed. "Pending" everywhere on this page
+is ``amount - paid``.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from payout.api.schemas import ExportSelection
 from payout.db import get_connection
 from payout.domain.adjustments import post_adjustment
 from payout.domain.arrears import settle_arrears_from_credit
+from payout.domain.holds import CodPaymentError, apply_cod_payment
 from payout.exports import xlsx_response
 from payout.money import to_paise
 
@@ -32,7 +38,9 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
         rows = conn.execute(
             """
             SELECT pr.person_id, pr.display_name,
-                   COALESCE(SUM(ch.amount), 0)     AS total_pending,
+                   COALESCE(SUM(ch.amount - COALESCE(ch.paid, 0)), 0) AS total_pending,
+                   COALESCE(SUM(COALESCE(ch.paid, 0)), 0) AS total_cod_paid,
+                   COALESCE(SUM(ch.amount), 0)     AS total_held,
                    COUNT(ch.id)                    AS entry_count,
                    MIN(ch.cycle_start)             AS earliest_cycle_start,
                    MAX(ch.cycle_end)               AS latest_cycle_end,
@@ -52,7 +60,7 @@ def list_cod(_: dict = Depends(get_current_user)) -> list[dict]:
             JOIN person_registry pr ON pr.person_id = ch.person_id
             WHERE ch.cleared_at IS NULL
             GROUP BY pr.person_id, pr.display_name
-            HAVING COALESCE(SUM(ch.amount), 0) > 0
+            HAVING COALESCE(SUM(ch.amount - COALESCE(ch.paid, 0)), 0) > 0
             ORDER BY total_pending DESC
             """
         ).fetchall()
@@ -113,7 +121,9 @@ def list_cod_entries(person_id: int, _: dict = Depends(get_current_user)) -> lis
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, cycle_start, cycle_end, company, rider_id, order_number, "
-            "       amount, payment_mode, txn_status, source, cleared_at, cleared_by "
+            "       amount, COALESCE(paid, 0) AS cod_paid, "
+            "       amount - COALESCE(paid, 0) AS pending, "
+            "       payment_mode, txn_status, source, cleared_at, cleared_by "
             "FROM cod_holds WHERE person_id = ? "
             "ORDER BY cleared_at IS NULL DESC, cycle_end DESC, id DESC",
             (person_id,),
@@ -144,13 +154,13 @@ def clear_cod(body: CodClearIn, user: dict = Depends(require_admin)) -> dict:
             placeholders = ",".join("?" * len(body.entry_ids))
             params = [cleared_at, user["email"], body.person_id, *body.entry_ids]
             cur = conn.execute(
-                f"UPDATE cod_holds SET cleared_at=?, cleared_by=? "
+                f"UPDATE cod_holds SET cleared_at=?, cleared_by=?, paid=amount "
                 f"WHERE person_id=? AND cleared_at IS NULL AND id IN ({placeholders})",
                 params,
             )
         else:
             cur = conn.execute(
-                "UPDATE cod_holds SET cleared_at=?, cleared_by=? "
+                "UPDATE cod_holds SET cleared_at=?, cleared_by=?, paid=amount "
                 "WHERE person_id=? AND cleared_at IS NULL",
                 (cleared_at, user["email"], body.person_id),
             )
@@ -184,3 +194,48 @@ def clear_cod(body: CodClearIn, user: dict = Depends(require_admin)) -> dict:
         "new_balance": new_balance,
         "arrears_settled_from_credit": settled,
     }
+
+
+class CodPayIn(BaseModel):
+    person_id: int
+    amount: float  # rupees collected now — all or part of what is owed
+    paid_on: str | None = None
+    note: str | None = None
+    entry_ids: list[int] | None = None  # default: every open entry, oldest first
+
+
+@router.post("/pay")
+def pay_cod(body: CodPayIn, user: dict = Depends(require_admin)) -> dict:
+    """Record COD collected from a rider, whole or in part."""
+    paid_on = body.paid_on or date.today().isoformat()
+    with get_connection() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM person_registry WHERE person_id=?", (body.person_id,)
+        ).fetchone():
+            raise HTTPException(404, f"Person {body.person_id} not found")
+        try:
+            out = apply_cod_payment(
+                conn,
+                body.person_id,
+                to_paise(body.amount),
+                paid_on=paid_on,
+                created_by=user["email"],
+                note=body.note,
+                entry_ids=body.entry_ids,
+            )
+        except CodPaymentError as e:
+            raise HTTPException(400, str(e)) from e
+        conn.commit()
+    return {"person_id": body.person_id, **out}
+
+
+@router.get("/{person_id}/payments")
+def list_cod_payments(person_id: int, _: dict = Depends(get_current_user)) -> list[dict]:
+    """COD collections recorded for one person, newest first."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, amount, paid_on, note, created_by, created_at FROM cod_payments "
+            "WHERE person_id=? ORDER BY id DESC",
+            (person_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]

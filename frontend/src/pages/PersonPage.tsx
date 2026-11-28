@@ -167,6 +167,8 @@ export function PersonPage() {
         </div>
       )}
 
+      {seesMoney && <PersonCod personId={person.person_id} canPay={isAdmin} />}
+
       <Section title={`EV History (${person.ev_history?.length ?? 0})`}>
         {!person.ev_history?.length ? (
           <p className="text-sm text-slate-500 px-1 py-2">
@@ -370,12 +372,13 @@ function RentPaidInCashCard({ personId, onPosted }: { personId: number; onPosted
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const r = await api.post<{ applied_to_arrears: number; applied_to_rent: number }>(
+      const r = await api.post<{ applied_to_arrears: number; applied_to_dues?: number; applied_to_rent: number }>(
         '/ledger/rent-payment', { person_id: personId, amount: Number(amount), paid_on: paidOn },
       )
       setTone('ok')
       const parts = []
       if (r.applied_to_arrears) parts.push(`₹${r.applied_to_arrears} against arrears`)
+      if (r.applied_to_dues) parts.push(`₹${r.applied_to_dues} against carried dues`)
       if (r.applied_to_rent) parts.push(`₹${r.applied_to_rent} for the current week`)
       setMsg(parts.length ? `Recorded: ${parts.join(', ')}.` : 'Recorded.')
       setAmount(''); onPosted()
@@ -827,6 +830,172 @@ function MoneyRequestCard({ personId }: { personId: number }) {
           <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>
         )}
       </form>
+    </div>
+  )
+}
+
+interface CodEntryRow {
+  id: number
+  cycle_start: string
+  cycle_end: string
+  company: string
+  rider_id: string | null
+  order_number: string | null
+  amount: number
+  cod_paid?: number
+  pending?: number
+  cleared_at: string | null
+}
+interface CodPaymentRow {
+  id: number
+  amount: number
+  paid_on: string
+  note: string | null
+  created_by: string | null
+}
+
+/** The COD this rider holds, on their own page: every entry with what is paid
+ *  and what is left, the collections recorded so far, and — for admins — a
+ *  form to record cash handed over, all of it or part. A part payment goes to
+ *  the oldest cycle first (``POST /cod/pay``); the COD page does the same from
+ *  the list of everybody. */
+function PersonCod({ personId, canPay }: { personId: number; canPay: boolean }) {
+  const [entries, setEntries] = useState<CodEntryRow[] | null>(null)
+  const [payments, setPayments] = useState<CodPaymentRow[]>([])
+  const [showCleared, setShowCleared] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [paidOn, setPaidOn] = useState(todayISO())
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [tone, setTone] = useState<'ok' | 'err'>('ok')
+
+  function load() {
+    api.get<CodEntryRow[]>(`/cod/${personId}/entries`).then(setEntries).catch(() => setEntries([]))
+    api.get<CodPaymentRow[]>(`/cod/${personId}/payments`).then(setPayments).catch(() => setPayments([]))
+  }
+  useEffect(load, [personId])
+  useLiveReload(load, ['cod', 'person'])
+
+  if (entries === null) return null
+  const left = (e: CodEntryRow) => (e.cleared_at ? 0 : (e.pending ?? e.amount))
+  const open = entries.filter((e) => !e.cleared_at && left(e) > 0)
+  const owed = open.reduce((a, e) => a + left(e), 0)
+  // Nothing ever held: say nothing rather than add an empty table to every page.
+  if (entries.length === 0) return null
+  const shown = showCleared ? entries : open
+
+  async function pay(e: FormEvent) {
+    e.preventDefault(); setMsg(null)
+    const amt = parseFloat(amount)
+    if (!Number.isFinite(amt) || amt <= 0) { setTone('err'); setMsg('Enter the amount collected.'); return }
+    if (amt > owed + 0.001) { setTone('err'); setMsg(`That is more than the ₹${fmt(owed)} still owed.`); return }
+    setBusy(true)
+    try {
+      const r = await api.post<{ cod_still_owed: number; entries_cleared: number }>('/cod/pay', {
+        person_id: personId, amount: amt, paid_on: paidOn, note: note.trim() || undefined,
+      })
+      setTone('ok')
+      setMsg(r.cod_still_owed > 0
+        ? `Recorded ₹${fmt(amt)}. ₹${fmt(r.cod_still_owed)} still owed.`
+        : `Recorded ₹${fmt(amt)}. COD fully paid.`)
+      setAmount(''); setNote('')
+      load()
+    } catch (err) {
+      setTone('err'); setMsg(err instanceof Error ? err.message : 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-baseline justify-between mb-2">
+        <h3 className="font-semibold">
+          COD{' '}
+          <span className={owed > 0 ? 'text-red-300' : 'text-emerald-300'}>
+            {owed > 0 ? `₹${fmt(owed)} owed` : 'nothing owed'}
+          </span>
+          <span className="text-slate-500 text-sm font-normal"> · {open.length} open of {entries.length}</span>
+        </h3>
+        {entries.length > open.length && (
+          <button type="button" onClick={() => setShowCleared(!showCleared)}
+                  className="text-xs text-brand underline">
+            {showCleared ? 'Hide cleared' : 'Show cleared'}
+          </button>
+        )}
+      </div>
+      <div className="panel overflow-x-auto">
+        {shown.length === 0 ? (
+          <p className="text-sm text-slate-500 px-3 py-2">All COD on this rider is paid.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-100 text-left">
+              <tr>
+                <Th>Cycle</Th><Th>Company</Th><Th>Rider ID</Th><Th>Order #</Th>
+                <Th right>Amount</Th><Th right>Paid</Th><Th right>Left</Th><Th>Status</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((e) => (
+                <tr key={e.id} className="border-t">
+                  <Td className="text-xs">{e.cycle_start} → {e.cycle_end}</Td>
+                  <Td>{e.company}</Td>
+                  <Td>{e.rider_id ?? '-'}</Td>
+                  <Td>{e.order_number ?? '-'}</Td>
+                  <Td right>{fmt(e.amount)}</Td>
+                  <Td right>{(e.cod_paid ?? 0) > 0 ? fmt(e.cod_paid ?? 0) : '-'}</Td>
+                  <Td right className={left(e) > 0 ? 'text-red-300 font-medium' : ''}>
+                    {left(e) > 0 ? fmt(left(e)) : '-'}
+                  </Td>
+                  <Td className="text-xs">
+                    {e.cleared_at ? `cleared ${e.cleared_at}` : (e.cod_paid ?? 0) > 0 ? 'part paid' : 'pending'}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {payments.length > 0 && (
+          <div className="border-t px-3 py-2 text-xs text-slate-400">
+            <span className="font-medium text-slate-300">Collected: </span>
+            {payments.map((p, i) => (
+              <span key={p.id}>
+                {i > 0 && ' · '}₹{fmt(p.amount)} on {p.paid_on}
+                {p.note ? ` (${p.note})` : ''}
+              </span>
+            ))}
+          </div>
+        )}
+        {canPay && owed > 0 && (
+          <form onSubmit={pay} className="border-t px-3 py-3 flex flex-wrap gap-2 items-end">
+            <label className="block text-sm">
+              <span className="block text-xs">Collected ₹ *</span>
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" step="0.01" min="0"
+                     max={owed} placeholder={fmt(owed)} className="border rounded px-3 py-1.5 w-36" />
+            </label>
+            <button type="button" onClick={() => setAmount(String(owed))}
+                    className="text-xs text-brand underline pb-2">all of it</button>
+            <label className="block text-sm">
+              <span className="block text-xs">On</span>
+              <input type="date" value={paidOn} max={todayISO()} onChange={(e) => setPaidOn(e.target.value)}
+                     className="border rounded px-3 py-1.5" />
+            </label>
+            <label className="block text-sm flex-1 min-w-[180px]">
+              <span className="block text-xs">Note</span>
+              <input value={note} onChange={(e) => setNote(e.target.value)}
+                     placeholder="e.g. cash at the store, rest next week"
+                     className="w-full border rounded px-3 py-1.5" />
+            </label>
+            <button type="submit" disabled={busy || !amount}
+                    className="bg-brand text-white px-3 py-1.5 rounded disabled:opacity-50">
+              {busy ? 'Recording…' : 'Record payment'}
+            </button>
+            {msg && <span className={'text-xs ' + (tone === 'err' ? 'text-red-400' : 'text-emerald-300')}>{msg}</span>}
+            <p className="w-full text-xs text-slate-500">
+              Part payments are fine — the money goes to the oldest cycle first and the rest stays owed.
+            </p>
+          </form>
+        )}
+      </div>
     </div>
   )
 }

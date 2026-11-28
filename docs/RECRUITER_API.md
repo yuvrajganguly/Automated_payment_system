@@ -253,6 +253,9 @@ GET   /evs/{ev_id}/profile                    unit + assignment history + mainte
 GET   /evs/models                             provider/model rate card
 POST  /evs                                    {"ev_id","provider","model","notes"?,"person_id"?,"handover_date"?}  — with person_id the unit is handed over in the same call
 POST  /evs/assign                             {"ev_id","person_id"} or {"ev_id","rider_id","company"} (+ "handover_date"?)
+      handover_date (both routes): may be backdated, never in the future (one day of UTC/IST slack) → 400;
+      not before this EV's or this person's last return → 409. The activity log records "backdated_days";
+      days before today are not billed automatically — the office settles them (back-rent).
 POST  /evs/return                             {"ev_id"} or {"rider_id","company"} (+ "returned_date"?)  — retire to provider; works for in-use or spare
 POST  /evs/to-spare                           same body — take back into the pool; on a RETURNED unit brings it back as spare
 GET   /evs/maintenance                        log
@@ -445,7 +448,7 @@ GET /recruiters?days=30                    admin only — every recruiter, best 
 GET /recruiters/{email}/series?grain=day|week|month&buckets=12
       → {email, grain, active_within_days,
          series: [{bucket, onboarded, still_working, evs_deployed, km}], totals}
-GET /recruiters/{email}/riders?status=all|working|idle
+GET /recruiters/{email}/riders?status=all|working|idle|holding|inactive   (inactive = every id they onboarded is switched off)
 GET /recruiters/{email}/evs                every EV they handed over
 ```
 

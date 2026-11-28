@@ -196,14 +196,59 @@ def persist_holds(
     """Write the cycle's COD hold detail to the cod_holds table.
 
     Replaces whatever this (company, cycle) wrote before, so re-running a cycle
-    (``force=true``) does not double the HOLD sheet's per-rider totals."""
+    (``force=true``) does not double the HOLD sheet's per-rider totals.
+
+    What was already collected survives the rewrite: a row matching an old one
+    (same rider, order and amount) keeps its ``paid`` and cleared stamp, and
+    any part-payment left over from rows that changed is re-spread over the
+    rider's new rows oldest first — re-running a cycle must not un-collect
+    cash the office already holds."""
     cs = cycle_start.isoformat() if hasattr(cycle_start, "isoformat") else str(cycle_start)
     ce = cycle_end.isoformat() if hasattr(cycle_end, "isoformat") else str(cycle_end)
+    old = conn.execute(
+        "SELECT rider_id, order_number, amount, COALESCE(paid, 0) AS paid, "
+        "       cleared_at, cleared_by "
+        "FROM cod_holds WHERE company=? AND cycle_start=? AND cycle_end=? ORDER BY id",
+        (company, cs, ce),
+    ).fetchall()
+    exact: dict[tuple, list] = {}
+    for o in old:
+        exact.setdefault((o["rider_id"], o["order_number"] or "", int(o["amount"])), []).append(o)
     conn.execute(
         "DELETE FROM cod_holds WHERE company=? AND cycle_start=? AND cycle_end=?",
         (company, cs, ce),
     )
+    carried: list[tuple] = []  # (rider_id, amount, paid, cleared_at, cleared_by)
     for ln in hold_result.lines:
+        match = exact.get((ln.rider_id, ln.order_number or "", int(ln.amount)))
+        o = match.pop(0) if match else None
+        carried.append(
+            (
+                ln.rider_id,
+                int(ln.amount),
+                int(o["paid"]) if o else 0,
+                o["cleared_at"] if o else None,
+                o["cleared_by"] if o else None,
+            )
+        )
+    # Part-payments on rows that did not come back: spread over the rider's
+    # new rows that are still open.
+    leftover: dict[str, int] = {}
+    for rows in exact.values():
+        for o in rows:
+            if o["paid"] and not o["cleared_at"]:
+                leftover[o["rider_id"]] = leftover.get(o["rider_id"], 0) + int(o["paid"])
+    for i, (rid, amt, paid, cat, cby) in enumerate(carried):
+        extra = leftover.get(rid, 0)
+        if extra and not cat:
+            take = min(extra, amt - paid)
+            leftover[rid] = extra - take
+            carried[i] = (rid, amt, paid + take, cat, cby)
+    for ln, (_rid, _amt, paid, cleared_at, cleared_by) in zip(
+        hold_result.lines, carried, strict=True
+    ):
+        if paid >= int(ln.amount) and not cleared_at and int(ln.amount) > 0:
+            cleared_at, cleared_by = date.today().isoformat(), "cod-payment"
         pr = conn.execute(
             "SELECT person_id FROM rider_master WHERE rider_id=? AND company=?",
             (ln.rider_id, company),
@@ -211,8 +256,8 @@ def persist_holds(
         conn.execute(
             "INSERT INTO cod_holds (cycle_start, cycle_end, company, rider_id, "
             "person_id, worker_code, order_number, amount, payment_mode, txn_status, source, "
-            "hub, hub_code, worker_name) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "hub, hub_code, worker_name, paid, cleared_at, cleared_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 cs,
                 ce,
@@ -228,5 +273,87 @@ def persist_holds(
                 ln.hub,
                 ln.hub_code,
                 ln.name,
+                paid,
+                cleared_at,
+                cleared_by,
             ),
         )
+
+
+class CodPaymentError(ValueError):
+    """A COD payment that cannot be applied (nothing owed, or more than owed)."""
+
+
+def apply_cod_payment(
+    conn: sqlite3.Connection,
+    person_id: int,
+    amount: int,
+    *,
+    paid_on: str,
+    created_by: str,
+    note: str | None = None,
+    entry_ids: list[int] | None = None,
+) -> dict:
+    """Record ``amount`` paise of COD collected from a person — all or part of
+    what they hold — and spread it over their open cod_holds rows, oldest
+    cycle first (or over ``entry_ids`` only, when given).
+
+    A row is cleared once its ``paid`` reaches its ``amount``; a row the money
+    only reaches part of stays open with the rest still owed. Paying more than
+    is owed is refused rather than silently turned into a credit: COD is not on
+    the ledger, so an excess would have nowhere honest to go.
+
+    Returns {payment_id, amount_applied, cod_still_owed, entries_cleared,
+    entries_touched} (paise).
+    """
+    amount = int(amount)
+    if amount <= 0:
+        raise CodPaymentError("Amount must be positive")
+    sql = (
+        "SELECT id, amount, COALESCE(paid, 0) AS paid FROM cod_holds "
+        "WHERE person_id=? AND cleared_at IS NULL AND amount > COALESCE(paid, 0)"
+    )
+    params: list = [person_id]
+    if entry_ids:
+        sql += f" AND id IN ({','.join('?' * len(entry_ids))})"
+        params += list(entry_ids)
+    rows = conn.execute(sql + " ORDER BY cycle_end, cycle_start, id", params).fetchall()
+    owed = sum(int(r["amount"]) - int(r["paid"]) for r in rows)
+    if owed <= 0:
+        raise CodPaymentError("Nothing is owed on the selected COD")
+    if amount > owed:
+        raise CodPaymentError(
+            f"Rs.{amount / 100:,.2f} is more than the Rs.{owed / 100:,.2f} still owed"
+        )
+    cur = conn.execute(
+        "INSERT INTO cod_payments (person_id, amount, paid_on, note, created_by) "
+        "VALUES (?,?,?,?,?)",
+        (person_id, amount, paid_on, (note or "").strip() or None, created_by),
+    )
+    payment_id = cur.lastrowid
+    left = amount
+    cleared = touched = 0
+    for r in rows:
+        if left <= 0:
+            break
+        due = int(r["amount"]) - int(r["paid"])
+        take = min(due, left)
+        left -= take
+        touched += 1
+        if take == due:
+            cleared += 1
+            conn.execute(
+                "UPDATE cod_holds SET paid=amount, cleared_at=?, cleared_by=? WHERE id=?",
+                (paid_on, created_by, r["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE cod_holds SET paid=COALESCE(paid, 0) + ? WHERE id=?", (take, r["id"])
+            )
+    return {
+        "payment_id": payment_id,
+        "amount_applied": amount,
+        "cod_still_owed": owed - amount,
+        "entries_cleared": cleared,
+        "entries_touched": touched,
+    }

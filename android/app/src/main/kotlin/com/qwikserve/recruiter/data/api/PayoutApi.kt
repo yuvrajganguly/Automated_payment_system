@@ -94,6 +94,10 @@ interface PayoutApi {
         @Body body: RiderPatchBody,
     ): RiderOut
 
+    /** Every document on file for a person, newest first. */
+    @GET("persons/{id}/documents")
+    suspend fun documents(@Path("id") personId: Long): List<DocumentOut>
+
     /** A rider's photo (doc_type=photo). The server shrinks and keeps the newest. */
     @Multipart
     @POST("persons/{id}/documents")

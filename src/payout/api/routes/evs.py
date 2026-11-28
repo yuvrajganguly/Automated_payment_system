@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -310,7 +310,13 @@ def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> E
             entity_id=body.ev_id,
             label=f"{body.provider} {body.model}",
             person_id=current_person_id,
-            details={"assigned_to": current_person_id, "handover_date": handover},
+            details={
+                "assigned_to": current_person_id,
+                "handover_date": handover,
+                # Admins review backdated handovers: the days before the app
+                # was told are not billed automatically (that is back-rent).
+                "backdated_days": backdated_days(handover),
+            },
         )
         conn.commit()
     return EvUnitOut(
@@ -323,6 +329,38 @@ def create_ev_unit(body: EvUnitIn, user: dict = Depends(require_recruiter)) -> E
         current_person_id=current_person_id,
         handover_date=handover,
     )
+
+
+def _check_handover_date(conn, ev_id: str, pid: int, hod: str) -> None:
+    """A handover may be backdated (the vehicle went out before anybody opened
+    the app) but not dated in the future, and not into a stretch where the
+    vehicle or the rider was still on an earlier assignment.
+
+    "Future" allows one day of slack: the server runs on UTC and the field on
+    IST, so between midnight and 05:30 in Kolkata the phone's today is the
+    server's tomorrow.
+    """
+    if hod > (date.today() + timedelta(days=1)).isoformat():
+        raise HTTPException(400, "The handover date can't be in the future")
+    for col, val, who in (("ev_id", ev_id, "This EV"), ("person_id", pid, "This rider")):
+        last = conn.execute(
+            f"SELECT MAX(returned_date) FROM ev_assignments WHERE {col}=? "  # noqa: S608 - literal
+            "AND returned_date IS NOT NULL",
+            (val,),
+        ).fetchone()[0]
+        if last and hod < str(last):
+            raise HTTPException(
+                409,
+                f"{who} was on another assignment until {last}; "
+                f"the handover can't be dated before that",
+            )
+
+
+def backdated_days(hod: str | None) -> int:
+    """How many days before today a handover was dated (0 for today or later)."""
+    if not hod:
+        return 0
+    return max(0, (date.today() - date.fromisoformat(hod)).days)
 
 
 def _open_assignment(
@@ -344,6 +382,7 @@ def _open_assignment(
     # left the office. Today is the only defensible default at the moment
     # somebody taps "hand over".
     hod = (handover_date or date.today()).isoformat()
+    _check_handover_date(conn, ev_id, pid, hod)
     conn.execute(
         "INSERT INTO ev_assignments (person_id, ev_id, handover_date, assigned_by) "
         "VALUES (?,?,?,?)",
@@ -394,7 +433,12 @@ def assign_ev(body: EvAssignIn, user: dict = Depends(require_recruiter)) -> dict
             entity_type="ev",
             entity_id=body.ev_id,
             person_id=pid,
-            details={"handover_date": hod, "rider_id": body.rider_id, "company": body.company},
+            details={
+                "handover_date": hod,
+                "rider_id": body.rider_id,
+                "company": body.company,
+                "backdated_days": backdated_days(hod),
+            },
         )
         conn.commit()
     return {"assigned": True, "person_id": pid, "ev_id": body.ev_id, "handover_date": hod}

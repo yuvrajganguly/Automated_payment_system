@@ -15,6 +15,7 @@ interface CodRow {
   person_id: number
   display_name: string
   total_pending: number
+  total_cod_paid?: number
   entry_count: number
   earliest_cycle_start: string | null
   latest_cycle_end: string | null
@@ -32,6 +33,8 @@ interface CodEntry {
   rider_id: string | null
   order_number: string | null
   amount: number
+  cod_paid?: number
+  pending?: number
   payment_mode: string | null
   txn_status: string | null
   source: string
@@ -76,9 +79,10 @@ export function CodPage() {
       </div>
       <p className="text-slate-500 text-sm mb-6">
         COD amounts that companies couldn't clear from a payout. These do not
-        deduct from the rider's balance; mark each as cleared once you've
-        collected the cash. You can optionally credit the rider's ledger by
-        the payout amount when marking clear.
+        deduct from the rider's balance. Record a payment when a rider hands
+        over all or part of it (oldest cycle first; an entry closes once fully
+        paid), or mark entries cleared outright. You can optionally credit the
+        rider's ledger by the payout amount when marking clear.
       </p>
 
       <ColumnFilters
@@ -109,7 +113,7 @@ export function CodPage() {
               <SortableTh tag="display_name" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Name</SortableTh>
               <SortableTh tag="companies" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Companies</SortableTh>
               <SortableTh tag="hubs" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Hub</SortableTh>
-              <SortableTh tag="total_pending" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Total COD</SortableTh>
+              <SortableTh tag="total_pending" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>COD owed</SortableTh>
               <SortableTh tag="entry_count" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Entries</SortableTh>
               <SortableTh tag="recent_payout" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} right>Recent payout</SortableTh>
               <SortableTh tag="recent_payout_cycle" sortKey={sortKey} sortDir={sortDir} onClick={toggleSort}>Last cycle</SortableTh>
@@ -123,7 +127,12 @@ export function CodPage() {
                 <Td>{r.display_name}</Td>
                 <Td className="text-xs">{r.companies || '-'}</Td>
                 <Td className="text-xs">{r.hubs || '-'}</Td>
-                <Td right className="font-semibold text-red-300">{fmt(r.total_pending)}</Td>
+                <Td right className="font-semibold text-red-300">
+                  {fmt(r.total_pending)}
+                  {(r.total_cod_paid ?? 0) > 0 && (
+                    <span className="block text-[11px] font-normal text-slate-500">{fmt(r.total_cod_paid)} paid</span>
+                  )}
+                </Td>
                 <Td right>{r.entry_count}</Td>
                 <Td right>{r.recent_payout != null ? fmt(r.recent_payout) : '-'}</Td>
                 <Td className="text-xs">{r.recent_payout_cycle ?? '-'}</Td>
@@ -131,7 +140,7 @@ export function CodPage() {
                   <Td>
                     <button onClick={() => setOpenClearFor(r)}
                             className="text-xs bg-brand text-white px-2 py-1 rounded">
-                      Mark cleared
+                      Pay / clear
                     </button>
                   </Td>
                 )}
@@ -161,6 +170,33 @@ function ClearModal({ row, onClose, onCleared }:
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [payAmount, setPayAmount] = useState('')
+  const [payOn, setPayOn] = useState(new Date().toISOString().slice(0, 10))
+  const [payNote, setPayNote] = useState('')
+
+  async function pay() {
+    const amt = parseFloat(payAmount)
+    if (!Number.isFinite(amt) || amt <= 0) { setError('Enter the amount collected'); return }
+    if (amt > totalSelected + 0.001) {
+      setError(`That is more than the ${fmt(totalSelected)} still owed on the selected entries`)
+      return
+    }
+    setBusy(true); setError(null)
+    try {
+      await api.post('/cod/pay', {
+        person_id: row.person_id,
+        amount: amt,
+        paid_on: payOn,
+        note: payNote || undefined,
+        entry_ids: Array.from(selectedIds),
+      })
+      onCleared()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     api.get<CodEntry[]>(`/cod/${row.person_id}/entries`)
@@ -173,7 +209,7 @@ function ClearModal({ row, onClose, onCleared }:
 
   const totalSelected = entries
     .filter((e) => selectedIds.has(e.id))
-    .reduce((a, e) => a + e.amount, 0)
+    .reduce((a, e) => a + (e.pending ?? e.amount), 0)
 
   useEffect(() => {
     if (creditPayout) setLedgerAmount(String(row.recent_payout ?? 0))
@@ -203,13 +239,13 @@ function ClearModal({ row, onClose, onCleared }:
       <div className="panel-pop w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
-            <h3 className="font-semibold">Mark COD cleared — {row.display_name}</h3>
-            <p className="text-xs text-slate-500">Pending: {fmt(row.total_pending)} across {row.entry_count} entries</p>
+            <h3 className="font-semibold">COD — {row.display_name}</h3>
+            <p className="text-xs text-slate-500">Owed: {fmt(row.total_pending)} across {row.entry_count} entries</p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-700">✕</button>
         </div>
         <div className="px-5 py-3 overflow-y-auto">
-          <p className="text-xs text-slate-500 mb-2">Select which entries you've collected:</p>
+          <p className="text-xs text-slate-500 mb-2">Select the entries this is for:</p>
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-left">
               <tr>
@@ -226,6 +262,8 @@ function ClearModal({ row, onClose, onCleared }:
                 <th className="px-2 py-1">Company</th>
                 <th className="px-2 py-1">Order #</th>
                 <th className="px-2 py-1 text-right">Amount</th>
+                <th className="px-2 py-1 text-right">Paid</th>
+                <th className="px-2 py-1 text-right">Left</th>
                 <th className="px-2 py-1">Status</th>
               </tr>
             </thead>
@@ -245,14 +283,51 @@ function ClearModal({ row, onClose, onCleared }:
                   <td className="px-2 py-1">{e.company}</td>
                   <td className="px-2 py-1">{e.order_number ?? '-'}</td>
                   <td className="px-2 py-1 text-right">{fmt(e.amount)}</td>
-                  <td className="px-2 py-1">{e.cleared_at ? `cleared ${e.cleared_at}` : 'pending'}</td>
+                  <td className="px-2 py-1 text-right">{(e.cod_paid ?? 0) > 0 ? fmt(e.cod_paid) : '-'}</td>
+                  <td className="px-2 py-1 text-right">{e.cleared_at ? '-' : fmt(e.pending ?? e.amount)}</td>
+                  <td className="px-2 py-1">
+                    {e.cleared_at ? `cleared ${e.cleared_at}` : (e.cod_paid ?? 0) > 0 ? 'part paid' : 'pending'}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="text-xs text-slate-500 mt-2">
-            Selected total: <span className="font-semibold">{fmt(totalSelected)}</span>
+            Still owed on selected: <span className="font-semibold">{fmt(totalSelected)}</span>
           </p>
+
+          <div className="mt-4 border-t pt-3">
+            <p className="text-sm font-medium mb-2">Record a payment (full or part)</p>
+            <div className="flex gap-2 items-end flex-wrap">
+              <label className="block text-xs w-32">
+                <span className="block text-slate-600">Amount collected</span>
+                <input type="number" step="0.01" min="0" value={payAmount}
+                       onChange={(e) => setPayAmount(e.target.value)}
+                       placeholder={totalSelected.toFixed(2)}
+                       className="w-full border rounded px-2 py-1" />
+              </label>
+              <label className="block text-xs w-36">
+                <span className="block text-slate-600">Paid on</span>
+                <input type="date" value={payOn} onChange={(e) => setPayOn(e.target.value)}
+                       className="w-full border rounded px-2 py-1" />
+              </label>
+              <label className="block text-xs flex-1 min-w-[8rem]">
+                <span className="block text-slate-600">Note</span>
+                <input value={payNote} onChange={(e) => setPayNote(e.target.value)}
+                       placeholder="e.g. cash at the hub"
+                       className="w-full border rounded px-2 py-1" />
+              </label>
+              <button onClick={pay} disabled={busy || selectedIds.size === 0 || !payAmount}
+                      className="text-sm px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                {busy ? 'Saving…' : 'Record payment'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Goes to the oldest selected entry first. Anything left stays pending.
+            </p>
+          </div>
+
+          <p className="text-sm font-medium mt-4 pt-3 border-t">Or close the selected entries outright</p>
 
           <div className="mt-4 border-t pt-3 space-y-2">
             <label className="flex items-center gap-2 text-sm">

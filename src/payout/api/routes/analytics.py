@@ -266,7 +266,7 @@ def collection_efficiency(
         # COD exposure: everything not yet marked cleared.
         cod_co, cod_params = _co_clause(cos, "ch.company")
         cod = conn.execute(
-            f"SELECT COALESCE(SUM(ch.amount),0) AS total_pending, "
+            f"SELECT COALESCE(SUM(ch.amount - COALESCE(ch.paid, 0)),0) AS total_pending, "
             f"       COUNT(DISTINCT ch.person_id) AS riders, "
             f"       MIN(ch.created_at) AS oldest "
             f"FROM cod_holds ch WHERE ch.cleared_at IS NULL {cod_co}",
@@ -601,7 +601,8 @@ def money_story(
             "                         AND a.returned_date IS NOT NULL)))"
         ).fetchone()[0]
         cod = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM cod_holds WHERE cleared_at IS NULL"
+            "SELECT COALESCE(SUM(amount - COALESCE(paid, 0)),0) FROM cod_holds "
+            "WHERE cleared_at IS NULL"
         ).fetchone()[0]
     return {
         "window": {"from": wf, "to": wt, "days": days},

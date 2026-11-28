@@ -1210,6 +1210,18 @@ def _0042_cycle_reporting_adjustments(conn: Any) -> None:
         conn.execute(translate_ddl(ddl) if DB_URL else ddl)
 
 
+def _0043_cod_partial_payments(conn: Any) -> None:
+    """COD paid in parts: cod_holds.paid + the cod_payments log."""
+    from payout.db.connection import translate_ddl
+    from payout.db.schema import SCHEMA
+
+    add_column(conn, "cod_holds", "paid", "INTEGER NOT NULL DEFAULT 0")
+    marker = "CREATE TABLE IF NOT EXISTS cod_payments"
+    start = SCHEMA.index(marker)
+    ddl = SCHEMA[start : SCHEMA.index(";", start) + 1]
+    conn.execute(translate_ddl(ddl) if DB_URL else ddl)
+
+
 MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0001_baseline", _baseline),
     ("0002_reset_token_attempts", _0002_reset_token_attempts),
@@ -1256,6 +1268,7 @@ MIGRATIONS: list[tuple[str, Callable[[Any], None]]] = [
     ("0040_shadowfax_pincode_rates", _0040_shadowfax_pincode_rates),
     ("0041_payout_workbooks", _0041_payout_workbooks),
     ("0042_cycle_reporting_adjustments", _0042_cycle_reporting_adjustments),
+    ("0043_cod_partial_payments", _0043_cod_partial_payments),
 ]
 
 _TRACKING_DDL = (

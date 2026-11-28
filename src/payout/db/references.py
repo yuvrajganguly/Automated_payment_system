@@ -23,6 +23,7 @@ PERSON_REFS: tuple[tuple[str, str], ...] = (
     ("money_requests", "person_id"),
     ("ev_daily_ledger", "assigned_person_id"),
     ("cod_holds", "person_id"),
+    ("cod_payments", "person_id"),
     ("transactions", "person_id"),
     ("ev_assignments", "person_id"),
     ("rider_master", "person_id"),
