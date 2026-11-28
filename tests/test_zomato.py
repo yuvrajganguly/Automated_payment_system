@@ -207,3 +207,19 @@ def test_commission_ids_can_be_chosen_at_onboarding(db, client):  # noqa: F811
         headers=boss,
     )
     assert bad.status_code == 400
+
+
+def test_editing_the_company_keeps_the_fe_parser_and_flat_rate(db, client):  # noqa: F811
+    boss = _hdr(client)
+    r = client.patch(
+        "/api/companies/Zomato",
+        json={"per_order_rate": 30, "incentive_per_order": 5, "notes": "FE reports"},
+        headers=boss,
+    )
+    assert r.status_code == 200, r.text
+    row = db.execute(
+        "SELECT parser_type, per_order_rate, payment_model FROM companies "
+        "WHERE company_name='Zomato'"
+    ).fetchone()
+    assert row["parser_type"] == "zomato" and row["per_order_rate"] == 3000
+    assert row["payment_model"] == "direct"

@@ -292,11 +292,20 @@ def update_company(
         _salary_fields(after["salary_expected_days"], None, None)  # range check
         if (after["incentive_per_order"] or 0) < 0 or (after["incentive_per_day"] or 0) < 0:
             raise HTTPException(400, "incentives cannot be negative")
+        # Zomato keeps its FE-report parser and its Flat rate whatever the
+        # company-level model says: the company stays "direct" so an untyped id
+        # is never paid, while its Flat and Salary ids are priced from these
+        # settings (domain/zomato.py).
+        zomato_fe = before["parser_type"] == "zomato"
         if model != "payout_file":
-            after["parser_type"] = {"per_order": "orders", "salary": "salary"}.get(model, "none")
+            after["parser_type"] = (
+                "zomato"
+                if zomato_fe
+                else {"per_order": "orders", "salary": "salary"}.get(model, "none")
+            )
             after["rider_id_column"] = after["rider_id_column"] or "rider_id"
             after["payout_column"] = after["payout_column"] or "payout"
-        if model != "per_order":
+        if model != "per_order" and not zomato_fe:
             after["per_order_rate"] = None
         if after["hold_style"] not in (None, "sheet", "column"):
             raise HTTPException(400, "hold_style must be 'sheet', 'column' or blank")

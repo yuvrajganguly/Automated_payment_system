@@ -406,6 +406,8 @@ function Th({ children }: { children?: React.ReactNode }) {
 
 interface Draft {
   payment_model: Model
+  /** Zomato: processed from the FE reports, ids typed Flat / Salary / Commission. */
+  zomato?: boolean
   house_sheet: boolean
   pincode_rates: boolean
   cadence: Cadence
@@ -433,7 +435,7 @@ const blank: Draft = {
   hold_status_column: '',
 }
 const fromCompany = (c: Company): Draft => ({
-  payment_model: modelOf(c), house_sheet: c.parser_type === 'house',
+  payment_model: modelOf(c), house_sheet: c.parser_type === 'house', zomato: c.parser_type === 'zomato',
   pincode_rates: c.rate_model === 'pincode_ratecard', cadence: cadenceOf(c),
   per_order_rate: c.per_order_rate != null ? String(c.per_order_rate) : '',
   salary_expected_days: String(c.salary_expected_days ?? 26),
@@ -453,7 +455,7 @@ const toBody = (d: Draft) => ({
   ...(d.payment_model === 'payout_file' ? { parser_type: d.house_sheet ? 'house' : undefined } : {}),
   rate_model: d.payment_model === 'per_order' && d.pincode_rates ? 'pincode_ratecard' : null,
   cadence: d.cadence,
-  per_order_rate: d.payment_model === 'per_order' && d.per_order_rate !== '' ? Number(d.per_order_rate) : null,
+  per_order_rate: (d.payment_model === 'per_order' || d.zomato) && d.per_order_rate !== '' ? Number(d.per_order_rate) : null,
   salary_expected_days: d.salary_expected_days !== '' ? Number(d.salary_expected_days) : 26,
   incentive_per_order: d.incentive_per_order !== '' ? Number(d.incentive_per_order) : 0,
   incentive_per_day: d.incentive_per_day !== '' ? Number(d.incentive_per_day) : 0,
@@ -527,6 +529,33 @@ function DraftFields({ d, set, companies, self }: {
           </Field>
         )}
       </div>
+
+      {d.zomato && (
+        <div className="mt-3">
+          <div className="text-xs font-semibold text-slate-600 mb-2">
+            Zomato ids — Flat and Salary ids are paid from the FE reports by these rules; Commission ids are not paid by us.
+            Each id's type (and a Salary id's salary) is set on the rider page.
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <Field label="Flat: rate per order (₹)" hint="Flat id pay = orders × this (a store's own rate wins).">
+              <input type="number" min={0} step="0.5" value={d.per_order_rate}
+                     onChange={(e) => set({ per_order_rate: e.target.value })} className={input} />
+            </Field>
+            <Field label="Salary: expected days per cycle" hint="Each day short costs salary ÷ this.">
+              <input type="number" min={1} max={31} step={1} value={d.salary_expected_days}
+                     onChange={(e) => set({ salary_expected_days: e.target.value })} className={input} required />
+            </Field>
+            <Field label="Salary: incentive per order (₹)" hint="0 for none.">
+              <input type="number" min={0} step="0.5" value={d.incentive_per_order}
+                     onChange={(e) => set({ incentive_per_order: e.target.value })} className={input} placeholder="0" />
+            </Field>
+            <Field label="Salary: incentive per day (₹)" hint="A day counts when the rider logged in or delivered.">
+              <input type="number" min={0} step="1" value={d.incentive_per_day}
+                     onChange={(e) => set({ incentive_per_day: e.target.value })} className={input} placeholder="0" />
+            </Field>
+          </div>
+        </div>
+      )}
 
       {d.payment_model === 'salary' && (
         <div className="mt-3">
